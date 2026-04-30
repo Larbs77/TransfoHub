@@ -1,0 +1,300 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Chantier {
+  id             String   @id @default(uuid())
+  code           String   @unique          // CH_001, CH_002...
+  nom            String
+  description    String   @default("")
+  domaine        String                    // Cockpit, Capital humain, etc.
+  type_chantier  String   @default("")     // Progiciel + Sélection, Migration / Data clensing, etc.
+  priorite       String   @default("")     // Fondations techniques, Dépendante de EI, etc.
+  duree_mois     Int      @default(0)
+  budget         Float    @default(0)      // Legacy - Total budget MAD
+  budgetJH                Float    @default(0)      // Man-Days budget (JH)
+  budgetProjetMAD         Float    @default(0)      // Project Budget in MAD
+  conseilEditeursMAD      Float    @default(0)      // Conseil éditeurs MAD
+  licencesAchatsMAD       Float    @default(0)      // Licence achat & maintenance MAD
+  licencesAbonnementsMAD  Float    @default(0)      // Licences abonnements MAD
+  coutsInfrasMAD          Float    @default(0)      // Coûts infrastructures MAD
+  budgetTotalMAD          Float    @default(0)      // Total calculated budget MAD
+  directeur      String   @default("")
+  pmo            String   @default("")
+  date_debut     DateTime
+  date_fin       DateTime
+  statut         String   @default("Non démarré") // Non démarré | Pré cadrage | Cadrage | Exécution | Clôturé
+  avancement     Int      @default(0)            // 0-100 percentage
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  raids          Raid[]
+  rmds           ChantierRmd[]
+  membres        MembreEquipe[]
+  saisiesTemps   SaisieTemps[]
+  jalons         Jalon[]
+  adherencesSource    Adherence[] @relation("AdherenceSource")
+  adherencesDependant Adherence[] @relation("AdherenceDependant")
+  consultationQuestions ConsultationQuestion[]
+  favoris              FavoriChantier[]
+}
+
+model Rmd {
+  id          String        @id @default(uuid())
+  nom_complet String
+  domaine     String
+  suppleant   String        @default("")
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  chantiers   ChantierRmd[]
+}
+
+model ChantierRmd {
+  chantierId String
+  rmdId      String
+  chantier   Chantier @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+  rmd        Rmd      @relation(fields: [rmdId], references: [id], onDelete: Cascade)
+
+  @@id([chantierId, rmdId])
+}
+
+model ProfilRessource {
+  id              String      @id @default(uuid())
+  nom             String                            // "Chef de projet", "Architecte Data", etc.
+  type_ressource  String                            // "Interne" | "Externe" | "Consultant"
+  tjm_defaut      Float       @default(0)           // TJM par défaut en MAD
+  ordre           Int         @default(0)           // Ordre d'affichage dans le type
+  actif           Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  ressources      Ressource[]
+
+  @@unique([nom, type_ressource])
+  @@index([type_ressource])
+}
+
+model Ressource {
+  id                    String            @id @default(uuid())
+  nom_complet           String
+  email                 String            @default("")
+  telephone             String            @default("")
+  type                  String                                  // Interne | Externe | Consultant
+  organisation          String            @default("")
+  tarif_journalier      Float             @default(0)           // MAD / jour
+  capacite_jours_mois   Int               @default(20)          // Jours ouvrés par mois
+  actif                 Boolean           @default(true)
+  profilId              String?
+  profil                ProfilRessource?  @relation(fields: [profilId], references: [id])
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  membres               MembreEquipe[]
+  raids                 Raid[]
+  saisiesTemps          SaisieTemps[]
+  user                  User?
+}
+
+model User {
+  id              String    @id @default(uuid())
+  username        String    @unique
+  password_hash   String
+  role            String    @default("PMO_Chantier") // Admin | Programme_Office | PMO_Chantier | Workforce_Manager
+  must_change_pwd Boolean   @default(true)
+  is_active       Boolean   @default(true)
+  ressourceId     String?   @unique
+  ressource       Ressource? @relation(fields: [ressourceId], references: [id], onDelete: SetNull)
+  failed_attempts Int       @default(0)
+  dashboard_type  String    @default("complete") // complete | limited
+  locked_until    DateTime?
+  last_login      DateTime?
+  created_by      String    @default("")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model MembreEquipe {
+  id            String      @id @default(uuid())
+  chantierId    String
+  chantier      Chantier    @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+  equipe        String      // AMOA | MOE | Métiers | Sécurité | EI
+  role          String      // Directeur AMOA, Chef de projet MOE, etc.
+  nom_complet   String
+  is_directeur       Boolean     @default(false)  // Directeur de chantier (un seul par chantier)
+  charge_pourcentage Int         @default(100)    // 0-100, % de la capacité allouée à ce chantier
+  ressourceId   String?
+  ressource     Ressource?  @relation(fields: [ressourceId], references: [id], onDelete: SetNull)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model Raid {
+  id                  String    @id @default(uuid())
+  type                String                          // Action | Décision | Information | Risque
+  intitule            String
+  description         String    @default("")
+  categorie           String    @default("")
+  chantierId          String?
+  chantier            Chantier? @relation(fields: [chantierId], references: [id])
+  domaine             String    @default("")
+  probabilite         Int?                            // 1-5, for Risque
+  impact              Int?                            // 1-5, for Risque
+  strategie           String    @default("")
+  mitigation          String    @default("")
+  responsable                String     @default("")
+  responsableRessourceId     String?
+  responsableRessource       Ressource? @relation(fields: [responsableRessourceId], references: [id], onDelete: SetNull)
+  statut                     String     @default("")
+  date_identification DateTime?
+  date_revision       DateTime?
+  date_echeance       DateTime?                   // Due date (for Actions)
+  commentaires        String    @default("")
+  comiteId            String?
+  comite              Comite?   @relation(fields: [comiteId], references: [id])
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+}
+
+model Comite {
+  id                  String   @id @default(uuid())
+  instance            String                          // Comité Programme, CTR, CTP, etc.
+  numero              Int                             // Sequence number (#)
+  date                DateTime
+  heure_casablanca    String   @default("")
+  heure_belgique      String   @default("")
+  statut              String   @default("A planifier") // A planifier | Planifié | A confirmer | Reporté
+  ordre_du_jour       String   @default("")
+  invitation_envoyee  Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  raids               Raid[]
+}
+
+model Settings {
+  id                       Int @id @default(1)
+  seuil_relance_jours      Int @default(3)
+  seuil_qa_critique_heures Int @default(48)
+  poids_precadrage         Int @default(10)
+  poids_cadrage            Int @default(20)
+  poids_execution          Int @default(50)
+  poids_cloture            Int @default(20)
+}
+
+model StatusConfig {
+  id        String   @id @default(uuid())
+  type      String   // "Action", "Risque", "Information", "Décision"
+  label     String
+  color     String   @default("#6b7280")
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([type, label])
+  @@index([type, position])
+}
+
+model SaisieTemps {
+  id               String    @id @default(uuid())
+  ressourceId      String
+  ressource        Ressource @relation(fields: [ressourceId], references: [id], onDelete: Cascade)
+  chantierId       String
+  chantier         Chantier  @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+  date_lundi       DateTime                      // Lundi de la semaine (identifie la semaine)
+  jours_travailles Float     @default(0)          // Jours travaillés cette semaine (0-5)
+  commentaire      String    @default("")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([ressourceId, chantierId, date_lundi])
+  @@index([ressourceId, date_lundi])
+  @@index([chantierId, date_lundi])
+}
+
+model Adherence {
+  id                    String    @id @default(uuid())
+  code                  String    @unique          // ADH-001, ADH-002...
+  chantierSourceId      String
+  chantierSource        Chantier  @relation("AdherenceSource", fields: [chantierSourceId], references: [id])
+  chantierDependantId   String?                    // null when "ALL" (transverse)
+  chantierDependant     Chantier? @relation("AdherenceDependant", fields: [chantierDependantId], references: [id])
+  chantierDependantLabel String   @default("")     // For "Tous chantiers" / "Tous chantiers applicatifs"
+  type                  String                     // Technique | Fonctionnelle | Données | Ressources
+  domaine               String    @default("")     // Infrastructure | Sécurité | Intégration | Données | Métier | etc.
+  description           String    @default("")
+  criticite             String    @default("MODÉRÉE") // BLOQUANTE | FORTE | MODÉRÉE | FAIBLE
+  statut                String    @default("Planifié") // Planifié | En cours | Résolu | Bloqué
+  date_identification   DateTime?
+  date_resolution_prevue DateTime?
+  responsable           String    @default("")
+  contrat_interface     String    @default("")     // CI-xxx-xxx
+  commentaires          String    @default("")
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([chantierSourceId])
+  @@index([chantierDependantId])
+  @@index([criticite])
+  @@index([statut])
+}
+
+model Jalon {
+  id              String    @id @default(uuid())
+  chantierId      String
+  chantier        Chantier  @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+  phase           String                            // "Précadrage" | "Cadrage" | "Exécution" | "Clôture"
+  nom             String
+  description     String    @default("")
+  ordre           Int       @default(0)
+  date_cible      DateTime
+  date_reelle     DateTime?
+  statut          String    @default("Planifié")    // Planifié | En cours | Atteint | Reporté | Annulé
+  livrables       String    @default("")
+  commentaire     String    @default("")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([chantierId])
+  @@index([phase])
+  @@index([statut])
+}
+
+model JalonTemplate {
+  id        String   @id @default(uuid())
+  phase     String   // "Précadrage" | "Cadrage" | "Exécution" | "Clôture"
+  nom       String
+  ordre     Int      @default(0)
+  offsetPct Float    // % position within chantier duration (0-100)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([phase])
+}
+
+model ConsultationQuestion {
+  id            String    @id @default(uuid())
+  chantierId    String
+  chantier      Chantier  @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+  dossier_ref   String    @default("")
+  question      String
+  categorie     String    @default("Générale")
+  priorite      String    @default("Moyenne")
+  statut        String    @default("Ouverte")
+  remontee_par  String    @default("")
+  affectee_a    String    @default("")
+  echeance      DateTime?
+  resolution    String    @default("")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([chantierId])
+  @@index([statut])
+  @@index([priorite])
+}
+
+model FavoriChantier {
+  id         String   @id @default(uuid())
+  chantierId String   @unique
+  chantier   Chantier @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+}

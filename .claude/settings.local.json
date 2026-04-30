@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(where:*)",
+      "Bash(export PATH=\"/c/Program Files/nodejs:$PATH\")",
+      "Bash(node --version:*)",
+      "Bash(npm:*)",
+      "Bash(curl:*)",
+      "Bash(npx prisma migrate dev:*)",
+      "Bash(npx prisma migrate:*)",
+      "Bash(npx prisma generate:*)",
+      "Bash(taskkill:*)",
+      "Bash(npx prisma db seed:*)",
+      "Bash(node:*)",
+      "Bash(PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION=\"yes\" npx prisma migrate:*)",
+      "Bash(npx next dev)",
+      "Bash(npx tsx:*)",
+      "Bash(echo:*)",
+      "Bash(npx next build:*)",
+      "Bash(node_modules/.bin/prisma migrate dev --name add-capacity-timesheets)",
+      "Bash(cmd //c \"where node\")",
+      "Bash(cmd //c \"node --version\")",
+      "Bash(cmd //c:*)",
+      "Bash(npx tsc:*)",
+      "Bash(ls:*)",
+      "Bash(tasklist:*)",
+      "Bash(export PATH=\"/c/Program Files/nodejs:/usr/bin:$PATH\")",
+      "Bash(python -c:*)",
+      "Bash(pip install:*)",
+      "WebFetch(domain:www.openproject.org)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:community.openproject.org)",
+      "Bash(npx prisma db execute:*)",
+      "Bash(npx npm-check-updates:*)",
+      "WebFetch(domain:www.prisma.io)"
+    ]
+  }
+}
