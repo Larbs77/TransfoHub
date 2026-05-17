@@ -139,6 +139,20 @@ export async function getChantierById(id: string) {
   });
 }
 
+export async function getChantiersByIds(ids: string[]) {
+  await requireAuth();
+  if (ids.length === 0) return [];
+  return prisma.chantier.findMany({
+    where: { id: { in: ids } },
+    orderBy: { code: "asc" },
+    include: {
+      raids: { orderBy: { createdAt: "desc" } },
+      membres: { orderBy: [{ equipe: "asc" }, { role: "asc" }] },
+      jalons: { orderBy: [{ phase: "asc" }, { ordre: "asc" }] },
+    },
+  });
+}
+
 export async function getChantiersForSelect() {
   const session = await requireAuth();
   const chantierIds = await getUserChantierIds(session);

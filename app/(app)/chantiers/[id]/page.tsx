@@ -34,6 +34,8 @@ import { ChantierAdherencesTab } from "@/components/chantier-adherences-tab";
 import { ChantierConsultationTab } from "@/components/chantier-consultation-tab";
 import { formatMAD, formatJH } from "@/lib/utils-pmo";
 import Link from "next/link";
+import { FileText } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -75,7 +77,15 @@ export default async function ChantierDetailPage({ params }: Props) {
                 {STATUT_CHANTIER_LABELS[chantier.statut] ?? chantier.statut}
               </Badge>
             </div>
-            <ChantierDetailActions chantier={chantier} />
+            <div className="flex items-center gap-2">
+              <Link href={`/rapport/${chantier.id}`} target="_blank">
+                <Button variant="outline" size="sm" className="gap-2">
+                  <FileText className="size-4" />
+                  Synthèse PDF
+                </Button>
+              </Link>
+              <ChantierDetailActions chantier={chantier} />
+            </div>
           </div>
           <h1 className="text-2xl font-bold tracking-tight">{chantier.nom}</h1>
           <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
