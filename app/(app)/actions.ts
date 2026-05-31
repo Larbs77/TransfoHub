@@ -149,6 +149,20 @@ export async function getChantiersByIds(ids: string[]) {
       raids: { orderBy: { createdAt: "desc" } },
       membres: { orderBy: [{ equipe: "asc" }, { role: "asc" }] },
       jalons: { orderBy: [{ phase: "asc" }, { ordre: "asc" }] },
+      adherencesSource: {
+        orderBy: { code: "asc" },
+        include: {
+          chantierSource: { select: { id: true, code: true, nom: true } },
+          chantierDependant: { select: { id: true, code: true, nom: true } },
+        },
+      },
+      adherencesDependant: {
+        orderBy: { code: "asc" },
+        include: {
+          chantierSource: { select: { id: true, code: true, nom: true } },
+          chantierDependant: { select: { id: true, code: true, nom: true } },
+        },
+      },
     },
   });
 }

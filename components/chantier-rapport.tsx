@@ -16,6 +16,11 @@ import {
   type Meteo,
 } from "@/lib/rapport-utils";
 import { scoreCriticite, formatMAD, formatMADCompact } from "@/lib/utils-pmo";
+import {
+  ADHERENCE_CRITICITE_COLORS,
+  ADHERENCE_STATUT_COLORS,
+  ADHERENCE_TYPE_COLORS,
+} from "@/lib/adherence-labels";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -51,6 +56,24 @@ interface Membre {
   is_directeur: boolean;
 }
 
+interface AdherenceRef {
+  id: string;
+  code: string;
+  nom: string;
+}
+
+interface Adherence {
+  id: string;
+  code: string;
+  type: string;
+  criticite: string;
+  statut: string;
+  description: string;
+  chantierDependantLabel: string;
+  chantierSource: AdherenceRef;
+  chantierDependant: AdherenceRef | null;
+}
+
 interface Chantier {
   id: string;
   code: string;
@@ -68,6 +91,8 @@ interface Chantier {
   raids: Raid[];
   jalons: Jalon[];
   membres: Membre[];
+  adherencesSource: Adherence[];
+  adherencesDependant: Adherence[];
 }
 
 interface BurnRateTotals {
@@ -571,6 +596,104 @@ export function ChantierRapport({ chantier, burnRate, showPrintButton = true }: 
           </table>
         </div>
       )}
+
+      {/* ── ADHÉRENCES ───────────────────────────────────────────────────────── */}
+      {(chantier.adherencesSource.length > 0 || chantier.adherencesDependant.length > 0) && (() => {
+        const CRITICITE_ORDER: Record<string, number> = { BLOQUANTE: 0, FORTE: 1, "MODÉRÉE": 2, FAIBLE: 3 };
+        const rows = [
+          ...chantier.adherencesDependant.map((a) => ({ ...a, direction: "entrante" as const })),
+          ...chantier.adherencesSource.map((a) => ({ ...a, direction: "sortante" as const })),
+        ].sort((a, b) => (CRITICITE_ORDER[a.criticite] ?? 9) - (CRITICITE_ORDER[b.criticite] ?? 9));
+
+        return (
+          <div className="mx-5 my-3 rounded-md overflow-hidden" style={{ border: "1.5px solid #6366f1" }}>
+            <div className="px-4 py-2" style={{ backgroundColor: "#eef2ff" }}>
+              <span className="font-bold" style={{ fontSize: 12, color: "#3730a3" }}>
+                Adhérences — Dépendances du chantier ({rows.length})
+              </span>
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ backgroundColor: "#e0e7ff" }}>
+                  {["Sens", "Chantier lié", "Type", "Criticité", "Statut"].map((h) => (
+                    <th
+                      key={h}
+                      className="text-left px-3 py-1.5"
+                      style={{ fontSize: 11, color: "#3730a3", fontWeight: 600, borderBottom: "1px solid #c7d2fe" }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((a, i) => {
+                  const isEntrante = a.direction === "entrante";
+                  const linkedChantier = isEntrante
+                    ? `${a.chantierSource.code} — ${a.chantierSource.nom}`
+                    : a.chantierDependant
+                    ? `${a.chantierDependant.code} — ${a.chantierDependant.nom}`
+                    : a.chantierDependantLabel || "Tous chantiers";
+                  return (
+                    <tr key={a.id} style={{ backgroundColor: i % 2 === 0 ? "#f5f7ff" : "#eef2ff" }}>
+                      {/* Direction arrow */}
+                      <td className="px-3 py-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <svg viewBox="0 0 20 20" width={18} height={18} fill="none">
+                            {isEntrante ? (
+                              /* → entrante green */
+                              <path d="M5 10h10m0 0l-4-4m4 4l-4 4" stroke="#16a34a" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                            ) : (
+                              /* ← sortante red */
+                              <path d="M15 10H5m0 0l4-4m-4 4l4 4" stroke="#dc2626" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                            )}
+                          </svg>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: isEntrante ? "#16a34a" : "#dc2626" }}>
+                            {isEntrante ? "Entrante" : "Sortante"}
+                          </span>
+                        </div>
+                      </td>
+                      {/* Chantier lié */}
+                      <td className="px-3 py-1.5" style={{ fontSize: 11, color: "#1e293b", maxWidth: 280 }}>
+                        {linkedChantier}
+                      </td>
+                      {/* Type */}
+                      <td className="px-3 py-1.5">
+                        <span
+                          className="px-1.5 py-0.5 rounded text-white"
+                          style={{ fontSize: 10, backgroundColor: ADHERENCE_TYPE_COLORS[a.type] ?? "#6b7280" }}
+                        >
+                          {a.type}
+                        </span>
+                      </td>
+                      {/* Criticité */}
+                      <td className="px-3 py-1.5">
+                        <span style={{ fontSize: 11, fontWeight: 700, color: ADHERENCE_CRITICITE_COLORS[a.criticite] ?? "#64748b" }}>
+                          {a.criticite}
+                        </span>
+                      </td>
+                      {/* Statut */}
+                      <td className="px-3 py-1.5">
+                        <span
+                          className="px-1.5 py-0.5 rounded"
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 600,
+                            color: ADHERENCE_STATUT_COLORS[a.statut] ?? "#64748b",
+                            backgroundColor: (ADHERENCE_STATUT_COLORS[a.statut] ?? "#64748b") + "18",
+                          }}
+                        >
+                          {a.statut}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
 
       {/* ── JALON TIMELINE ───────────────────────────────────────────────────── */}
       <div className="px-6 pt-3 pb-5">
