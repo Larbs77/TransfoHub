@@ -1,0 +1,14 @@
+LOAD DATABASE
+    FROM sqlite://./dev.db
+    INTO postgresql://postgres@172.18.176.1:5432/transfodb
+
+WITH
+    data only,
+    batch rows = 500,
+    prefetch rows = 1000,
+    reset sequences
+
+
+SET
+    work_mem to '128MB',
+    maintenance_work_mem to '512MB';
