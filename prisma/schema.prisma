@@ -107,6 +107,8 @@ model User {
   email           String     @default("")
   /// Public path to avatar image, e.g. /uploads/avatars/{id}.webp — empty = letter fallback
   avatar_url      String     @default("")
+  /// Account default UI theme: light | dark (applied on app access; sidebar can still toggle)
+  theme_preference String    @default("light")
   role            String     @default("PMO_Chantier")
   must_change_pwd Boolean    @default(true)
   is_active       Boolean    @default(true)

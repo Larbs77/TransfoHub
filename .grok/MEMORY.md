@@ -32,9 +32,10 @@ This file is for **agents and humans** working on TransfoHub. Grok project rules
 ## Features shipped in v0.3.0 (this multi-session work)
 
 ### Dark mode
-- Toggle under sidebar user block.  
+- Toggle under sidebar user block (temporary switch during session).  
 - Key: `localStorage["pmo-theme"]` = `light` | `dark`.  
-- Components: `theme-provider.tsx`, `theme-toggle.tsx`, `lib/theme-script.ts` (storage key only).
+- Account default: `User.theme_preference` (`light` | `dark`, default `light`) — set on `/profil`, applied on authenticated app access via `UserThemeSync`.  
+- Components: `theme-provider.tsx`, `theme-toggle.tsx`, `user-theme-sync.tsx`, `lib/theme-script.ts` (storage key only).
 
 ### Dynamic roles
 - Model `AppRole`; pages JSON from `lib/app-pages.ts`.  

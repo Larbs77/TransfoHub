@@ -14,6 +14,9 @@ import {
   Camera,
   Trash2,
   ImageIcon,
+  Sun,
+  Moon,
+  Palette,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,11 +30,14 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { UserAvatar } from "@/components/user-avatar";
 import { AvatarCropDialog } from "@/components/avatar-crop-dialog";
+import { useTheme, type Theme } from "@/components/theme-provider";
 import {
   updateMyPhone,
   changeMyPassword,
   uploadMyAvatar,
   deleteMyAvatar,
+  updateMyThemePreference,
+  type ThemePreference,
 } from "./actions";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -44,6 +50,7 @@ export type ProfileData = {
   phone: string;
   email: string;
   avatar_url: string;
+  theme_preference: ThemePreference;
   role: string;
   roleLabel: string;
   roleColor: string;
@@ -79,6 +86,7 @@ function ReadOnlyField({
 const PICK_MAX_BYTES = 12 * 1024 * 1024; // allow large source; crop output is small
 
 export function ProfileClient({ profile }: { profile: ProfileData }) {
+  const { setTheme } = useTheme();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [avatarUrl, setAvatarUrl] = useState(profile.avatar_url ?? "");
   const [avatarVersion, setAvatarVersion] = useState(
@@ -94,6 +102,14 @@ export function ProfileClient({ profile }: { profile: ProfileData }) {
 
   const [phone, setPhone] = useState(profile.phone ?? "");
   const [phoneMsg, setPhoneMsg] = useState<{
+    type: "ok" | "err";
+    text: string;
+  } | null>(null);
+
+  const [themePreference, setThemePreference] = useState<ThemePreference>(
+    profile.theme_preference === "dark" ? "dark" : "light"
+  );
+  const [themeMsg, setThemeMsg] = useState<{
     type: "ok" | "err";
     text: string;
   } | null>(null);
@@ -205,6 +221,26 @@ export function ProfileClient({ profile }: { profile: ProfileData }) {
         setPhoneMsg({ type: "ok", text: "Téléphone mis à jour." });
       } catch (e: unknown) {
         setPhoneMsg({
+          type: "err",
+          text: e instanceof Error ? e.message : "Erreur",
+        });
+      }
+    });
+  };
+
+  const handleSaveTheme = (next: ThemePreference) => {
+    setThemeMsg(null);
+    setThemePreference(next);
+    setTheme(next as Theme);
+    startTransition(async () => {
+      try {
+        await updateMyThemePreference(next);
+        setThemeMsg({
+          type: "ok",
+          text: "Mode par défaut enregistré. Il sera appliqué à chaque connexion.",
+        });
+      } catch (e: unknown) {
+        setThemeMsg({
           type: "err",
           text: e instanceof Error ? e.message : "Erreur",
         });
@@ -439,6 +475,85 @@ export function ProfileClient({ profile }: { profile: ProfileData }) {
               </p>
             )}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Appearance / default theme */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Palette className="size-4" />
+            Mode d&apos;affichage
+          </CardTitle>
+          <CardDescription>
+            Choisissez le mode par défaut (clair ou sombre) associé à votre
+            compte. Il sera appliqué automatiquement à chaque accès à
+            l&apos;application. Vous pouvez toujours basculer temporairement
+            depuis le menu latéral.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div
+            className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+            role="radiogroup"
+            aria-label="Mode d'affichage par défaut"
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={themePreference === "light"}
+              disabled={isPending}
+              onClick={() => handleSaveTheme("light")}
+              className={`flex items-center gap-3 rounded-xl border p-4 text-left transition-colors ${
+                themePreference === "light"
+                  ? "border-primary bg-primary/5 ring-2 ring-primary/30"
+                  : "border-border hover:bg-muted/50"
+              }`}
+            >
+              <span className="flex size-10 items-center justify-center rounded-lg border bg-background">
+                <Sun className="size-5 text-amber-500" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold">Mode clair</span>
+                <span className="block text-xs text-muted-foreground">
+                  Fond clair, idéal en journée
+                </span>
+              </span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={themePreference === "dark"}
+              disabled={isPending}
+              onClick={() => handleSaveTheme("dark")}
+              className={`flex items-center gap-3 rounded-xl border p-4 text-left transition-colors ${
+                themePreference === "dark"
+                  ? "border-primary bg-primary/5 ring-2 ring-primary/30"
+                  : "border-border hover:bg-muted/50"
+              }`}
+            >
+              <span className="flex size-10 items-center justify-center rounded-lg border bg-background">
+                <Moon className="size-5 text-sky-400" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold">Mode sombre</span>
+                <span className="block text-xs text-muted-foreground">
+                  Fond sombre, plus confortable le soir
+                </span>
+              </span>
+            </button>
+          </div>
+          {themeMsg && (
+            <p
+              className={`text-sm ${
+                themeMsg.type === "ok"
+                  ? "text-emerald-600"
+                  : "text-destructive"
+              }`}
+            >
+              {themeMsg.text}
+            </p>
+          )}
         </CardContent>
       </Card>
 

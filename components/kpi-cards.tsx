@@ -25,6 +25,9 @@ import {
 interface Stats {
   totalActions: number;
   totalRisks: number;
+  /** Chantiers with statut ≠ "Non démarré" */
+  activeChantiers: number;
+  /** All chantiers (denominator for Chantiers Actifs) */
   totalChantiers: number;
   criticalRisks: number;
   overdueActions: number;
@@ -48,12 +51,12 @@ function formatBudget(amount: number): { num: string; unit: string } {
 
 export function KpiCards({ stats }: { stats: Stats }) {
   return (
-    <section className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+    <section className="grid grid-cols-2 gap-4 overflow-visible py-2 sm:grid-cols-3 lg:grid-cols-6">
       <KpiCard
         icon={FolderKanban}
         label="Chantiers Actifs"
-        value={String(stats.totalChantiers)}
-        subtitle="En cours"
+        value={`${stats.activeChantiers}/${stats.totalChantiers}`}
+        subtitle="lancé / total"
         href="/chantiers"
       />
       <KpiCard
@@ -149,6 +152,20 @@ export function KpiCards({ stats }: { stats: Stats }) {
   );
 }
 
+const VARIANT_HOVER: Record<
+  "default" | "destructive" | "warning" | "success",
+  string
+> = {
+  default:
+    "group-hover:border-sky-400/55 dark:group-hover:border-sky-400/45",
+  destructive:
+    "group-hover:border-destructive/55 dark:group-hover:border-destructive/45",
+  warning:
+    "group-hover:border-amber-400/60 dark:group-hover:border-amber-400/45",
+  success:
+    "group-hover:border-emerald-400/60 dark:group-hover:border-emerald-400/45",
+};
+
 function KpiCard({
   icon: Icon,
   label,
@@ -171,23 +188,72 @@ function KpiCard({
         ? "text-amber-500"
         : variant === "success"
           ? "text-emerald-500"
-          : "";
+          : "text-sky-600 dark:text-sky-400";
   const hasColor = variant !== "default";
 
   return (
-    <Link href={href}>
-      <Card className="cursor-pointer transition-shadow hover:shadow-md h-full">
-        <CardHeader className="pb-2">
+    <Link
+      href={href}
+      className="group block h-full rounded-xl outline-none transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-2 hover:scale-[1.03] active:-translate-y-0.5 active:scale-[1.01] focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+    >
+      <Card
+        className={[
+          "relative h-full cursor-pointer overflow-hidden",
+          "border bg-card/95 backdrop-blur-[2px]",
+          "shadow-sm transition-[box-shadow,border-color,background-color] duration-300 ease-out",
+          "group-hover:shadow-xl group-hover:shadow-slate-900/15",
+          "dark:group-hover:shadow-2xl dark:group-hover:shadow-black/50",
+          VARIANT_HOVER[variant],
+        ].join(" ")}
+      >
+        {/* Top shine */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent opacity-60 dark:via-white/20"
+        />
+        {/* Hover glow */}
+        <div
+          aria-hidden
+          className={[
+            "pointer-events-none absolute -inset-px z-0 rounded-[inherit] opacity-0 transition-opacity duration-300 group-hover:opacity-100",
+            variant === "destructive"
+              ? "bg-gradient-to-b from-destructive/15 via-transparent to-transparent"
+              : variant === "warning"
+                ? "bg-gradient-to-b from-amber-400/15 via-transparent to-transparent"
+                : variant === "success"
+                  ? "bg-gradient-to-b from-emerald-400/15 via-transparent to-transparent"
+                  : "bg-gradient-to-b from-sky-400/15 via-transparent to-transparent",
+          ].join(" ")}
+        />
+
+        <CardHeader className="relative z-10 pb-2">
           <CardDescription className="flex items-center gap-2">
-            <Icon className={`size-4 ${hasColor ? colorClass : ""}`} />
-            {label}
+            <span
+              className={[
+                "flex size-8 shrink-0 items-center justify-center rounded-lg border shadow-sm",
+                "bg-background transition-transform duration-300 ease-out",
+                "group-hover:scale-110 group-hover:shadow-md",
+                hasColor ? "border-current/15" : "border-border",
+              ].join(" ")}
+            >
+              <Icon className={`size-3.5 ${colorClass}`} />
+            </span>
+            <span className="truncate font-medium">{label}</span>
           </CardDescription>
         </CardHeader>
-        <CardContent className="text-center">
-          <div className={`text-2xl font-bold whitespace-nowrap ${hasColor ? colorClass : ""}`}>
+        <CardContent className="relative z-10 text-center">
+          <div
+            className={[
+              "text-2xl font-bold tracking-tight whitespace-nowrap",
+              "transition-transform duration-300 ease-out group-hover:scale-105",
+              hasColor ? colorClass : "text-foreground",
+            ].join(" ")}
+          >
             {value}
           </div>
-          <p className="text-xs text-muted-foreground">{subtitle}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground transition-colors duration-300 group-hover:text-foreground/75">
+            {subtitle}
+          </p>
         </CardContent>
       </Card>
     </Link>

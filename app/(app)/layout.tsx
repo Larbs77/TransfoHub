@@ -3,12 +3,14 @@ import { redirect } from "next/navigation";
 import { NavBar } from "@/components/nav-bar";
 import { ChatWidget } from "@/components/chat-widget";
 import { UserProvider } from "@/components/user-provider";
+import { UserThemeSync } from "@/components/user-theme-sync";
 import { getRoleByCode, resolveAllowedPages } from "@/lib/roles";
 import {
   LEGACY_ROLE_COLORS,
   LEGACY_ROLE_LABELS,
 } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import type { Theme } from "@/components/theme-provider";
 
 export default async function AppLayout({
   children,
@@ -34,6 +36,7 @@ export default async function AppLayout({
         last_name: true,
         username: true,
         avatar_url: true,
+        theme_preference: true,
         updatedAt: true,
       },
     }),
@@ -48,6 +51,8 @@ export default async function AppLayout({
   const canUseApp = !!role?.is_active;
   const fullName = `${dbUser?.first_name ?? ""} ${dbUser?.last_name ?? ""}`.trim();
   const displayName = fullName || dbUser?.username || session.username;
+  const themePreference: Theme =
+    dbUser?.theme_preference === "dark" ? "dark" : "light";
 
   return (
     <UserProvider
@@ -67,6 +72,7 @@ export default async function AppLayout({
         dashboardType: session.dashboardType || "complete",
       }}
     >
+      <UserThemeSync preference={themePreference} />
       <NavBar>{children}</NavBar>
       {session.role === "Admin" && <ChatWidget />}
     </UserProvider>

@@ -30,6 +30,12 @@ function revalidateProfile() {
   revalidatePath("/");
 }
 
+export type ThemePreference = "light" | "dark";
+
+function normalizeThemePreference(value: unknown): ThemePreference {
+  return value === "dark" ? "dark" : "light";
+}
+
 export async function getMyProfile() {
   const session = await requireAuth();
   const user = await prisma.user.findUnique({
@@ -42,6 +48,7 @@ export async function getMyProfile() {
       phone: true,
       email: true,
       avatar_url: true,
+      theme_preference: true,
       role: true,
       dashboard_type: true,
       last_login: true,
@@ -56,6 +63,7 @@ export async function getMyProfile() {
 
   return {
     ...user,
+    theme_preference: normalizeThemePreference(user.theme_preference),
     roleLabel: role?.label ?? user.role,
     roleColor: role?.color ?? "#6b7280",
   };
@@ -72,6 +80,19 @@ export async function updateMyPhone(phone: string) {
   });
 
   revalidateProfile();
+}
+
+export async function updateMyThemePreference(theme: ThemePreference) {
+  const session = await requireAuth();
+  const theme_preference = normalizeThemePreference(theme);
+
+  await prisma.user.update({
+    where: { id: session.userId },
+    data: { theme_preference },
+  });
+
+  revalidateProfile();
+  return { theme_preference };
 }
 
 export async function uploadMyAvatar(formData: FormData) {

@@ -79,7 +79,9 @@ Légende
 ================================================================================
 
 Chantiers Actifs
-  COUNT chantiers où statut ≠ "Clôturé"
+  Affichage : N / T
+  N = COUNT chantiers où statut ≠ "Non démarré"
+  T = COUNT total des chantiers
 
 Actions Actives
   COUNT RAID type = "Action" ET statut ∉ {"Clôturé", "Abandonné"}

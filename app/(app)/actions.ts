@@ -211,7 +211,9 @@ export async function getDashboardStats() {
   const activeActions = actions.filter((a) => a.statut !== "Clôturé" && a.statut !== "Abandonné");
   const totalActions = activeActions.length;
   const totalRisks = risks.filter((r) => r.statut !== "Clos").length;
-  const totalChantiers = chantiers.filter((c) => c.statut !== "Clôturé").length;
+  // Chantiers Actifs KPI: started (any statut except "Non démarré") / total portfolio
+  const totalChantiers = chantiers.length;
+  const activeChantiers = chantiers.filter((c) => c.statut !== "Non démarré").length;
 
   const criticalRisksList = risks.filter(
     (r) => r.probabilite && r.impact && scoreCriticite(r.impact, r.probabilite) >= 12
@@ -471,6 +473,7 @@ export async function getDashboardStats() {
     totalActions,
     totalRisks,
     totalChantiers,
+    activeChantiers,
     criticalRisks: criticalRisksList.length,
     criticalRisksList,
     overdueActions: overdueActionsList.length,
