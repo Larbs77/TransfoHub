@@ -1,4 +1,5 @@
 import { createPrismaClient } from "../lib/create-prisma";
+import { DEFAULT_ROLE_PAGES, ALL_PAGE_PATHS } from "../lib/app-pages";
 import bcrypt from "bcryptjs";
 import * as XLSX from "xlsx";
 import * as path from "path";
@@ -25,6 +26,55 @@ async function main() {
   await prisma.profilRessource.deleteMany();
   await prisma.statusConfig.deleteMany();
   await prisma.settings.deleteMany();
+  await prisma.appRole.deleteMany();
+
+  // Rôles applicatifs par défaut
+  const defaultRoles = [
+    {
+      code: "Admin",
+      label: "Administrateur",
+      description: "Accès complet à l'application et à l'administration",
+      color: "#dc2626",
+      is_system: true,
+      chantier_scope: "all",
+      pages: DEFAULT_ROLE_PAGES.Admin ?? ALL_PAGE_PATHS,
+    },
+    {
+      code: "Programme_Office",
+      label: "Bureau Programme",
+      description: "Pilotage programme et gouvernance",
+      color: "#2563eb",
+      is_system: true,
+      chantier_scope: "all",
+      pages: DEFAULT_ROLE_PAGES.Programme_Office,
+    },
+    {
+      code: "PMO_Chantier",
+      label: "PMO Chantier",
+      description: "Pilotage des chantiers assignés",
+      color: "#059669",
+      is_system: true,
+      chantier_scope: "assigned",
+      pages: DEFAULT_ROLE_PAGES.PMO_Chantier,
+    },
+    {
+      code: "Workforce_Manager",
+      label: "Gestionnaire Ressources",
+      description: "Gestion des ressources, profils et capacité",
+      color: "#7c3aed",
+      is_system: true,
+      chantier_scope: "none",
+      pages: DEFAULT_ROLE_PAGES.Workforce_Manager,
+    },
+  ];
+  for (const r of defaultRoles) {
+    await prisma.appRole.create({
+      data: {
+        ...r,
+        is_active: true,
+      },
+    });
+  }
 
   // Paramètres par défaut
   await prisma.settings.create({

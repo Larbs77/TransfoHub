@@ -14,10 +14,20 @@ import {
   ArrowUpDown,
   ToggleLeft,
   ToggleRight,
+  Pencil,
+  Mail,
+  Phone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardAction } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardAction,
+} from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -34,10 +44,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
-import type { Role } from "@/lib/permissions";
+import { UserAvatar } from "@/components/user-avatar";
 import {
   createUser,
+  updateUserProfile,
   updateUserRole,
   updateDashboardType,
   toggleUserActive,
@@ -51,6 +61,11 @@ import { fr } from "date-fns/locale";
 type UserRow = {
   id: string;
   username: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string;
+  avatar_url: string;
   role: string;
   dashboard_type: string;
   is_active: boolean;
@@ -61,39 +76,107 @@ type UserRow = {
   ressourceId: string | null;
   ressource: { id: string; nom_complet: string } | null;
   createdAt: Date;
+  updatedAt: Date;
 };
 
-const ROLES: Role[] = ["Admin", "Programme_Office", "PMO_Chantier", "Workforce_Manager"];
+type ActiveRole = {
+  code: string;
+  label: string;
+  color: string;
+  chantier_scope: string;
+};
+
+type ProfileForm = {
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string;
+  role: string;
+  dashboard_type: "complete" | "limited";
+  ressourceId: string;
+};
+
+function displayName(u: Pick<UserRow, "first_name" | "last_name" | "username">) {
+  const full = `${u.first_name} ${u.last_name}`.trim();
+  return full || u.username;
+}
 
 export function UserManagement({
   initialUsers,
   ressources,
+  activeRoles,
 }: {
   initialUsers: UserRow[];
   ressources: { id: string; nom_complet: string }[];
+  activeRoles: ActiveRole[];
 }) {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
-  const [sortKey, setSortKey] = useState<"username" | "role" | "last_login" | "createdAt">("username");
+  const [sortKey, setSortKey] = useState<
+    "username" | "role" | "last_login" | "createdAt" | "name"
+  >("username");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [isPending, startTransition] = useTransition();
 
   // Dialogs
   const [showAdd, setShowAdd] = useState(false);
+  const [showEdit, setShowEdit] = useState<UserRow | null>(null);
   const [showResetPwd, setShowResetPwd] = useState<UserRow | null>(null);
   const [showDelete, setShowDelete] = useState<UserRow | null>(null);
+
+  const defaultRoleCode =
+    activeRoles.find((r) => r.code === "PMO_Chantier")?.code ??
+    activeRoles[0]?.code ??
+    "";
 
   // Add form state
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [newRole, setNewRole] = useState<Role>("PMO_Chantier");
+  const [newFirstName, setNewFirstName] = useState("");
+  const [newLastName, setNewLastName] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newRole, setNewRole] = useState<string>(defaultRoleCode);
   const [newRessourceId, setNewRessourceId] = useState<string>("");
   const [resetPwdValue, setResetPwdValue] = useState("");
   const [error, setError] = useState("");
 
+  const [editForm, setEditForm] = useState<ProfileForm>({
+    first_name: "",
+    last_name: "",
+    phone: "",
+    email: "",
+    role: "",
+    dashboard_type: "complete",
+    ressourceId: "",
+  });
+
+  const roleMeta = (code: string) =>
+    activeRoles.find((r) => r.code === code) ?? {
+      code,
+      label: code,
+      color: "#6b7280",
+    };
+
+  const rolesForUser = (currentCode: string) => {
+    const list = [...activeRoles];
+    if (currentCode && !list.some((r) => r.code === currentCode)) {
+      list.push({
+        code: currentCode,
+        label: `${currentCode} (inactif)`,
+        color: "#6b7280",
+        chantier_scope: "none",
+      });
+    }
+    return list;
+  };
+
   const toggleSort = (key: typeof sortKey) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else { setSortKey(key); setSortDir("asc"); }
+    else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
   };
 
   const filtered = useMemo(() => {
@@ -103,6 +186,10 @@ export function UserManagement({
       list = list.filter(
         (u) =>
           u.username.toLowerCase().includes(q) ||
+          u.first_name.toLowerCase().includes(q) ||
+          u.last_name.toLowerCase().includes(q) ||
+          u.email.toLowerCase().includes(q) ||
+          u.phone.toLowerCase().includes(q) ||
           u.ressource?.nom_complet.toLowerCase().includes(q)
       );
     }
@@ -110,18 +197,48 @@ export function UserManagement({
     list.sort((a, b) => {
       let cmp = 0;
       if (sortKey === "username") cmp = a.username.localeCompare(b.username);
+      else if (sortKey === "name")
+        cmp = displayName(a).localeCompare(displayName(b));
       else if (sortKey === "role") cmp = a.role.localeCompare(b.role);
-      else if (sortKey === "last_login") cmp = (a.last_login?.getTime() ?? 0) - (b.last_login?.getTime() ?? 0);
-      else if (sortKey === "createdAt") cmp = a.createdAt.getTime() - b.createdAt.getTime();
+      else if (sortKey === "last_login")
+        cmp = (a.last_login?.getTime() ?? 0) - (b.last_login?.getTime() ?? 0);
+      else if (sortKey === "createdAt")
+        cmp = a.createdAt.getTime() - b.createdAt.getTime();
       return sortDir === "asc" ? cmp : -cmp;
     });
     return list;
   }, [initialUsers, search, roleFilter, sortKey, sortDir]);
 
-  // KPIs
   const total = initialUsers.length;
   const active = initialUsers.filter((u) => u.is_active).length;
-  const locked = initialUsers.filter((u) => u.locked_until && u.locked_until > new Date()).length;
+  const locked = initialUsers.filter(
+    (u) => u.locked_until && u.locked_until > new Date()
+  ).length;
+
+  const resetAddForm = () => {
+    setNewUsername("");
+    setNewPassword("");
+    setNewFirstName("");
+    setNewLastName("");
+    setNewPhone("");
+    setNewEmail("");
+    setNewRole(defaultRoleCode);
+    setNewRessourceId("");
+  };
+
+  const openEdit = (user: UserRow) => {
+    setShowEdit(user);
+    setEditForm({
+      first_name: user.first_name ?? "",
+      last_name: user.last_name ?? "",
+      phone: user.phone ?? "",
+      email: user.email ?? "",
+      role: user.role,
+      dashboard_type: (user.dashboard_type as "complete" | "limited") || "complete",
+      ressourceId: user.ressourceId ?? "",
+    });
+    setError("");
+  };
 
   const handleCreate = () => {
     setError("");
@@ -131,13 +248,35 @@ export function UserManagement({
           username: newUsername.trim(),
           password: newPassword,
           role: newRole,
+          first_name: newFirstName,
+          last_name: newLastName,
+          phone: newPhone,
+          email: newEmail,
           ressourceId: newRessourceId || null,
         });
         setShowAdd(false);
-        setNewUsername("");
-        setNewPassword("");
-        setNewRole("PMO_Chantier");
-        setNewRessourceId("");
+        resetAddForm();
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Erreur");
+      }
+    });
+  };
+
+  const handleSaveEdit = () => {
+    if (!showEdit) return;
+    setError("");
+    startTransition(async () => {
+      try {
+        await updateUserProfile(showEdit.id, {
+          first_name: editForm.first_name,
+          last_name: editForm.last_name,
+          phone: editForm.phone,
+          email: editForm.email,
+          role: editForm.role,
+          dashboard_type: editForm.dashboard_type,
+          ressourceId: editForm.ressourceId || null,
+        });
+        setShowEdit(null);
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Erreur");
       }
@@ -168,9 +307,10 @@ export function UserManagement({
 
   return (
     <main className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
-      <h1 className="text-2xl font-bold tracking-tight">Gestion des Utilisateurs</h1>
+      <h1 className="text-2xl font-bold tracking-tight">
+        Gestion des Utilisateurs
+      </h1>
 
-      {/* KPI cards */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="flex items-center gap-3 rounded-lg border p-3">
           <div className="flex size-9 items-center justify-center rounded-md bg-blue-500/10 text-blue-600">
@@ -201,7 +341,6 @@ export function UserManagement({
         </div>
       </div>
 
-      {/* Table card */}
       <Card>
         <CardHeader>
           <div>
@@ -211,19 +350,25 @@ export function UserManagement({
             </CardDescription>
           </div>
           <CardAction>
-            <Button size="sm" onClick={() => setShowAdd(true)}>
+            <Button
+              size="sm"
+              onClick={() => {
+                resetAddForm();
+                setError("");
+                setShowAdd(true);
+              }}
+            >
               <UserPlus className="mr-1.5 size-4" />
               Ajouter
             </Button>
           </CardAction>
         </CardHeader>
         <CardContent>
-          {/* Filters */}
           <div className="mb-4 flex flex-wrap gap-3">
-            <div className="relative flex-1 min-w-[200px]">
+            <div className="relative min-w-[200px] flex-1">
               <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
               <Input
-                placeholder="Rechercher..."
+                placeholder="Rechercher (nom, login, e-mail, téléphone)..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-9"
@@ -235,35 +380,54 @@ export function UserManagement({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Tous les rôles</SelectItem>
-                {ROLES.map((r) => (
-                  <SelectItem key={r} value={r}>
-                    {ROLE_LABELS[r]}
+                {activeRoles.map((r) => (
+                  <SelectItem key={r.code} value={r.code}>
+                    {r.label}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
 
-          {/* Table */}
           <div className="overflow-x-auto rounded-md border">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50">
                   <th className="px-3 py-2 text-left font-medium">
-                    <button onClick={() => toggleSort("username")} className="inline-flex items-center gap-1">
+                    <button
+                      onClick={() => toggleSort("username")}
+                      className="inline-flex items-center gap-1"
+                    >
                       Utilisateur <ArrowUpDown className="size-3" />
                     </button>
                   </th>
                   <th className="px-3 py-2 text-left font-medium">
-                    <button onClick={() => toggleSort("role")} className="inline-flex items-center gap-1">
+                    <button
+                      onClick={() => toggleSort("name")}
+                      className="inline-flex items-center gap-1"
+                    >
+                      Nom <ArrowUpDown className="size-3" />
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-left font-medium">Contact</th>
+                  <th className="px-3 py-2 text-left font-medium">
+                    <button
+                      onClick={() => toggleSort("role")}
+                      className="inline-flex items-center gap-1"
+                    >
                       Rôle <ArrowUpDown className="size-3" />
                     </button>
                   </th>
                   <th className="px-3 py-2 text-left font-medium">Dashboard</th>
-                  <th className="px-3 py-2 text-left font-medium">Ressource liée</th>
+                  <th className="px-3 py-2 text-left font-medium">
+                    Ressource liée
+                  </th>
                   <th className="px-3 py-2 text-center font-medium">Statut</th>
                   <th className="px-3 py-2 text-left font-medium">
-                    <button onClick={() => toggleSort("last_login")} className="inline-flex items-center gap-1">
+                    <button
+                      onClick={() => toggleSort("last_login")}
+                      className="inline-flex items-center gap-1"
+                    >
                       Dernière connexion <ArrowUpDown className="size-3" />
                     </button>
                   </th>
@@ -272,37 +436,93 @@ export function UserManagement({
               </thead>
               <tbody>
                 {filtered.map((user) => {
-                  const isLocked = user.locked_until && user.locked_until > new Date();
+                  const isLocked =
+                    user.locked_until && user.locked_until > new Date();
                   return (
-                    <tr key={user.id} className="border-b last:border-0 hover:bg-muted/30">
-                      <td className="px-3 py-2 font-medium">
-                        {user.username}
-                        {user.must_change_pwd && (
-                          <Badge variant="outline" className="ml-2 text-[10px]">
-                            Temp
-                          </Badge>
+                    <tr
+                      key={user.id}
+                      className="border-b last:border-0 hover:bg-muted/30"
+                    >
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2.5">
+                          <UserAvatar
+                            name={displayName(user)}
+                            color={roleMeta(user.role).color}
+                            src={user.avatar_url}
+                            version={
+                              user.updatedAt
+                                ? new Date(user.updatedAt).getTime()
+                                : undefined
+                            }
+                            size="md"
+                          />
+                          <div className="min-w-0">
+                            <div className="font-medium">
+                              {user.username}
+                              {user.must_change_pwd && (
+                                <Badge
+                                  variant="outline"
+                                  className="ml-2 text-[10px]"
+                                >
+                                  Temp
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="font-medium">{displayName(user)}</div>
+                        {(user.first_name || user.last_name) && (
+                          <div className="text-[11px] text-muted-foreground">
+                            {user.first_name} {user.last_name}
+                          </div>
                         )}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">
+                        <div className="space-y-0.5">
+                          {user.email ? (
+                            <div className="flex items-center gap-1">
+                              <Mail className="size-3 shrink-0" />
+                              <span className="truncate max-w-[160px]">
+                                {user.email}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground/60">—</span>
+                          )}
+                          {user.phone && (
+                            <div className="flex items-center gap-1">
+                              <Phone className="size-3 shrink-0" />
+                              {user.phone}
+                            </div>
+                          )}
+                        </div>
                       </td>
                       <td className="px-3 py-2">
                         <Select
                           value={user.role}
                           onValueChange={(val) =>
-                            startTransition(() => updateUserRole(user.id, val as Role))
+                            startTransition(() =>
+                              updateUserRole(user.id, val)
+                            )
                           }
                         >
                           <SelectTrigger className="h-7 w-[180px] text-xs">
                             <div className="flex items-center gap-1.5">
                               <span
                                 className="inline-block size-2 rounded-full"
-                                style={{ backgroundColor: ROLE_COLORS[user.role as Role] }}
+                                style={{
+                                  backgroundColor: roleMeta(user.role).color,
+                                }}
                               />
                               <SelectValue />
                             </div>
                           </SelectTrigger>
                           <SelectContent>
-                            {ROLES.map((r) => (
-                              <SelectItem key={r} value={r}>
-                                {ROLE_LABELS[r]}
+                            {rolesForUser(user.role).map((r) => (
+                              <SelectItem key={r.code} value={r.code}>
+                                {r.label}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -312,7 +532,12 @@ export function UserManagement({
                         <Select
                           value={user.dashboard_type}
                           onValueChange={(val) =>
-                            startTransition(() => updateDashboardType(user.id, val as "complete" | "limited"))
+                            startTransition(() =>
+                              updateDashboardType(
+                                user.id,
+                                val as "complete" | "limited"
+                              )
+                            )
                           }
                         >
                           <SelectTrigger className="h-7 w-[120px] text-xs">
@@ -329,29 +554,54 @@ export function UserManagement({
                       </td>
                       <td className="px-3 py-2 text-center">
                         {isLocked ? (
-                          <Badge variant="destructive" className="text-[10px]">
+                          <Badge
+                            variant="destructive"
+                            className="text-[10px]"
+                          >
                             <Lock className="mr-1 size-3" /> Verrouillé
                           </Badge>
                         ) : user.is_active ? (
-                          <Badge className="bg-green-600 text-[10px]">Actif</Badge>
+                          <Badge className="bg-green-600 text-[10px]">
+                            Actif
+                          </Badge>
                         ) : (
-                          <Badge variant="secondary" className="text-[10px]">Inactif</Badge>
+                          <Badge
+                            variant="secondary"
+                            className="text-[10px]"
+                          >
+                            Inactif
+                          </Badge>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-muted-foreground text-xs">
+                      <td className="px-3 py-2 text-xs text-muted-foreground">
                         {user.last_login
-                          ? format(new Date(user.last_login), "dd MMM yyyy HH:mm", { locale: fr })
+                          ? format(
+                              new Date(user.last_login),
+                              "dd MMM yyyy HH:mm",
+                              { locale: fr }
+                            )
                           : "Jamais"}
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center justify-end gap-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="size-7"
+                            title="Modifier le profil"
+                            onClick={() => openEdit(user)}
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
                           {isLocked && (
                             <Button
                               size="icon"
                               variant="ghost"
                               className="size-7"
                               title="Déverrouiller"
-                              onClick={() => startTransition(() => unlockUser(user.id))}
+                              onClick={() =>
+                                startTransition(() => unlockUser(user.id))
+                              }
                             >
                               <Unlock className="size-3.5" />
                             </Button>
@@ -360,8 +610,14 @@ export function UserManagement({
                             size="icon"
                             variant="ghost"
                             className="size-7"
-                            title={user.is_active ? "Désactiver" : "Activer"}
-                            onClick={() => startTransition(() => toggleUserActive(user.id))}
+                            title={
+                              user.is_active ? "Désactiver" : "Activer"
+                            }
+                            onClick={() =>
+                              startTransition(() =>
+                                toggleUserActive(user.id)
+                              )
+                            }
                           >
                             {user.is_active ? (
                               <ToggleRight className="size-3.5 text-green-600" />
@@ -374,7 +630,11 @@ export function UserManagement({
                             variant="ghost"
                             className="size-7"
                             title="Réinitialiser le mot de passe"
-                            onClick={() => { setShowResetPwd(user); setResetPwdValue(""); setError(""); }}
+                            onClick={() => {
+                              setShowResetPwd(user);
+                              setResetPwdValue("");
+                              setError("");
+                            }}
                           >
                             <KeyRound className="size-3.5" />
                           </Button>
@@ -394,7 +654,10 @@ export function UserManagement({
                 })}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
+                    <td
+                      colSpan={9}
+                      className="px-3 py-8 text-center text-muted-foreground"
+                    >
                       Aucun utilisateur trouvé.
                     </td>
                   </tr>
@@ -407,21 +670,63 @@ export function UserManagement({
 
       {/* Add User Dialog */}
       <Dialog open={showAdd} onOpenChange={setShowAdd}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Nouvel utilisateur</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Prénom</label>
+                <Input
+                  value={newFirstName}
+                  onChange={(e) => setNewFirstName(e.target.value)}
+                  placeholder="Jean"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Nom</label>
+                <Input
+                  value={newLastName}
+                  onChange={(e) => setNewLastName(e.target.value)}
+                  placeholder="Dupont"
+                />
+              </div>
+            </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Nom d&apos;utilisateur</label>
+              <label className="text-sm font-medium">
+                Nom d&apos;utilisateur
+              </label>
               <Input
                 value={newUsername}
                 onChange={(e) => setNewUsername(e.target.value)}
                 placeholder="ex: j.dupont"
               />
             </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">E-mail</label>
+                <Input
+                  type="email"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  placeholder="jean.dupont@banque.ma"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Téléphone</label>
+                <Input
+                  type="tel"
+                  value={newPhone}
+                  onChange={(e) => setNewPhone(e.target.value)}
+                  placeholder="+212 6 …"
+                />
+              </div>
+            </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Mot de passe temporaire</label>
+              <label className="text-sm font-medium">
+                Mot de passe temporaire
+              </label>
               <Input
                 type="password"
                 value={newPassword}
@@ -434,22 +739,33 @@ export function UserManagement({
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Rôle</label>
-              <Select value={newRole} onValueChange={(v) => setNewRole(v as Role)}>
+              <Select
+                value={newRole}
+                onValueChange={(v) => setNewRole(v)}
+                disabled={activeRoles.length === 0}
+              >
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue placeholder="Sélectionner un rôle" />
                 </SelectTrigger>
                 <SelectContent>
-                  {ROLES.map((r) => (
-                    <SelectItem key={r} value={r}>
-                      {ROLE_LABELS[r]}
+                  {activeRoles.map((r) => (
+                    <SelectItem key={r.code} value={r.code}>
+                      {r.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Ressource liée (optionnel)</label>
-              <Select value={newRessourceId || "none"} onValueChange={(v) => setNewRessourceId(v === "none" ? "" : v)}>
+              <label className="text-sm font-medium">
+                Ressource liée (optionnel)
+              </label>
+              <Select
+                value={newRessourceId || "none"}
+                onValueChange={(v) =>
+                  setNewRessourceId(v === "none" ? "" : v)
+                }
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Aucune" />
                 </SelectTrigger>
@@ -464,7 +780,7 @@ export function UserManagement({
               </Select>
             </div>
             {error && (
-              <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 text-sm text-destructive">
+              <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {error}
               </div>
             )}
@@ -473,36 +789,173 @@ export function UserManagement({
             <DialogClose asChild>
               <Button variant="outline">Annuler</Button>
             </DialogClose>
-            <Button onClick={handleCreate} disabled={isPending || !newUsername.trim() || !newPassword}>
+            <Button
+              onClick={handleCreate}
+              disabled={
+                isPending || !newUsername.trim() || !newPassword || !newRole
+              }
+            >
               {isPending ? "Création..." : "Créer"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Reset Password Dialog */}
-      <Dialog open={!!showResetPwd} onOpenChange={() => setShowResetPwd(null)}>
-        <DialogContent>
+      {/* Edit profile Dialog */}
+      <Dialog
+        open={!!showEdit}
+        onOpenChange={(open) => {
+          if (!open) setShowEdit(null);
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              Réinitialiser le mot de passe de {showResetPwd?.username}
+              Modifier — {showEdit?.username}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            {showEdit && (
+              <div className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3">
+                <UserAvatar
+                  name={displayName(showEdit)}
+                  color={roleMeta(showEdit.role).color}
+                  src={showEdit.avatar_url}
+                  version={
+                    showEdit.updatedAt
+                      ? new Date(showEdit.updatedAt).getTime()
+                      : undefined
+                  }
+                  size="xl"
+                  className="ring-2 ring-border"
+                />
+                <div className="min-w-0">
+                  <div className="truncate font-medium">
+                    {displayName(showEdit)}
+                  </div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    @{showEdit.username}
+                  </div>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    La photo est gérée par l&apos;utilisateur depuis son profil.
+                  </p>
+                </div>
+              </div>
+            )}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Prénom</label>
+                <Input
+                  value={editForm.first_name}
+                  onChange={(e) =>
+                    setEditForm((f) => ({
+                      ...f,
+                      first_name: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Nom</label>
+                <Input
+                  value={editForm.last_name}
+                  onChange={(e) =>
+                    setEditForm((f) => ({
+                      ...f,
+                      last_name: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">E-mail</label>
+                <Input
+                  type="email"
+                  value={editForm.email}
+                  onChange={(e) =>
+                    setEditForm((f) => ({ ...f, email: e.target.value }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Téléphone</label>
+                <Input
+                  type="tel"
+                  value={editForm.phone}
+                  onChange={(e) =>
+                    setEditForm((f) => ({ ...f, phone: e.target.value }))
+                  }
+                />
+              </div>
+            </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Nouveau mot de passe temporaire</label>
-              <Input
-                type="password"
-                value={resetPwdValue}
-                onChange={(e) => setResetPwdValue(e.target.value)}
-                placeholder="Min. 8 car., maj., min., chiffre, spécial"
-              />
-              <p className="text-[10px] text-muted-foreground">
-                L&apos;utilisateur devra le changer à la prochaine connexion.
-              </p>
+              <label className="text-sm font-medium">Rôle</label>
+              <Select
+                value={editForm.role}
+                onValueChange={(v) =>
+                  setEditForm((f) => ({ ...f, role: v }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {rolesForUser(editForm.role).map((r) => (
+                    <SelectItem key={r.code} value={r.code}>
+                      {r.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Dashboard</label>
+              <Select
+                value={editForm.dashboard_type}
+                onValueChange={(v) =>
+                  setEditForm((f) => ({
+                    ...f,
+                    dashboard_type: v as "complete" | "limited",
+                  }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="complete">Complet</SelectItem>
+                  <SelectItem value="limited">Limité</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Ressource liée</label>
+              <Select
+                value={editForm.ressourceId || "none"}
+                onValueChange={(v) =>
+                  setEditForm((f) => ({
+                    ...f,
+                    ressourceId: v === "none" ? "" : v,
+                  }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Aucune" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Aucune</SelectItem>
+                  {ressources.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.nom_complet}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             {error && (
-              <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 text-sm text-destructive">
+              <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {error}
               </div>
             )}
@@ -511,7 +964,51 @@ export function UserManagement({
             <DialogClose asChild>
               <Button variant="outline">Annuler</Button>
             </DialogClose>
-            <Button onClick={handleResetPassword} disabled={isPending || !resetPwdValue}>
+            <Button onClick={handleSaveEdit} disabled={isPending}>
+              {isPending ? "Enregistrement..." : "Enregistrer"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reset Password Dialog */}
+      <Dialog
+        open={!!showResetPwd}
+        onOpenChange={() => setShowResetPwd(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Réinitialiser le mot de passe de{" "}
+              {showResetPwd ? displayName(showResetPwd) : ""}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Nouveau mot de passe temporaire
+              </label>
+              <Input
+                type="password"
+                value={resetPwdValue}
+                onChange={(e) => setResetPwdValue(e.target.value)}
+                placeholder="Min. 8 car., maj., min., chiffre, spécial"
+              />
+            </div>
+            {error && (
+              <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">Annuler</Button>
+            </DialogClose>
+            <Button
+              onClick={handleResetPassword}
+              disabled={isPending || !resetPwdValue}
+            >
               {isPending ? "Réinitialisation..." : "Réinitialiser"}
             </Button>
           </DialogFooter>
@@ -526,13 +1023,20 @@ export function UserManagement({
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             Voulez-vous vraiment supprimer l&apos;utilisateur{" "}
-            <strong>{showDelete?.username}</strong> ? Cette action est irréversible.
+            <strong>
+              {showDelete ? displayName(showDelete) : ""}
+            </strong>{" "}
+            ({showDelete?.username}) ? Cette action est irréversible.
           </p>
           <DialogFooter>
             <DialogClose asChild>
               <Button variant="outline">Annuler</Button>
             </DialogClose>
-            <Button variant="destructive" onClick={handleDelete} disabled={isPending}>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={isPending}
+            >
               {isPending ? "Suppression..." : "Supprimer"}
             </Button>
           </DialogFooter>

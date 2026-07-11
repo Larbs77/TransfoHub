@@ -1,6 +1,6 @@
 {
   "name": "pmo-transformation-bancaire",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -38,6 +38,7 @@
     "radix-ui": "^1.4.3",
     "react": "19.2.5",
     "react-dom": "19.2.5",
+    "react-easy-crop": "^6.2.2",
     "recharts": "^3.8.1",
     "tailwind-merge": "^3.5.0"
   },

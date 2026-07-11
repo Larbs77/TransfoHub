@@ -1,0 +1,424 @@
+================================================================================
+TransfoHub — Catalogue des KPIs et formules de calcul
+================================================================================
+Document généré à partir du code (actions.ts, composants dashboard/KPI, utils).
+Dernière revue : basés sur l’implémentation runtime (PostgreSQL / Prisma).
+
+Légende
+-------
+• « Actif / ouverte » : selon le type d’entité, hors statuts de fin (Clôturé,
+  Abandonné, Clos, etc.) — détail par KPI ci-dessous.
+• scoreCriticite(impact, probabilite) = impact × probabilite
+  (échelle 1–5 × 1–5 → score 1–25). Source : lib/utils-pmo.ts
+• Seuils configurables (table Settings) :
+  - seuil_relance_jours (défaut 3) — utilisé pour relances (exposé dashboard)
+  - seuil_qa_critique_heures (défaut 48) — alertes Q&A critiques
+  - poids_precadrage / poids_cadrage / poids_execution / poids_cloture
+    (défaut 10 / 20 / 50 / 20) — avancement chantier
+
+
+================================================================================
+1. FORMULES TRANSVERSES
+================================================================================
+
+1.1 Score de criticité d’un risque
+---------------------------------
+  score = impact × probabilite
+
+  Labels (lib/raid-labels.ts — getCriticiteLabel) :
+    ≤ 3   → Négligeable
+    ≤ 6   → Mineur
+    ≤ 10  → Modéré
+    ≤ 15  → Majeur
+    > 15  → Critique
+
+  Seuils utilisés dans les dashboards :
+    ≥ 12  → « risque critique / majeur » (home, PMO, chantier, CTP/CTR)
+    ≥ 15  → risques critiques pour la météo rapport chantier
+    ≥ 20  → risque « bloquant » (CTP / CTR)
+
+1.2 Avancement chantier (stocké en base : Chantier.avancement)
+-------------------------------------------------------------
+  Recalculé à chaque mise à jour de jalon (recalculateChantierProgress).
+
+  Phases ordonnées : Précadrage → Cadrage → Exécution → Clôture
+  Poids phase W_p = Settings.poids_* correspondant (somme typique 100).
+
+  Pour chaque phase p ayant au moins un jalon :
+    progress_p = (nb jalons avec statut "Atteint" / nb jalons de la phase) × W_p
+
+  avancement = round( Σ progress_p )   // entier 0–100 (selon poids)
+
+  Statut chantier (auto) :
+    - « Non démarré » par défaut
+    - dernière phase ayant un jalon "En cours" ou "Atteint" → statut mappé
+      (Pré cadrage / Cadrage / Exécution / Clôture)
+    - si phase Clôture et TOUS ses jalons sont "Atteint" → statut « Clôturé »
+
+1.3 Météo chantier (rapports PDF — lib/rapport-utils.ts computeMeteo)
+--------------------------------------------------------------------
+  Score points (0–6), puis :
+    ≤ 1 → vert
+    ≤ 3 → orange
+    sinon → rouge
+
+  Points :
+    Jalons en retard (date_cible < now ET statut ∉ {Atteint, Annulé}) :
+      ≥ 3 → +2 ; ≥ 1 → +1
+    Risques critiques ouverts (type Risque, statut ∉ {Clos, Matérialisé},
+      score ≥ 15) :
+      ≥ 3 → +2 ; ≥ 1 → +1
+    Écart planning : expectedPct − avancement
+      expectedPct = clamp((jours écoulés / durée chantier) × 100, 0, 100)
+      gap ≥ 20 → +2 ; gap ≥ 10 → +1
+
+
+================================================================================
+2. TABLEAU DE BORD ACCUEIL (Admin / Programme Office / Workforce)
+   Source : getDashboardStats() + components/kpi-cards.tsx
+================================================================================
+
+Chantiers Actifs
+  COUNT chantiers où statut ≠ "Clôturé"
+
+Actions Actives
+  COUNT RAID type = "Action" ET statut ∉ {"Clôturé", "Abandonné"}
+
+Actions Échues
+  Parmi Actions Actives : date_echeance renseignée ET date_echeance < maintenant
+
+Risques Ouverts
+  COUNT RAID type = "Risque" ET statut ≠ "Clos"
+
+Risques Critiques
+  COUNT risques avec probabilite ET impact définis ET scoreCriticite ≥ 12
+  (tous statuts dans le filtre actuel — pas d’exclusion "Clos" dans cette
+  liste critique du home ; les ouvertures UI filtrent souvent "open")
+
+Décisions en attente
+  COUNT RAID type = "Décision" ET statut = "En attente"
+
+Comités à venir
+  COUNT Comite où date ≥ maintenant
+
+Budget Total
+  SUM(budgetTotalMAD) des chantiers statut ≠ "Clôturé"
+  Affichage : K / M / MM MAD selon ordre de grandeur
+
+Taux Clôture (actions)
+  round( (nb actions statut = "Clôturé" / nb total actions) × 100 )
+  0 % si aucune action
+
+Avancement Moyen
+  Moyenne des avancement des chantiers où
+    statut ∉ {"Clôturé", "Non démarré"}
+  round( moyenne )
+
+Q&A Critiques
+  COUNT ConsultationQuestion où statut = "Ouverte" ET priorite = "Critique"
+
+Risques Mitigés (taux)
+  Parmi risques statut ≠ "Clos" :
+    round( (nb avec mitigation non vide / nb risques ouverts) × 100 )
+
+Indicateurs graphiques associés (mêmes sources)
+  - statusCounts : répartition des actions par statut
+  - raidTypeCounts : RAID par type
+  - riskMatrix[p-1][i-1] : nb risques ouverts (≠ Clos) par proba×impact
+  - overdueByDomaine : actions échues groupées par domaine
+  - budgetByDomaine : sum budgetTotalMAD (chantiers non clôturés) par domaine
+  - burndownData (12 mois) : actions créées (createdAt) vs clôturées (updatedAt
+    si statut Clôturé) par mois
+  - riskEvolutionData : moyenne des scores criticité des risques créés par mois
+  - workloadData : top 10 responsables par nb items RAID actifs
+    (statut ∉ Clôturé/Abandonné/Clos)
+  - healthData par domaine : overdueActions + openRisks + budgetPct relatif
+  - decisionTimelineData : décisions par mois et statut
+  - actionCompletionByDomaine : closed/total actions par domaine
+
+
+================================================================================
+3. TABLEAU DE BORD PMO CHANTIER
+   Source : getDashboardPMO() + components/dashboard-pmo.tsx
+   Scope : chantiers accessibles à l’utilisateur (getUserChantierIds)
+================================================================================
+
+Mêmes définitions que le home pour (sur le périmètre scoppé) :
+  - Chantiers actifs (≠ Clôturé)
+  - Actions actives / échues
+  - Risques ouverts / critiques (score ≥ 12)
+  - Taux clôture actions
+  - Décisions en attente
+
+Timeline : affiche aussi tous les chantiers non clôturés du programme
+  (flag isMine pour ceux du PMO).
+
+
+================================================================================
+4. DASHBOARD CTP (Comité de Pilotage)
+   Source : getDashboardCTP(month, year) + components/dashboard-ctp.tsx
+================================================================================
+
+Période
+  Du 1er au dernier jour du mois/année sélectionnés (saisies temps filtrées).
+
+Avancement programme
+  round( moyenne(avancement) de TOUS les chantiers )
+
+Nb risques (ouverts)
+  type = Risque ET statut ≠ Clos
+
+Majeurs
+  Risques ouverts avec score ≥ 12
+
+Bloquants
+  Risques ouverts avec score ≥ 20
+
+SPI (Schedule Performance Index) — programme
+  jalonsDue = jalons avec date_cible ≤ fin de période
+  jalonsCompleted = parmi eux, statut = "Atteint"
+  SPI = jalonsCompleted / jalonsDue   (2 décimales)
+  Si aucun jalon dû → SPI = 1.0
+
+CPI (Cost Performance Index) — approximation
+  totalJoursPlanned = SUM(chantier.budgetJH)
+  totalJoursConsommes = SUM(saisieTemps.jours_travailles) sur la période
+  earnedJH ≈ totalJoursPlanned × (avgAvancement / 100)
+  CPI = earnedJH / totalJoursConsommes   (si conso et plan > 0)
+  Sinon CPI = 1.0
+
+Go-live rate
+  round( (nb chantiers statut Clôturé / nb total chantiers) × 100 )
+
+Go-live cible année
+  Parmi chantiers dont year(date_fin) = année sélectionnée :
+    round( (clôturés / total de ce sous-ensemble) × 100 )
+
+Budget total MAD
+  SUM(budgetTotalMAD) tous chantiers
+
+Budget consommé (JH)
+  SUM(jours_travailles) des saisies de la période
+
+Budget JH total
+  SUM(budgetJH) tous chantiers
+
+% budget affiché (UI)
+  round( budgetConsumed / budgetJHTotal × 100 ) si budgetJHTotal > 0
+
+Météo programme (icône UI)
+  SPI≥1 & CPI≥1 → soleil
+  SPI<1 & CPI≥1 → nuage partiel
+  SPI≥1 & CPI<1 → nuage
+  SPI<1 & CPI<1 → orage
+
+Top 5 risques : majeurs triés par score décroissant
+Décisions en attente : 5 premières (type Décision, statut En attente)
+
+
+================================================================================
+5. DASHBOARD CTR (Comité de Transformation / revue)
+   Source : getDashboardCTR(startDate, endDate) + components/dashboard-ctr.tsx
+================================================================================
+
+Avancement, nb risques, majeurs, bloquants, SPI, CPI, budgets :
+  mêmes formules que CTP, période = [startDate, endDate] pour les saisies.
+
+Adhérence au planning FDR
+  jalonsDue = date_cible ≤ fin période
+  jalonsOnTime =
+    - statut Atteint → OK
+    - statut En cours ou Planifié ET date_cible ≥ aujourd’hui → OK
+  adherencePlanning = round( onTime / due × 100 )  (100 % si due = 0)
+
+Taux de staffing
+  totalSlots = nb MembreEquipe
+  staffedSlots = membres avec ressourceId non null
+  staffingRate = round( staffedSlots / totalSlots × 100 )
+
+Top 5 chantiers à surveiller
+  Chantiers actifs (≠ Clôturé, ≠ Non démarré), SPI local :
+    due = jalons du chantier avec date_cible ≤ fin période
+    SPI_c = Atteint / due  (1.0 si due = 0)
+  Tri SPI croissant, 5 premiers.
+  Météo chantier : SPI < 0.9 → orage ; < 1.0 → nuageux ; sinon soleil
+  Tendance : SPI ≥ 1.0 → hausse ; sinon baisse
+  Phase courante : dernière phase ayant un jalon En cours ou Atteint
+
+
+================================================================================
+6. FICHE CHANTIER — ONGLET KPI
+   Source : components/chantier-kpi-tab.tsx + getBurnRateChantier
+================================================================================
+
+Planification & avancement
+--------------------------
+SPI (chantier)
+  timeElapsedPct = min( (jours écoulés depuis date_debut / durée totale) × 100, 100 )
+  SPI = avancement / timeElapsedPct
+  Si timeElapsedPct = 0 : SPI = 2 si avancement > 0 sinon 1
+  Affiché arrondi à 2 décimales
+  Lecture UI : ≥1 dans les temps ; ≥0.8 léger retard ; sinon en retard
+
+Avancement
+  Valeur stockée Chantier.avancement (%) — voir §1.2
+
+Jours restants
+  max(0, ceil(date_fin − now en jours))
+
+Membres
+  COUNT membres d’équipe
+  Sous-titre : nb d’équipes couvertes parmi {AMOA, MOE, Métiers, Sécurité, EI}
+
+Capacités & coûts
+-----------------
+Budget
+  Champ budget du chantier (affichage M MAD)
+
+Coût réel
+  SUM mois (jours_reels × tarif_journalier) via burn rate
+
+Jours planifiés / réels
+  Totaux getBurnRateChantier :
+    jours_planifies (mois) = Σ (charge_% / 100 × capacité_jours_mois) des
+      membres liés à une ressource, pour chaque mois du chantier jusqu’à min(fin, now)
+    jours_reels = Σ saisiesTemps.jours_travailles du mois
+    cout_planifie = jours_planifies × TJM ressource
+    cout_reel = jours_reels × TJM
+
+Taux de consommation
+  round( totalCoutReel / totalCoutPlanifie × 100 )
+  0 si aucun coût planifié
+
+Actions / décisions / risques (périmètre chantier)
+--------------------------------------------------
+Total actions, actives, taux complétion :
+  completion = closed(Clôturé) / total actions × 100
+
+Actions en retard
+  Actives avec date_echeance < now
+
+Décisions en attente
+  type Décision, statut En attente
+
+Risques ouverts / critiques (score ≥ 12)
+Criticité moyenne
+  moyenne des scores des risques ouverts ayant proba+impact
+Taux mitigation
+  open avec mitigation non vide / open × 100 (100 % si aucun risque ouvert)
+
+Q&A
+---
+Total questions, ouvertes, critiques ouvertes (priorité Critique)
+
+Adhérences
+----------
+Total = source + dépendant
+Bloquantes = criticite = "BLOQUANTE" (source ∪ dépendant)
+
+
+================================================================================
+7. JALONS (page globale /stats)
+   Source : getJalonStats() + jalons-global-timeline
+================================================================================
+
+Total jalons          COUNT (scope utilisateur)
+Atteints              statut = "Atteint"
+En retard             date_cible < now ET statut ∉ {Atteint, Annulé}
+À venir (30 j)        date_cible ∈ [now, now+30j] ET statut ∉ {Atteint, Annulé}
+Taux de réalisation   round( atteints / total × 100 )
+
+
+================================================================================
+8. CAPACITÉ RESSOURCES
+   Source : getCapaciteRessource / getCapaciteGlobale
+================================================================================
+
+Capacité mensuelle (ressource)
+  capacite = Ressource.capacite_jours_mois
+
+Jours planifiés (mois M)
+  Pour chaque affectation MembreEquipe sur chantier non clôturé dont la période
+  chevauche le mois M :
+    jours += (charge_pourcentage / 100) × capacite
+
+Jours travaillés (mois M)
+  SUM SaisieTemps.jours_travailles dont le lundi tombe dans le mois M
+
+Charge %
+  round( jours_planifies / capacite × 100 )
+
+Charge moyenne annuelle (heatmap globale)
+  round( moyenne des 12 charge_pct du mois )
+
+Disponibilité (prévision)
+  Premier mois futur (à partir du mois courant) avec charge_pct < 50 %
+
+
+================================================================================
+9. ALERTES (cloche)
+   Source : getAlerts()
+================================================================================
+
+Action échue
+  Action non clôturée/abandonnée, date_echeance < now
+  (scope chantiers utilisateur)
+
+Q&A critique échue (délai)
+  priorite = Critique, statut = Ouverte,
+  createdAt < now − seuil_qa_critique_heures (défaut 48 h)
+
+
+================================================================================
+10. AUTRES COMPTEURS UI (mini-KPIs locaux)
+================================================================================
+
+Ces écrans affichent des compteurs dérivés des listes filtrées (pas toujours
+la même fonction serveur) :
+
+• Registre adhérences — totaux / par criticité / par statut (filtre client)
+• Onglet jalons chantier — atteints, en retard, à venir (logique locale)
+• Onglet consultation chantier — ouvertes / critiques
+• Onglet capacité chantier — burn rate (mêmes formules §6)
+• Comités page — compteurs sur la liste (ex. à planifier / à venir)
+• Admin utilisateurs / rôles — total, actifs, verrouillés / inactifs
+  (métriques d’administration, pas métier PMO)
+
+
+================================================================================
+11. RÉSUMÉ DES SEUILS MÉTIER
+================================================================================
+
+| Seuil                         | Valeur défaut | Usage principal                    |
+|-------------------------------|---------------|------------------------------------|
+| Score critique risque         | ≥ 12          | KPI « critiques / majeurs »        |
+| Score bloquant                | ≥ 20          | CTP / CTR « bloquants »            |
+| Score météo rapport           | ≥ 15          | computeMeteo risques               |
+| SPI chantier « OK »           | ≥ 1.0         | Onglet KPI chantier                |
+| SPI chantier « léger retard » | ≥ 0.8         | Onglet KPI chantier                |
+| SPI top chantier orage        | < 0.9         | CTR                                |
+| Charge dispo ressource        | < 50 %        | Premier mois libre                 |
+| Q&A critique alerte           | 48 h          | Settings.seuil_qa_critique_heures  |
+| Poids phases avancement       | 10/20/50/20   | Settings poids_*                   |
+
+
+================================================================================
+12. FICHIERS SOURCES PRINCIPAUX
+================================================================================
+
+  app/(app)/actions.ts
+    getDashboardStats, getDashboardPMO, getDashboardCTP, getDashboardCTR,
+    recalculateChantierProgress, getJalonStats, getAlerts,
+    getCapaciteRessource, getCapaciteGlobale, getBurnRateChantier
+
+  lib/utils-pmo.ts          scoreCriticite, formats MAD/JH
+  lib/raid-labels.ts        labels criticité
+  lib/rapport-utils.ts      météo rapport PDF
+  components/kpi-cards.tsx  cartes home
+  components/dashboard-pmo.tsx / dashboard-ctp.tsx / dashboard-ctr.tsx
+  components/chantier-kpi-tab.tsx
+  components/jalons-global-timeline.tsx
+
+================================================================================
+Fin du document
+================================================================================

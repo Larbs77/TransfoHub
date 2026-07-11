@@ -55,3 +55,8 @@ prisma/*.db
 prisma/*.db-journal
 *.db
 *.db-journal
+
+# User-uploaded avatars (runtime) — keep folder structure
+/public/uploads/**
+!/public/uploads/avatars/
+!/public/uploads/avatars/.gitkeep

@@ -3,10 +3,12 @@ import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
+import { getRoleByCode, roleCanAccessPage } from "@/lib/roles";
 
 // ── Types ──────────────────────────────────────────────
 
-export type Role = "Admin" | "Programme_Office" | "PMO_Chantier" | "Workforce_Manager";
+/** Role code (dynamic — matches AppRole.code). */
+export type Role = string;
 
 export type DashboardType = "complete" | "limited";
 
@@ -113,33 +115,122 @@ export async function requireAuth(): Promise<SessionData> {
   return session as SessionData;
 }
 
+/**
+ * Maps legacy requireRole(...codes) call signatures to a page capability.
+ * Custom roles gain access when they have the corresponding page permission.
+ */
+function capabilityPageForRoles(allowedRoles: string[]): string | null {
+  const set = new Set(allowedRoles);
+  const has = (...codes: string[]) => codes.every((c) => set.has(c));
+
+  // Admin only
+  if (set.size === 1 && set.has("Admin")) return "/admin/users";
+
+  // Admin + Workforce only
+  if (has("Admin", "Workforce_Manager") && set.size === 2) return "/profils";
+
+  // Admin + Programme + Workforce (no PMO)
+  if (
+    has("Admin", "Programme_Office", "Workforce_Manager") &&
+    !set.has("PMO_Chantier")
+  ) {
+    return "/ressources";
+  }
+
+  // All standard operational roles
+  if (
+    has("Admin", "Programme_Office", "PMO_Chantier", "Workforce_Manager") ||
+    (has("Admin", "Programme_Office", "PMO_Chantier") && set.has("Workforce_Manager"))
+  ) {
+    return "/";
+  }
+
+  // Programme + PMO style (no workforce exclusive)
+  if (has("Admin", "Programme_Office", "PMO_Chantier")) return "/chantiers";
+
+  // Programme office + Admin
+  if (has("Admin", "Programme_Office") && set.size === 2) return "/dashboards";
+
+  // Fallback: first non-admin code or home
+  return "/";
+}
+
+/**
+ * Guard by role codes (backward compatible) OR by mapped page permission
+ * so custom dynamic roles work when granted the right pages.
+ */
 export async function requireRole(
-  ...allowedRoles: Role[]
+  ...allowedRoles: string[]
 ): Promise<SessionData> {
   const session = await requireAuth();
-  if (!allowedRoles.includes(session.role)) {
-    throw new Error("Accès non autorisé");
+
+  if (allowedRoles.includes(session.role)) {
+    return session;
   }
-  return session;
+
+  // Admin always allowed when Admin is among the accepted roles
+  if (session.role === "Admin" && allowedRoles.includes("Admin")) {
+    return session;
+  }
+
+  const page = capabilityPageForRoles(allowedRoles);
+  if (page) {
+    const role = await getRoleByCode(session.role);
+    if (roleCanAccessPage(role, page)) {
+      return session;
+    }
+  }
+
+  throw new Error("Accès non autorisé");
+}
+
+/** Guard by explicit page path(s) — preferred for new code. */
+export async function requirePageAccess(
+  ...paths: string[]
+): Promise<SessionData> {
+  const session = await requireAuth();
+  const role = await getRoleByCode(session.role);
+
+  for (const path of paths) {
+    if (roleCanAccessPage(role, path)) {
+      return session;
+    }
+  }
+
+  throw new Error("Accès non autorisé");
 }
 
 export async function requireChantierAccess(
   chantierId: string
 ): Promise<SessionData> {
   const session = await requireAuth();
+  const role = await getRoleByCode(session.role);
 
-  // Admin and Programme_Office have global access
-  if (session.role === "Admin" || session.role === "Programme_Office") {
+  if (!role || !role.is_active) {
+    throw new Error("Accès au chantier non autorisé");
+  }
+
+  if (role.chantier_scope === "all" || role.code === "Admin") {
     return session;
   }
 
-  // PMO_Chantier: check MembreEquipe link via ressourceId
-  if (session.role === "PMO_Chantier" && session.ressourceId) {
+  if (role.chantier_scope === "assigned" && session.ressourceId) {
     const membre = await prisma.membreEquipe.findFirst({
       where: {
         chantierId,
         ressourceId: session.ressourceId,
       },
+    });
+    if (membre) return session;
+  }
+
+  // Legacy fallback for known codes if role row missing scope
+  if (session.role === "Admin" || session.role === "Programme_Office") {
+    return session;
+  }
+  if (session.role === "PMO_Chantier" && session.ressourceId) {
+    const membre = await prisma.membreEquipe.findFirst({
+      where: { chantierId, ressourceId: session.ressourceId },
     });
     if (membre) return session;
   }
@@ -152,11 +243,19 @@ export async function requireChantierAccess(
 export async function getUserChantierIds(
   session: SessionData
 ): Promise<string[] | "all"> {
-  if (session.role === "Admin" || session.role === "Programme_Office") {
-    return "all";
-  }
+  const role = await getRoleByCode(session.role);
 
-  if (session.role === "PMO_Chantier" && session.ressourceId) {
+  const scope =
+    role?.chantier_scope ??
+    (session.role === "Admin" || session.role === "Programme_Office"
+      ? "all"
+      : session.role === "PMO_Chantier"
+        ? "assigned"
+        : "none");
+
+  if (scope === "all") return "all";
+
+  if (scope === "assigned" && session.ressourceId) {
     const membres = await prisma.membreEquipe.findMany({
       where: { ressourceId: session.ressourceId },
       select: { chantierId: true },
@@ -164,6 +263,5 @@ export async function getUserChantierIds(
     return membres.map((m) => m.chantierId);
   }
 
-  // Workforce_Manager: no chantier access by default
   return [];
 }

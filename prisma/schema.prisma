@@ -101,6 +101,12 @@ model User {
   id              String     @id @default(uuid())
   username        String     @unique
   password_hash   String
+  first_name      String     @default("")
+  last_name       String     @default("")
+  phone           String     @default("")
+  email           String     @default("")
+  /// Public path to avatar image, e.g. /uploads/avatars/{id}.webp — empty = letter fallback
+  avatar_url      String     @default("")
   role            String     @default("PMO_Chantier")
   must_change_pwd Boolean    @default(true)
   is_active       Boolean    @default(true)
@@ -113,6 +119,26 @@ model User {
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
   ressource       Ressource? @relation(fields: [ressourceId], references: [id])
+}
+
+/// Dynamic application role (permissions + data scope)
+model AppRole {
+  id             String   @id @default(uuid())
+  code           String   @unique
+  label          String
+  description    String   @default("")
+  color          String   @default("#6b7280")
+  is_active      Boolean  @default(true)
+  /// System roles (e.g. Admin) cannot be deleted; Admin cannot be disabled
+  is_system      Boolean  @default(false)
+  /// Chantier data scope: all | assigned | none
+  chantier_scope String   @default("none")
+  /// Allowed app page paths (JSON string array)
+  pages          Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([is_active])
 }
 
 model MembreEquipe {

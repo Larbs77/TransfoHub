@@ -27,6 +27,17 @@ export async function loginAction(
     return { error: "Identifiants invalides." };
   }
 
+  // Role must exist and be active
+  const appRole = await prisma.appRole.findUnique({
+    where: { code: user.role },
+  });
+  if (!appRole || !appRole.is_active) {
+    return {
+      error:
+        "Votre rôle est désactivé ou introuvable. Contactez un administrateur.",
+    };
+  }
+
   // Check lock
   if (user.locked_until && user.locked_until > new Date()) {
     const minutes = Math.ceil(
@@ -59,7 +70,7 @@ export async function loginAction(
   const session = await getSession();
   session.userId = user.id;
   session.username = user.username;
-  session.role = user.role as "Admin" | "Programme_Office" | "PMO_Chantier" | "Workforce_Manager";
+  session.role = user.role;
   session.mustChangePwd = user.must_change_pwd;
   session.ressourceId = user.ressourceId;
   session.dashboardType = (user.dashboard_type as "complete" | "limited") || "complete";
@@ -69,9 +80,21 @@ export async function loginAction(
     redirect("/change-password");
   }
 
-  // Role-based default landing page
-  const defaultLanding =
-    user.role === "Workforce_Manager" ? "/chantiers" : "/";
+  // Prefer home if allowed, else first granted page
+  let pages: string[] = [];
+  try {
+    pages = Array.isArray(appRole.pages)
+      ? (appRole.pages as string[])
+      : JSON.parse(String(appRole.pages));
+  } catch {
+    pages = [];
+  }
+  if (user.role === "Admin") {
+    pages = ["/", ...pages];
+  }
+  const defaultLanding = pages.includes("/")
+    ? "/"
+    : pages[0] || "/";
   redirect(rawRedirect || defaultLanding);
 }
 

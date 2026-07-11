@@ -29,6 +29,8 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { AlertBell } from "@/components/alert-bell";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { UserAvatar } from "@/components/user-avatar";
 import {
   Tooltip,
   TooltipContent,
@@ -36,7 +38,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useUser } from "@/components/user-provider";
-import { ROUTE_PERMISSIONS, ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
 import { logoutAction } from "@/app/(auth)/login/actions";
 
 interface NavItem {
@@ -89,10 +90,18 @@ const ALL_SECTIONS: NavSection[] = [
     icon: ShieldCheck,
     items: [
       { href: "/admin/users", label: "Utilisateurs", icon: Users },
+      { href: "/admin/roles", label: "Rôles", icon: ShieldCheck },
       { href: "/settings", label: "Paramètres", icon: Settings },
     ],
   },
 ];
+
+function canAccessPath(allowedPages: string[], href: string): boolean {
+  if (allowedPages.includes(href)) return true;
+  return allowedPages.some(
+    (p) => p !== "/" && (href === p || href.startsWith(p + "/"))
+  );
+}
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
@@ -195,18 +204,17 @@ export function NavBar({ children }: { children?: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const user = useUser();
 
-  // Filter sections and items by role
+  // Filter sections and items by dynamic role page permissions
   const sections = useMemo(() => {
     return ALL_SECTIONS
       .map((section) => ({
         ...section,
-        items: section.items.filter((item) => {
-          const allowed = ROUTE_PERMISSIONS[item.href];
-          return !allowed || allowed.includes(user.role);
-        }),
+        items: section.items.filter((item) =>
+          canAccessPath(user.allowedPages, item.href)
+        ),
       }))
       .filter((section) => section.items.length > 0);
-  }, [user.role]);
+  }, [user.allowedPages]);
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -336,54 +344,106 @@ export function NavBar({ children }: { children?: React.ReactNode }) {
           ))}
         </nav>
 
-        {/* Bottom: User menu + Alert + Collapse toggle */}
+        {/* Bottom: User menu + theme + Alert + Collapse toggle */}
         <div className="shrink-0 border-t">
-          {/* User info */}
+          {/* User info + logout — avatar/name open profile */}
           <div className={`${collapsed ? "px-2 py-3" : "px-3 py-3"}`}>
             {collapsed ? (
               <Tooltip delayDuration={0}>
                 <TooltipTrigger asChild>
-                  <div className="flex items-center justify-center">
-                    <div
-                      className="flex size-9 items-center justify-center rounded-full text-xs font-bold text-white"
-                      style={{ backgroundColor: ROLE_COLORS[user.role] }}
-                    >
-                      {user.username.charAt(0).toUpperCase()}
-                    </div>
-                  </div>
+                  <Link
+                    href="/profil"
+                    onClick={closeMobile}
+                    className={`flex items-center justify-center rounded-lg p-0.5 transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                      pathname === "/profil" || pathname.startsWith("/profil/")
+                        ? "ring-2 ring-primary ring-offset-2 ring-offset-background rounded-full"
+                        : ""
+                    }`}
+                    aria-label="Mon profil"
+                  >
+                    <UserAvatar
+                      name={user.displayName || user.username}
+                      color={user.roleColor}
+                      src={user.avatarUrl}
+                      version={user.avatarVersion}
+                      size="md"
+                    />
+                  </Link>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
-                  <div className="text-sm font-medium">{user.username}</div>
+                  <div className="text-sm font-medium">
+                    {user.displayName || user.username}
+                  </div>
                   <div className="text-xs text-muted-foreground">
-                    {ROLE_LABELS[user.role]}
+                    {user.roleLabel}
+                  </div>
+                  <div className="mt-1 text-[10px] text-muted-foreground">
+                    Voir mon profil
                   </div>
                 </TooltipContent>
               </Tooltip>
             ) : (
-              <div className="flex items-center gap-3">
-                <div
-                  className="flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                  style={{ backgroundColor: ROLE_COLORS[user.role] }}
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/profil"
+                  onClick={closeMobile}
+                  className={`flex min-w-0 flex-1 items-center gap-3 rounded-lg px-1 py-1 transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    pathname === "/profil" || pathname.startsWith("/profil/")
+                      ? "bg-accent/50"
+                      : ""
+                  }`}
+                  title="Mon profil"
                 >
-                  {user.username.charAt(0).toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">
-                    {user.username}
+                  <UserAvatar
+                    name={user.displayName || user.username}
+                    color={user.roleColor}
+                    src={user.avatarUrl}
+                    version={user.avatarVersion}
+                    size="md"
+                  />
+                  <div className="min-w-0 flex-1 text-left">
+                    <div className="truncate text-sm font-medium">
+                      {user.displayName || user.username}
+                    </div>
+                    <div
+                      className="truncate text-[11px] font-medium"
+                      style={{ color: user.roleColor }}
+                    >
+                      {user.roleLabel}
+                    </div>
                   </div>
-                  <div
-                    className="truncate text-[11px] font-medium"
-                    style={{ color: ROLE_COLORS[user.role] }}
-                  >
-                    {ROLE_LABELS[user.role]}
-                  </div>
-                </div>
+                </Link>
+                <form action={logoutAction} className="shrink-0">
+                  <Tooltip delayDuration={0}>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="submit"
+                        className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                      >
+                        <LogOut className="size-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" sideOffset={8}>
+                      Se déconnecter
+                    </TooltipContent>
+                  </Tooltip>
+                </form>
+              </div>
+            )}
+
+            {/* Theme toggle — directly under username / logout */}
+            <div className="mt-2">
+              <ThemeToggle collapsed={collapsed} />
+            </div>
+
+            {collapsed && (
+              <div className="mt-2">
                 <form action={logoutAction}>
                   <Tooltip delayDuration={0}>
                     <TooltipTrigger asChild>
                       <button
                         type="submit"
-                        className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                        className="flex w-full items-center justify-center rounded-lg p-2.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                       >
                         <LogOut className="size-4" />
                       </button>
@@ -408,23 +468,6 @@ export function NavBar({ children }: { children?: React.ReactNode }) {
             <div className="hidden lg:block">
               <AlertBell />
             </div>
-            {collapsed && (
-              <form action={logoutAction}>
-                <Tooltip delayDuration={0}>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="submit"
-                      className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
-                    >
-                      <LogOut className="size-4" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right" sideOffset={8}>
-                    Se déconnecter
-                  </TooltipContent>
-                </Tooltip>
-              </form>
-            )}
             <button
               onClick={() => setCollapsed((c) => !c)}
               className="hidden lg:flex items-center justify-center rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"

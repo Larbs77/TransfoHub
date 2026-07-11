@@ -1,37 +1,47 @@
-import type { Role } from "./auth";
-export type { Role };
+import type { RoleRecord } from "@/lib/roles";
+import { APP_PAGES } from "@/lib/app-pages";
 
-// Route-level access matrix
-export const ROUTE_PERMISSIONS: Record<string, Role[]> = {
-  "/": ["Admin", "Programme_Office", "PMO_Chantier", "Workforce_Manager"],
-  "/chantiers": ["Admin", "Programme_Office", "PMO_Chantier"],
-  "/adherences": ["Admin", "Programme_Office", "PMO_Chantier"],
-  "/raid": ["Admin", "Programme_Office", "PMO_Chantier"],
-  "/jalons": ["Admin", "Programme_Office", "PMO_Chantier"],
-  "/saisie-temps": ["Admin", "Programme_Office", "PMO_Chantier", "Workforce_Manager"],
-  "/consultation-backlog": ["Admin", "Programme_Office", "PMO_Chantier"],
-  "/favoris": ["Admin", "Programme_Office", "PMO_Chantier"],
-  "/comites": ["Admin", "Programme_Office", "PMO_Chantier"],
-  "/dashboards": ["Admin", "Programme_Office"],
-  "/rmds": ["Admin", "Programme_Office"],
-  "/calendrier": ["Admin", "Programme_Office", "PMO_Chantier", "Workforce_Manager"],
-  "/ressources": ["Admin", "Programme_Office", "Workforce_Manager"],
-  "/profils": ["Admin", "Workforce_Manager"],
-  "/capacite": ["Admin", "Programme_Office", "Workforce_Manager"],
-  "/settings": ["Admin"],
-  "/admin/users": ["Admin"],
-};
+/** Role code stored on User.role — free-form string (dynamic roles). */
+export type Role = string;
 
-export const ROLE_LABELS: Record<Role, string> = {
+/** Fallback labels when a role is missing from DB (legacy sessions). */
+export const LEGACY_ROLE_LABELS: Record<string, string> = {
   Admin: "Administrateur",
   Programme_Office: "Bureau Programme",
   PMO_Chantier: "PMO Chantier",
   Workforce_Manager: "Gestionnaire Ressources",
 };
 
-export const ROLE_COLORS: Record<Role, string> = {
+export const LEGACY_ROLE_COLORS: Record<string, string> = {
   Admin: "#dc2626",
   Programme_Office: "#2563eb",
   PMO_Chantier: "#059669",
   Workforce_Manager: "#7c3aed",
 };
+
+export function roleLabel(
+  code: string,
+  roles?: Pick<RoleRecord, "code" | "label">[]
+): string {
+  const fromDb = roles?.find((r) => r.code === code)?.label;
+  return fromDb ?? LEGACY_ROLE_LABELS[code] ?? code;
+}
+
+export function roleColor(
+  code: string,
+  roles?: Pick<RoleRecord, "code" | "color">[]
+): string {
+  const fromDb = roles?.find((r) => r.code === code)?.color;
+  return fromDb ?? LEGACY_ROLE_COLORS[code] ?? "#6b7280";
+}
+
+/** @deprecated Static matrix — kept for reference; runtime uses AppRole.pages */
+export const ROUTE_PERMISSIONS: Record<string, string[]> = Object.fromEntries(
+  APP_PAGES.map((p) => [p.path, [] as string[]])
+);
+
+/** @deprecated Use roleLabel() / roles from DB */
+export const ROLE_LABELS = LEGACY_ROLE_LABELS;
+
+/** @deprecated Use roleColor() / roles from DB */
+export const ROLE_COLORS = LEGACY_ROLE_COLORS;
