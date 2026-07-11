@@ -157,7 +157,7 @@ const VARIANT_HOVER: Record<
   string
 > = {
   default:
-    "group-hover:border-sky-400/55 dark:group-hover:border-sky-400/45",
+    "group-hover:border-[#00BDBB]/55 dark:group-hover:border-[#00BDBB]/40",
   destructive:
     "group-hover:border-destructive/55 dark:group-hover:border-destructive/45",
   warning:
@@ -188,7 +188,7 @@ function KpiCard({
         ? "text-amber-500"
         : variant === "success"
           ? "text-emerald-500"
-          : "text-sky-600 dark:text-sky-400";
+          : "text-[#0A3C74] dark:text-[#5ad4d2]";
   const hasColor = variant !== "default";
 
   return (
@@ -201,7 +201,7 @@ function KpiCard({
           "relative h-full cursor-pointer overflow-hidden",
           "border bg-card/95 backdrop-blur-[2px]",
           "shadow-sm transition-[box-shadow,border-color,background-color] duration-300 ease-out",
-          "group-hover:shadow-xl group-hover:shadow-slate-900/15",
+          "group-hover:shadow-xl group-hover:shadow-[#0A3C74]/12",
           "dark:group-hover:shadow-2xl dark:group-hover:shadow-black/50",
           VARIANT_HOVER[variant],
         ].join(" ")}
@@ -222,7 +222,7 @@ function KpiCard({
                 ? "bg-gradient-to-b from-amber-400/15 via-transparent to-transparent"
                 : variant === "success"
                   ? "bg-gradient-to-b from-emerald-400/15 via-transparent to-transparent"
-                  : "bg-gradient-to-b from-sky-400/15 via-transparent to-transparent",
+                  : "bg-gradient-to-b from-[#00BDBB]/18 via-transparent to-transparent",
           ].join(" ")}
         />
 

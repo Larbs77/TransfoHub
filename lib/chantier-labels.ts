@@ -80,6 +80,20 @@ export const PRIORITE_CHANTIER_COLORS: Record<string, string> = {
   "Pilotage Transformation": "#7c3aed",
 };
 
+/**
+ * Timeline Chantiers (Gantt) bar / group colors — Bank of Africa palette.
+ * Date ticks (Jan/Jul) and "Auj." markers stay separate in the chart components.
+ */
+export const TIMELINE_PRIORITE_COLORS: Record<string, string> = {
+  "Pilotage Transformation": "#0A3C74",
+  "Fondations techniques": "#0d4d8c",
+  "Briques transverses EI": "#1470b0",
+  "Briques Satellite EI": "#00BDBB",
+  "Dépendante de EI": "#00a8a6",
+  "Indépendante de EI": "#33c9c7",
+  Autre: "#6b8aab",
+};
+
 export const STATUT_CHANTIER_LABELS: Record<string, string> = {
   "Non démarré": "Non démarré",
   "Pré cadrage": "Pré cadrage",

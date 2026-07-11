@@ -234,8 +234,10 @@ export function NavBar({ children }: { children?: React.ReactNode }) {
           <Menu className="size-5" />
         </button>
         <Link href="/" className="flex items-center gap-2">
-          <FolderKanban className="size-5 text-primary" />
-          <span className="text-sm font-bold">PMO Transformation</span>
+          <span className="flex size-7 items-center justify-center rounded-md bg-primary">
+            <FolderKanban className="size-3.5 text-[#00BDBB]" />
+          </span>
+          <span className="text-sm font-bold text-primary">TransfoHub</span>
         </Link>
         <AlertBell />
       </header>
@@ -265,16 +267,25 @@ export function NavBar({ children }: { children?: React.ReactNode }) {
           }`}
         >
           {collapsed ? (
-            <Link href="/">
-              <FolderKanban className="size-6 text-primary" />
+            <Link
+              href="/"
+              className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm"
+              title="TransfoHub"
+            >
+              <FolderKanban className="size-4 text-[#00BDBB]" />
             </Link>
           ) : (
             <>
               <Link href="/" className="flex items-center gap-2.5">
-                <FolderKanban className="size-6 text-primary" />
+                <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+                  <FolderKanban className="size-4 text-[#00BDBB]" />
+                </span>
                 <div className="leading-tight">
-                  <span className="text-sm font-bold tracking-tight">
-                    PMO Transformation
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#00BDBB]">
+                    Bank of Africa
+                  </span>
+                  <span className="block text-sm font-bold tracking-tight text-primary">
+                    TransfoHub
                   </span>
                 </div>
               </Link>

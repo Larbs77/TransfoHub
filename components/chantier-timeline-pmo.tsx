@@ -3,9 +3,7 @@
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import {
-  PRIORITE_CHANTIER_COLORS,
-} from "@/lib/chantier-labels";
+import { TIMELINE_PRIORITE_COLORS } from "@/lib/chantier-labels";
 
 interface TimelineItemPMO {
   id: string;
@@ -159,7 +157,9 @@ export function ChantierTimelinePMO({ chantierTimeline }: { chantierTimeline: Ti
 
       {/* Groups */}
       {groups.map((group) => {
-        const color = PRIORITE_CHANTIER_COLORS[group.priorite] ?? "#6b7280";
+        const color =
+          TIMELINE_PRIORITE_COLORS[group.priorite] ??
+          TIMELINE_PRIORITE_COLORS.Autre;
         const label = PRIORITE_SHORT_LABELS[group.priorite] ?? group.priorite;
 
         return (

@@ -48,38 +48,50 @@
 }
 
 :root {
+  /* Bank of Africa brand — light mode (class, sober, white-forward) */
+  --boa-navy: #0a3c74;
+  --boa-teal: #00bdbb;
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+
+  /* Surfaces: lots of white, cool soft wash */
+  --background: #f5f9fb;
+  --foreground: #0a3c74;
+  --card: #ffffff;
+  --card-foreground: #0a3c74;
+  --popover: #ffffff;
+  --popover-foreground: #0a3c74;
+
+  /* Actions: navy primary, teal focus */
+  --primary: #0a3c74;
+  --primary-foreground: #ffffff;
+  --secondary: #e8f7f7;
+  --secondary-foreground: #0a3c74;
+  --muted: #eef3f7;
+  --muted-foreground: #4d6780;
+  --accent: #e6f9f8;
+  --accent-foreground: #0a3c74;
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+
+  --border: color-mix(in srgb, #0a3c74 11%, #ffffff);
+  --input: color-mix(in srgb, #0a3c74 14%, #ffffff);
+  --ring: #00bdbb;
+
+  /* Charts aligned with navy / teal / sober companions */
+  --chart-1: #0a3c74;
+  --chart-2: #00bdbb;
+  --chart-3: #1a6bb5;
+  --chart-4: #5ad4d2;
+  --chart-5: #6b8aab;
+
+  /* Sidebar: white panel, navy text, teal accents */
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0a3c74;
+  --sidebar-primary: #0a3c74;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e6f9f8;
+  --sidebar-accent-foreground: #0a3c74;
+  --sidebar-border: color-mix(in srgb, #0a3c74 10%, #ffffff);
+  --sidebar-ring: #00bdbb;
 }
 
 .dark {
@@ -119,11 +131,187 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    @apply border-border outline-ring/50;
   }
   body {
     @apply bg-background text-foreground;
-    @apply bg-background text-foreground;
+  }
+
+  /* Light mode app shell: soft white + BOA wash (matches login feeling) */
+  html:not(.dark) body {
+    background-color: var(--background);
+    background-image:
+      radial-gradient(
+        ellipse 90% 55% at 0% -10%,
+        color-mix(in srgb, var(--boa-teal) 12%, transparent) 0%,
+        transparent 55%
+      ),
+      radial-gradient(
+        ellipse 70% 45% at 100% 0%,
+        color-mix(in srgb, var(--boa-navy) 7%, transparent) 0%,
+        transparent 50%
+      ),
+      radial-gradient(
+        ellipse 50% 40% at 100% 100%,
+        color-mix(in srgb, var(--boa-teal) 6%, transparent) 0%,
+        transparent 45%
+      ),
+      linear-gradient(180deg, #ffffff 0%, var(--background) 40%, #f3f7fa 100%);
+    background-attachment: fixed;
+  }
+
+  /* Subtle card lift in light mode — sober banking UI */
+  html:not(.dark) [data-slot="card"] {
+    box-shadow:
+      0 1px 2px color-mix(in srgb, var(--boa-navy) 4%, transparent),
+      0 8px 24px -12px color-mix(in srgb, var(--boa-navy) 10%, transparent);
+    border-color: color-mix(in srgb, var(--boa-navy) 10%, white);
+  }
+}
+
+/* ── Auth / login: Bank of Africa brand shell ─────────
+   Palette: #0A3C74 (navy), #00BDBB (teal), white
+───────────────────────────────────────────────────── */
+.auth-shell {
+  --boa-navy: #0a3c74;
+  --boa-teal: #00bdbb;
+  background: #ffffff;
+}
+
+.auth-shell-bg {
+  background:
+    radial-gradient(ellipse 80% 60% at 10% 0%, color-mix(in srgb, var(--boa-teal) 14%, white) 0%, transparent 55%),
+    radial-gradient(ellipse 70% 50% at 100% 100%, color-mix(in srgb, var(--boa-navy) 10%, white) 0%, transparent 50%),
+    radial-gradient(ellipse 50% 40% at 80% 10%, color-mix(in srgb, var(--boa-teal) 8%, white) 0%, transparent 45%),
+    linear-gradient(165deg, #ffffff 0%, #f7fbfc 45%, #f3f7fb 100%);
+}
+
+.auth-grid {
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--boa-navy) 5%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--boa-navy) 5%, transparent) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 75% 70% at 50% 45%, black 20%, transparent 75%);
+  animation: auth-grid-drift 28s linear infinite;
+  opacity: 0.85;
+}
+
+.auth-orb {
+  border-radius: 9999px;
+  filter: blur(48px);
+  opacity: 0.45;
+  animation: auth-orb-float 18s ease-in-out infinite;
+}
+
+.auth-orb-a {
+  width: min(42vw, 420px);
+  height: min(42vw, 420px);
+  top: -8%;
+  right: -6%;
+  background: color-mix(in srgb, var(--boa-teal) 35%, transparent);
+  animation-duration: 20s;
+}
+
+.auth-orb-b {
+  width: min(36vw, 360px);
+  height: min(36vw, 360px);
+  bottom: -10%;
+  left: -8%;
+  background: color-mix(in srgb, var(--boa-navy) 28%, transparent);
+  animation-duration: 24s;
+  animation-delay: -6s;
+}
+
+.auth-orb-c {
+  width: min(28vw, 280px);
+  height: min(28vw, 280px);
+  top: 42%;
+  left: 48%;
+  background: color-mix(in srgb, var(--boa-teal) 22%, transparent);
+  animation-duration: 16s;
+  animation-delay: -3s;
+}
+
+.auth-network {
+  opacity: 0.9;
+}
+
+.auth-network-lines path {
+  stroke-dasharray: 8 14;
+  animation: auth-line-flow 12s linear infinite;
+}
+
+.auth-network-lines path:nth-child(2) {
+  animation-duration: 16s;
+  animation-direction: reverse;
+}
+
+.auth-network-lines path:nth-child(3) {
+  animation-duration: 14s;
+}
+
+.auth-node {
+  fill: var(--boa-teal);
+  opacity: 0.55;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: auth-node-pulse 3.6s ease-in-out infinite;
+}
+
+.auth-node-delay {
+  animation-delay: 1.2s;
+  fill: var(--boa-navy);
+  opacity: 0.4;
+}
+
+@keyframes auth-grid-drift {
+  0% {
+    background-position: 0 0, 0 0;
+  }
+  100% {
+    background-position: 48px 48px, 48px 48px;
+  }
+}
+
+@keyframes auth-orb-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  33% {
+    transform: translate3d(2%, -3%, 0) scale(1.05);
+  }
+  66% {
+    transform: translate3d(-3%, 2%, 0) scale(0.96);
+  }
+}
+
+@keyframes auth-line-flow {
+  0% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -120;
+  }
+}
+
+@keyframes auth-node-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.35);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-grid,
+  .auth-orb,
+  .auth-network-lines path,
+  .auth-node {
+    animation: none !important;
   }
 }
 

@@ -29,6 +29,7 @@ import {
   STATUT_CHANTIER_COLORS,
   PRIORITE_CHANTIER_COLORS,
   PRIORITE_CHANTIER_LABELS,
+  TIMELINE_PRIORITE_COLORS,
 } from "@/lib/chantier-labels";
 import {
   STATUT_ACTION_COLORS,
@@ -454,7 +455,9 @@ export function ChantierTimelineChart({ chantierTimeline }: TimelineChartProps) 
 
       {/* Groups */}
       {groups.map((group) => {
-        const color = PRIORITE_CHANTIER_COLORS[group.priorite] ?? "#6b7280";
+        const color =
+          TIMELINE_PRIORITE_COLORS[group.priorite] ??
+          TIMELINE_PRIORITE_COLORS.Autre;
         const label = PRIORITE_SHORT_LABELS[group.priorite] ?? group.priorite;
 
         return (
