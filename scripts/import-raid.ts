@@ -1,12 +1,8 @@
-import { PrismaClient } from "../generated/prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { createPrismaClient } from "../lib/create-prisma";
 import * as XLSX from "xlsx";
 import * as path from "path";
 
-const adapter = new PrismaBetterSqlite3({
-  url: process.env.DATABASE_URL || "file:./dev.db",
-});
-const prisma = new PrismaClient({ adapter });
+const prisma = createPrismaClient();
 
 function parseExcelDate(val: any): Date | null {
   if (!val) return null;

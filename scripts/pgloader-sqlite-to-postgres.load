@@ -1,0 +1,21 @@
+-- One-shot historical migration helper (pgloader).
+-- The application uses PostgreSQL only; this file is NOT used at runtime.
+--
+-- Example (after installing pgloader):
+--   pgloader scripts/pgloader-sqlite-to-postgres.load
+--
+-- Adjust FROM / INTO paths for your environment before running.
+
+LOAD DATABASE
+    FROM sqlite://./dev.db
+    INTO postgresql://postgres@localhost:5432/transfodb
+
+WITH
+    data only,
+    batch rows = 500,
+    prefetch rows = 1000,
+    reset sequences
+
+SET
+    work_mem to '128MB',
+    maintenance_work_mem to '512MB';

@@ -1,17 +1,15 @@
-import { PrismaClient } from "../generated/prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { createPrismaClient } from "../lib/create-prisma";
+import bcrypt from "bcryptjs";
 import * as XLSX from "xlsx";
 import * as path from "path";
 
-const adapter = new PrismaBetterSqlite3({
-  url: process.env.DATABASE_URL || "file:./dev.db",
-});
-const prisma = new PrismaClient({ adapter });
+const prisma = createPrismaClient();
 
 async function main() {
   // Nettoyage (order matters for FK constraints)
   await prisma.jalonTemplate.deleteMany();
   await prisma.consultationQuestion.deleteMany();
+  await prisma.favoriChantier.deleteMany();
   await prisma.adherence.deleteMany();
   await prisma.jalon.deleteMany();
   await prisma.saisieTemps.deleteMany();
@@ -19,7 +17,10 @@ async function main() {
   await prisma.chantierRmd.deleteMany();
   await prisma.raid.deleteMany();
   await prisma.chantier.deleteMany();
+  await prisma.comite.deleteMany();
   await prisma.rmd.deleteMany();
+  // Detach users from resources before wiping the resource catalog
+  await prisma.user.updateMany({ data: { ressourceId: null } });
   await prisma.ressource.deleteMany();
   await prisma.profilRessource.deleteMany();
   await prisma.statusConfig.deleteMany();
@@ -757,7 +758,30 @@ async function main() {
     totalQuestions++;
   }
 
-  console.log(`Seed terminé : ${profilsData.length} profils, 46 chantiers, 8 RMDs, ${createdMembres.length} membres équipe, ${ressourcesData.length} ressources, ${membresWithRessource.length * 10} saisies temps, ${totalJalons} jalons, ${totalRaid} RAID, ${totalAdherences} adhérences, ${totalQuestions} questions consultation insérés.`);
+  // Default admin (idempotent). Override password with SEED_ADMIN_PASSWORD.
+  const adminPassword =
+    process.env.SEED_ADMIN_PASSWORD ?? "ChangeMe1!";
+  const password_hash = await bcrypt.hash(adminPassword, 12);
+  await prisma.user.upsert({
+    where: { username: "admin" },
+    update: {
+      role: "Admin",
+      is_active: true,
+      // Do not overwrite an existing password on reseed
+    },
+    create: {
+      username: "admin",
+      password_hash,
+      role: "Admin",
+      must_change_pwd: true,
+      is_active: true,
+      dashboard_type: "complete",
+    },
+  });
+
+  console.log(
+    `Seed terminé : ${profilsData.length} profils, 46 chantiers, 8 RMDs, ${createdMembres.length} membres équipe, ${ressourcesData.length} ressources, ${membresWithRessource.length * 10} saisies temps, ${totalJalons} jalons, ${totalRaid} RAID, ${totalAdherences} adhérences, ${totalQuestions} questions consultation, admin user ready.`
+  );
 }
 
 main()

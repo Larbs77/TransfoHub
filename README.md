@@ -1,36 +1,94 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# TransfoHub — PMO Transformation Bancaire
 
-## Getting Started
+Application PMO (Next.js) pour le pilotage de la transformation bancaire : chantiers, RAID, jalons, adhérences, ressources, comités et dashboards.
 
-First, run the development server:
+## Stack
+
+- **Next.js 16** (App Router) + React 19 + TypeScript
+- **PostgreSQL** via Prisma 7 (`@prisma/adapter-pg`)
+- Auth : iron-session + bcryptjs
+- UI : Tailwind 4, shadcn/Radix, Recharts
+
+## Prérequis
+
+- Node.js 20+
+- PostgreSQL 14+ (base vide ou existante `transfodb`)
+
+## Configuration
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env
+# Éditer .env : DATABASE_URL + SESSION_SECRET (32+ caractères)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+| Variable | Rôle |
+|----------|------|
+| `DATABASE_URL` | Connexion PostgreSQL (obligatoire) |
+| `SESSION_SECRET` | Secret session iron-session (obligatoire) |
+| `GROQ_API_KEY` | Chat IA admin (optionnel) |
+| `SEED_ADMIN_PASSWORD` | Mot de passe initial `admin` au seed (optionnel) |
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Base de données
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+# Appliquer les migrations (CI / recette / prod)
+npm run db:migrate
 
-## Learn More
+# Environnement de dev (crée migrations si besoin)
+npm run db:migrate:dev
 
-To learn more about Next.js, take a look at the following resources:
+# Données de démo (réécrit le domaine métier ; upsert admin)
+npm run db:seed
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+# Statut migrations
+npm run db:status
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+# Prisma Studio
+npm run db:studio
+```
 
-## Deploy on Vercel
+Migration unique de baseline : `prisma/migrations/20260710172723_init_postgres`.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+> SQLite n’est plus supporté. Les anciens fichiers `*.db` locaux sont ignorés par git.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Première installation
+
+```bash
+npm install
+cp .env.example .env
+# Créer la base PostgreSQL, puis :
+npm run db:migrate
+npm run db:seed
+npm run dev
+```
+
+Compte seed par défaut : **admin** / `SEED_ADMIN_PASSWORD` ou `ChangeMe1!` (changement de mot de passe forcé à la première connexion si créé par le seed).
+
+Réinitialiser le mot de passe admin :
+
+```bash
+npx tsx scripts/update-password.ts "VotreMotDePasse1!"
+```
+
+## Développement
+
+```bash
+npm run dev    # http://localhost:3000
+npm run build
+npm run lint
+```
+
+## Scripts utilitaires
+
+| Script | Description |
+|--------|-------------|
+| `scripts/update-password.ts` | Reset mot de passe admin (Postgres) |
+| `scripts/import-raid.ts` | Import RAID depuis `Data/RAID.xlsx` |
+| `prisma/seed-raid.ts` | Seed RAID de démo |
+| `scripts/pgloader-sqlite-to-postgres.load` | Recette **historique** pgloader SQLite→Postgres (hors runtime) |
+
+## Rôles
+
+`Admin` · `Programme_Office` · `PMO_Chantier` · `Workforce_Manager`
+
+Voir `lib/permissions.ts` pour la matrice des routes.
