@@ -150,4 +150,4 @@ Branch `Style-Review`, tag `v0.3.0`, commit message documents:
 - Do not commit `.env`, `*.db`, uploaded avatars under `public/uploads/**` (except `.gitkeep`).
 - Never reintroduce `better-sqlite3` / SQLite adapters.
 - After Prisma schema change: migrate + generate + **bump `PRISMA_MODEL_STAMP`**.
-- Project memory for multi-session continuity: see `.grok/MEMORY.md` and enable Grok memory (`[memory] enabled = true` or `/memory on`).
+- Project memory for multi-session continuity: see `.grok/MEMORY.md` and `.grok/config.toml` (`[memory] enabled = true`). User must also enable memory in `~/.grok/config.toml` and/or set `GROK_MEMORY=1` (project config does not fully override user memory settings). Mid-session: `/memory on`.

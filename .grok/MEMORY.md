@@ -2,6 +2,8 @@
 
 Last updated: 2026-07-11 (session Style-Review / v0.3.0)
 
+**Last flush:** 2026-07-11 — full session summary in `~/.grok/memory/**/sessions/2026-07-11-flush.md`.
+
 This file is for **agents and humans** working on TransfoHub. Grok project rules also live in `AGENTS.md` (always loaded when the project is trusted). Prefer keeping durable facts here and in `AGENTS.md`; use Grok `/remember` or `~/.grok/memory/` when experimental memory is enabled.
 
 ---
@@ -62,7 +64,7 @@ This file is for **agents and humans** working on TransfoHub. Grok project rules
 2. **Branch name:** user asked for `Style Review` → git branch is **`Style-Review`** (no spaces).  
 3. **Do not reseed production data lightly:** `npm run db:seed` wipes domain tables.  
 4. **Avatar files:** never commit user JPGs under `public/uploads/`.  
-5. **Memory:** Grok memory is experimental; enable with `GROK_MEMORY=1` or `[memory] enabled = true` in `~/.grok/config.toml`, then `/memory on` in session.
+5. **Memory:** Expected **on** for this project. User: `~/.grok/config.toml` → `[memory] enabled = true` and/or user env `GROK_MEMORY=1`. Repo documents intent in `.grok/config.toml`. Mid-session toggle: `/memory on` (session-only). Full commands (`/flush`, `/dream`, `/memory`) need experimental memory (`GROK_MEMORY=1` or `--experimental-memory`).
 
 ---
 
@@ -71,7 +73,7 @@ This file is for **agents and humans** working on TransfoHub. Grok project rules
 - Push `Style-Review` + tag `v0.3.0` to origin if not already.  
 - Merge Style-Review into main when ready for recette.  
 - Optional: map more `requireRole` call sites purely to `requirePageAccess`.  
-- Optional: admin ability to clear another user’s avatar.  
+- Optional: admin ability to clear another user's avatar.  
 - Optional: cookie-based theme for zero FOUC without scripts.  
 - Deploy/recette checklist against Postgres env.
 
@@ -89,3 +91,4 @@ This file is for **agents and humans** working on TransfoHub. Grok project rules
 | Avatar IO | `lib/avatar.ts`, `components/user-avatar.tsx`, `components/avatar-crop-dialog.tsx` |
 | KPI docs | `KPIS.txt` |
 | Agent rules | `AGENTS.md` |
+| Grok memory config | `.grok/config.toml` |

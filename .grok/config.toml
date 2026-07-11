@@ -1,0 +1,14 @@
+# Project-scoped Grok config for TransfoHub.
+# Note: [memory] is primarily loaded from ~/.grok/config.toml (user-level).
+# Keep this file so the repo documents the intended memory settings for agents
+# working in this project. Also set GROK_MEMORY=1 (or [memory] enabled = true
+# in your personal ~/.grok/config.toml).
+
+[memory]
+enabled = true
+
+[memory.session]
+save_on_end = true
+
+[memory.initial_injection]
+enabled = true
