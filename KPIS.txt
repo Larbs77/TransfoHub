@@ -78,7 +78,7 @@ Légende
    Source : getDashboardStats() + components/kpi-cards.tsx
 ================================================================================
 
-Chantiers Actifs
+Lancés / total (ex. Chantiers Actifs)
   Affichage : N / T
   N = COUNT chantiers où statut ≠ "Non démarré"
   T = COUNT total des chantiers

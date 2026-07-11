@@ -54,9 +54,9 @@ export function KpiCards({ stats }: { stats: Stats }) {
     <section className="grid grid-cols-2 gap-4 overflow-visible py-2 sm:grid-cols-3 lg:grid-cols-6">
       <KpiCard
         icon={FolderKanban}
-        label="Chantiers Actifs"
+        label="Lancés / total"
         value={`${stats.activeChantiers}/${stats.totalChantiers}`}
-        subtitle="lancé / total"
+        subtitle="Chantiers démarrés"
         href="/chantiers"
       />
       <KpiCard
@@ -226,11 +226,11 @@ function KpiCard({
           ].join(" ")}
         />
 
-        <CardHeader className="relative z-10 pb-2">
-          <CardDescription className="flex items-center gap-2">
+        <CardHeader className="relative z-10 space-y-0 px-4 pb-2 sm:px-5">
+          <CardDescription className="flex items-center gap-2.5">
             <span
               className={[
-                "flex size-8 shrink-0 items-center justify-center rounded-lg border shadow-sm",
+                "flex size-7 shrink-0 items-center justify-center rounded-lg border shadow-sm",
                 "bg-background transition-transform duration-300 ease-out",
                 "group-hover:scale-110 group-hover:shadow-md",
                 hasColor ? "border-current/15" : "border-border",
@@ -238,10 +238,12 @@ function KpiCard({
             >
               <Icon className={`size-3.5 ${colorClass}`} />
             </span>
-            <span className="truncate font-medium">{label}</span>
+            <span className="min-w-0 flex-1 text-sm font-bold leading-snug tracking-tight text-balance text-foreground/80 sm:text-[15px]">
+              {label}
+            </span>
           </CardDescription>
         </CardHeader>
-        <CardContent className="relative z-10 text-center">
+        <CardContent className="relative z-10 px-4 text-center sm:px-5">
           <div
             className={[
               "text-2xl font-bold tracking-tight whitespace-nowrap",
@@ -251,7 +253,7 @@ function KpiCard({
           >
             {value}
           </div>
-          <p className="mt-0.5 text-xs text-muted-foreground transition-colors duration-300 group-hover:text-foreground/75">
+          <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground transition-colors duration-300 group-hover:text-foreground/75 sm:text-xs">
             {subtitle}
           </p>
         </CardContent>

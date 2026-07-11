@@ -339,6 +339,27 @@ const PRIORITE_SHORT_LABELS: Record<string, string> = {
   "Indépendante de EI": "Indépendantes de EI",
 };
 
+/** January = cool sky; July = warm amber */
+function timelineMonthLabelClass(month: number): string {
+  if (month === 0) {
+    return "font-semibold text-sky-600 dark:text-sky-400";
+  }
+  if (month === 6) {
+    return "font-semibold text-amber-600 dark:text-amber-400";
+  }
+  return "text-muted-foreground";
+}
+
+function timelineMonthLineClass(month: number): string {
+  if (month === 0) {
+    return "border-l border-sky-400/45 dark:border-sky-400/35";
+  }
+  if (month === 6) {
+    return "border-l border-amber-400/50 dark:border-amber-400/40";
+  }
+  return "border-l border-muted/30";
+}
+
 export function ChantierTimelineChart({ chantierTimeline }: TimelineChartProps) {
   const router = useRouter();
 
@@ -352,17 +373,24 @@ export function ChantierTimelineChart({ chantierTimeline }: TimelineChartProps) 
   const maxDate = Math.max(...allDates);
   const range = maxDate - minDate || 1;
 
-  // Build month ticks
-  const months: { label: string; pos: number }[] = [];
+  // Build month ticks (every 6 months — typically Jan / Jul)
+  const months: { label: string; pos: number; month: number }[] = [];
   const d = new Date(minDate);
   d.setDate(1);
   while (d.getTime() <= maxDate) {
     months.push({
       label: format(d, "MMM yy", { locale: fr }),
       pos: ((d.getTime() - minDate) / range) * 100,
+      month: d.getMonth(),
     });
     d.setMonth(d.getMonth() + 6);
   }
+
+  const nowTs = Date.now();
+  const todayPos =
+    nowTs >= minDate && nowTs <= maxDate
+      ? ((nowTs - minDate) / range) * 100
+      : null;
 
   // Group by priorité
   const groups: { priorite: string; items: TimelineItem[] }[] = [];
@@ -381,19 +409,46 @@ export function ChantierTimelineChart({ chantierTimeline }: TimelineChartProps) 
 
   return (
     <div className="overflow-x-auto">
-      {/* Month headers */}
-      <div className="flex items-center border-b pb-1 mb-1">
+      {/* Month color legend */}
+      <div className="mb-2 flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="size-2 rounded-full bg-sky-500" />
+          <span className="font-medium text-sky-600 dark:text-sky-400">Janvier</span>
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="size-2 rounded-full bg-amber-500" />
+          <span className="font-medium text-amber-600 dark:text-amber-400">Juillet</span>
+        </span>
+        {todayPos != null && (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-3 w-px rounded-full bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.7)]" />
+            <span className="font-semibold text-rose-600 dark:text-rose-400">Auj.</span>
+          </span>
+        )}
+      </div>
+
+      {/* Month headers — dates on top, "Auj." tight below */}
+      <div className="mb-0.5 flex items-end border-b pb-0.5">
         <div className="w-44 shrink-0" />
-        <div className="relative flex-1 h-5">
+        <div className="relative h-[22px] flex-1">
           {months.map((m, i) => (
             <span
               key={i}
-              className="absolute text-[10px] text-muted-foreground -translate-x-1/2"
+              className={`absolute top-0 -translate-x-1/2 text-[10px] capitalize leading-none ${timelineMonthLabelClass(m.month)}`}
               style={{ left: `${m.pos}%` }}
             >
               {m.label}
             </span>
           ))}
+          {todayPos != null && (
+            <span
+              className="absolute top-[12px] z-10 -translate-x-1/2 text-[8px] font-semibold leading-none text-rose-600 dark:text-rose-400"
+              style={{ left: `${todayPos}%` }}
+              title={format(new Date(nowTs), "dd MMMM yyyy", { locale: fr })}
+            >
+              Auj.
+            </span>
+          )}
         </div>
       </div>
 
@@ -406,11 +461,11 @@ export function ChantierTimelineChart({ chantierTimeline }: TimelineChartProps) 
           <div key={group.priorite} className="flex">
             {/* Priority label block */}
             <div
-              className="w-44 shrink-0 flex items-center justify-center border-r px-2 py-1"
+              className="flex w-44 shrink-0 items-center justify-center border-r px-2 py-1"
               style={{ backgroundColor: color + "18" }}
             >
               <span
-                className="text-[11px] font-semibold leading-tight text-center"
+                className="text-center text-[11px] font-semibold leading-tight"
                 style={{ color }}
               >
                 {label}
@@ -418,7 +473,7 @@ export function ChantierTimelineChart({ chantierTimeline }: TimelineChartProps) 
             </div>
 
             {/* Chantier rows */}
-            <div className="flex-1 min-w-0">
+            <div className="min-w-0 flex-1">
               {group.items.map((c) => {
                 const start = new Date(c.date_debut).getTime();
                 const end = new Date(c.date_fin).getTime();
@@ -426,18 +481,29 @@ export function ChantierTimelineChart({ chantierTimeline }: TimelineChartProps) 
                 const width = Math.max(((end - start) / range) * 100, 1);
 
                 return (
-                  <div key={c.code} className="relative h-7 border-b border-muted/30 last:border-b-0 bg-muted/20">
+                  <div
+                    key={c.code}
+                    className="relative h-7 border-b border-muted/30 bg-muted/20 last:border-b-0"
+                  >
                     {/* Vertical month grid lines */}
                     {months.map((m, i) => (
                       <div
                         key={i}
-                        className="absolute top-0 bottom-0 border-l border-muted/30"
+                        className={`absolute top-0 bottom-0 ${timelineMonthLineClass(m.month)}`}
                         style={{ left: `${m.pos}%` }}
                       />
                     ))}
+                    {/* Today marker */}
+                    {todayPos != null && (
+                      <div
+                        className="pointer-events-none absolute top-0 bottom-0 z-[5] w-px bg-gradient-to-b from-rose-500 via-rose-500 to-rose-400/80 shadow-[0_0_6px_rgba(244,63,94,0.55)]"
+                        style={{ left: `${todayPos}%` }}
+                        title="Aujourd'hui"
+                      />
+                    )}
                     {/* Bar */}
                     <div
-                      className="absolute top-1 bottom-1 rounded flex items-center overflow-hidden cursor-pointer transition-opacity hover:opacity-85 hover:ring-2 hover:ring-ring hover:ring-offset-1 ring-offset-background"
+                      className="absolute top-1 bottom-1 z-[1] flex cursor-pointer items-center overflow-hidden rounded transition-opacity hover:opacity-85 hover:ring-2 hover:ring-ring hover:ring-offset-1 ring-offset-background"
                       style={{
                         left: `${left}%`,
                         width: `${width}%`,
@@ -446,7 +512,7 @@ export function ChantierTimelineChart({ chantierTimeline }: TimelineChartProps) 
                       title={`${c.code} - ${c.nom}\n${format(new Date(c.date_debut), "dd/MM/yyyy", { locale: fr })} → ${format(new Date(c.date_fin), "dd/MM/yyyy", { locale: fr })}\nCliquez pour ouvrir`}
                       onClick={() => router.push(`/chantiers/${c.id}`)}
                     >
-                      <span className="truncate px-1.5 text-[10px] font-medium text-white whitespace-nowrap">
+                      <span className="truncate whitespace-nowrap px-1.5 text-[10px] font-medium text-white">
                         {c.code} {c.nom}
                       </span>
                     </div>
