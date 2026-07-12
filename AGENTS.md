@@ -51,9 +51,10 @@ npx tsc --noEmit
 | Shared factory | `lib/create-prisma.ts` (app + seeds/scripts) |
 | App singleton | `lib/prisma.ts` — Proxy + `PRISMA_MODEL_STAMP`; **bump stamp after schema changes** so HMR drops stale clients |
 | Baseline | `prisma/migrations/20260710172723_init_postgres` |
-| Later migrations | `…_add_app_roles`, `…_add_user_profile_fields`, `…_add_user_avatar`, `…_add_user_theme_preference` |
+| Later migrations | `…_add_app_roles` (seeds 4 roles), `…_add_user_profile_fields`, `…_add_user_avatar`, `…_add_user_theme_preference`, `…_add_mail_server_config` |
 | Seed | `prisma/seed.ts` (Postgres; default roles + domain data; upserts `admin`) |
 | SQLite import (historical) | `scripts/pgloader-sqlite-to-postgres.load` |
+| Stamp (v0.4.0) | `PRISMA_MODEL_STAMP` includes mail-server model checks — **bump on every schema change** |
 
 After schema edits: new migration → `db:generate` → **bump `PRISMA_MODEL_STAMP` in `lib/prisma.ts`** → restart dev if select fields still unknown.
 
@@ -67,10 +68,12 @@ After schema edits: new migration → `db:generate` → **bump `PRISMA_MODEL_STA
 | `app/(app)/admin/roles/` | Dynamic role management |
 | `app/(app)/admin/messagerie/` | SMTP server config (**Admin only**) — Technique menu |
 | `app/(app)/admin/donnees/` | CSV import / purge for métier tables (**Admin only**) — Technique menu |
+| `app/(maintenance)/` | File-based **system** user only — `/maintenance/db` critical DB console (no app nav) |
 | `app/(app)/profil/` | Self-service profile (any authenticated user) |
 | `app/(print)/` | Printable reports |
 | `components/` | Feature UI + `ui/` primitives |
-| `lib/` | auth, roles, pages catalog, prisma, labels, avatar helpers |
+| `lib/` | auth, roles, pages catalog, prisma, mail, csv/db maintenance helpers |
+| `config/` | `maintenance-user.example.json` (real `maintenance-user.json` **gitignored**) |
 | `prisma/` | schema, migrations, seeds |
 | `Data/` | Source Excel/PPT for imports (not runtime) |
 | `KPIS.txt` | Full KPI catalogue and formulas |
@@ -152,35 +155,53 @@ Seeded system roles (labels): Administrateur, Bureau Programme, PMO Chantier, Ge
 - **Timeline Chantiers:** BOA bar colors (`TIMELINE_PRIORITE_COLORS`); Jan = sky, Jul = amber; today line + small **Auj.** under dates.
 - Full formulas: **`KPIS.txt`**.
 
-## DB maintenance user (file-based · not in DB)
+## DB maintenance user (file-based · not in DB) · v0.4.0
 
-- **Credentials file:** `config/maintenance-user.json` (gitignored). Copy from `config/maintenance-user.example.json`.
-- **Default (dev):** username `system` / password `123.Pol*` — change in production.
-- **Login:** if username matches the file, password is checked against the file; otherwise normal DB auth.
-- **Session:** `isMaintenance: true`, role `__MAINTENANCE__`, userId `__maintenance__`.
-- **Console:** `/maintenance/db` only — red critical banner; no app nav. App layout redirects maintenance sessions there.
-- **Exports:** JSON dump (`.thdump.json`), SQL INSERTs, ZIP of CSVs (all tables, pipe `|` separator).
-- **Import modes:** `truncate` (data only, no DDL in SQL) or `drop` (DROP SCHEMA + `prisma migrate deploy` + load).
-- **Lib:** `lib/maintenance-auth.ts`, `lib/db-maintenance.ts`.
+- **Credentials file:** `config/maintenance-user.json` (**gitignored**). Copy from `config/maintenance-user.example.json`.
+- **Default (dev):** username `system` / password `123.Pol*` — **must change in production**.
+- **Login:** if username matches the file → verify against file password; else normal Prisma/bcrypt auth.
+- **Session:** `isMaintenance: true`, role `__MAINTENANCE__`, userId `__maintenance__` (`lib/auth.ts` + `lib/maintenance-auth.ts`).
+- **Console:** `/maintenance/db` only — red critical banner; no app sidebar. `(app)` layout redirects maintenance sessions here; `requireAuth` does the same.
+- **Exports:** `.thdump.json` dump, SQL INSERT data-only, ZIP of per-table CSVs (**pipe `|`**).
+- **Import modes:**
+  - **truncate** — TRUNCATE all app tables, then load (SQL must not contain DDL).
+  - **drop** — DROP SCHEMA → `prisma migrate deploy` → **TRUNCATE again** (clears AppRole seed from migrations) → load dump/SQL.
+- **Pitfalls:**
+  - Migration `add_app_roles` seeds Admin/… — without post-migrate truncate, dump insert hits `AppRole_code_key`.
+  - JSON columns (`AppRole.pages`): stringify + `::jsonb` (node-pg treats JS arrays as PG arrays otherwise).
+  - After restore: **restart Next.js**; optional `npm run db:generate` after DROP.
+- **UI:** live progress log (step actions: drop / migrate / truncate / table-by-table load).
+- **Lib:** `lib/maintenance-auth.ts`, `lib/db-maintenance.ts`. Server actions body limit **64mb** (`next.config.ts`).
 
-## Mail / SMTP (v0.3.1+ · branch SMTP-Server-Connection)
+## Mail / SMTP (v0.4.0 · Technique)
 
-- **UI:** Technique → **Serveur De Messagerie** (`/admin/messagerie`) — Admin only (`requireRole("Admin")`).
-- **Model:** `MailServerConfig` — host, port, security (`none` | `starttls` | `ssl`), auth, from/reply-to, TLS options, timeouts, pool, default flag.
+- **UI:** Technique → **Serveur De Messagerie** (`/admin/messagerie`) — Admin only.
+- **Model:** `MailServerConfig` — host, port, security (`none` | `starttls` | `ssl`), auth, from/reply-to, TLS, timeouts, pool, `is_default`.
 - **Password:** encrypted at rest (`lib/mail-crypto.ts`, AES-256-GCM via `SESSION_SECRET`).
-- **Send API for future features:** `import { sendMail } from "@/lib/mail"` — uses default active config.
-- **Test:** form button sends a test message to a given address; last test status stored on the config.
-- Nav catalog path: `/admin/messagerie` in `lib/app-pages.ts` (section Technique). Admin role always sees all pages.
+- **Send API:** `import { sendMail } from "@/lib/mail"` — default active config (use this for all future notifications).
+- **Test:** form sends a test message; last status on the config row.
+- Nav: `/admin/messagerie` in `lib/app-pages.ts` (section Technique).
 
-## Data import / purge (v0.3.1+ · Technique)
+## Data import / purge (v0.4.0 · Technique)
 
 - **UI:** Technique → **Import / Purge** (`/admin/donnees`) — Admin only.
-- **Tables (current):** `Ressources`, `RAID` — export full CSV, download structure template, upload → validation report → approve to persist.
-- **CSV separator:** pipe `|` (not comma) so free text may contain commas; shared via `CSV_SEPARATOR` / `rowsToCsv` / `parseCsv` in `lib/csv-data-admin.ts`.
-- **System fields:** `id`, `createdAt`, `updatedAt` are never imported (generated by DB).
-- **Lib:** `lib/csv-data-admin.ts` — parse/validate; actions in `app/(app)/admin/donnees/actions.ts`.
-- **FKs in CSV:** RAID uses `chantier_code` + `responsable_email`; Ressources uses `profil` (name).
-- **Purge Ressources:** clears timesheets, nullifies user/équipe/RAID links, then deletes rows.
+- **Tables (current):** `Ressources`, `RAID` only (extend carefully with same CSV helpers).
+- **CSV separator:** pipe `|` — `CSV_SEPARATOR` / `rowsToCsv` / `parseCsv` in `lib/csv-data-admin.ts` (commas allowed in cell text). Legacy comma files accepted only if header has no `|`.
+- **Preview:** full column set + horizontal scroll; report OK/errors per line.
+- **Write modes after preview:**
+  - **append** — insert only.
+  - **replace** — purge table then insert; if table not empty, **force backup CSV download** first; confirm with `PURGE`.
+- **Standalone purge button:** 3-step wizard — (1) mandatory backup download, (2) type exact table **label** (`Ressources` or `RAID`), (3) type `PURGE`.
+- **System fields:** never in CSV import — `id`, `createdAt`, `updatedAt` generated by DB.
+- **FKs in CSV:** RAID → `chantier_code`, `responsable_email`; Ressources → `profil` (name match).
+- **Purge Ressources:** delete `SaisieTemps`, nullify User/MembreEquipe/Raid.responsable links, then delete rows.
+- **Lib / actions:** `lib/csv-data-admin.ts`, `app/(app)/admin/donnees/actions.ts`.
+
+## Timeline (hydration)
+
+- Client timelines must receive **`nowMs`** from a Server Component (do not use bare `Date.now()` during SSR render).
+- Format CSS percentages with a stable helper (e.g. 4 decimal places) to avoid float serialization mismatch.
+- Components: `ChantierTimelineChart`, `ChantierTimelinePMO`.
 
 ## Domain rules
 
@@ -233,7 +254,10 @@ Seeded system roles (labels): Administrateur, Bureau Programme, PMO Chantier, Ge
 
 - Prefer server components + `"use server"` actions over new API routes.
 - Keep French domain labels in `lib/*-labels.ts`.
-- Do not commit `.env`, `*.db`, uploaded avatars under `public/uploads/**` (except `.gitkeep`).
+- Do not commit `.env`, `*.db`, `config/maintenance-user.json`, uploaded avatars under `public/uploads/**` (except `.gitkeep`).
 - Never reintroduce `better-sqlite3` / SQLite adapters.
 - After Prisma schema change: migrate + generate + **bump `PRISMA_MODEL_STAMP`**.
-- Project memory for multi-session continuity: see `.grok/MEMORY.md` and `.grok/config.toml` (`[memory] enabled = true`). User must also enable memory in `~/.grok/config.toml` and/or set `GROK_MEMORY=1` (project config does not fully override user memory settings). Mid-session: `/memory on`.
+- Product emails only via `sendMail()` from `lib/mail.ts`.
+- CSV in this product = **pipe-separated** unless extending a format that documents otherwise.
+- Destructive DB ops (purge/replace/maintenance import) require explicit user confirmation + backup where designed.
+- Project memory: `.grok/MEMORY.md` + `.grok/config.toml` (`[memory] enabled = true`). User must also enable memory in `~/.grok/config.toml` and/or set `GROK_MEMORY=1`. Mid-session: `/memory on`.
