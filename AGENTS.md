@@ -4,9 +4,8 @@
 
 French-language **PMO dashboard** for Bank of Africa banking transformation (`pmo-transformation-bancaire` / **TransfoHub**). Tracks **chantiers**, **RAID**, **jalons**, **adhérences**, resources/capacity, committees, and executive dashboards.
 
-**Current version:** `0.3.1` (tag `v0.3.1` on `main`).  
-**Current working branch:** `SMTP-Server-Connection` (created from `main` @ `f07c5a0` for SMTP work).  
-**Previous:** `v0.3.0` (Style-Review), `v0.2.0` (PostgreSQL-only; SQLite runtime removed).
+**Current version:** `0.4.0` (tag `v0.4.0` on `main`).  
+**Previous:** `v0.3.1` (BOA branding / theme / KPI), `v0.3.0` (Style-Review), `v0.2.0` (PostgreSQL-only).
 
 ## Stack
 
@@ -190,15 +189,15 @@ Seeded system roles (labels): Administrateur, Bureau Programme, PMO Chantier, Ge
 - RAID types: Risque, Action, Information, Décision.
 - UI language: **French**.
 
-## Git / release state (as of 2026-07-11)
+## Git / release state (as of 2026-07-12)
 
 | Item | Value |
 |------|--------|
+| Tag `v0.4.0` | SMTP admin, CSV Import/Purge, system DB maintenance, timeline hydration fix |
 | Tag `v0.3.1` | BOA branding, theme preference, KPI/timeline polish |
 | Tag `v0.3.0` | Dark mode, dynamic roles, profiles, avatars |
 | Tag `v0.2.0` | PostgreSQL-only |
-| `main` | Fast-forwarded through Style-Review → `f07c5a0` (v0.3.1) |
-| Active branch | **`SMTP-Server-Connection`** (from `main`; for SMTP server connection work) |
+| `main` | At `v0.4.0` (merged `SMTP-Server-Connection`) |
 | Remote | May still need `git push origin main` + tags if not published |
 
 ## Recent release notes
@@ -221,6 +220,14 @@ Seeded system roles (labels): Administrateur, Bureau Programme, PMO Chantier, Ge
 3. Timeline Jan/Jul colors, **Auj.** marker, BOA bar palette  
 4. BOA login/change-password shell + logo; light-mode app brand tokens  
 5. Sidebar TransfoHub brand block  
+
+### v0.3.1 → v0.4.0
+
+1. Technique → **Serveur De Messagerie** (SMTP config, encrypted password, test send)  
+2. Technique → **Import / Purge** (RAID & Ressources CSV `|`, append or replace with backup)  
+3. File-based **system** maintenance user + `/maintenance/db` (dump/SQL/CSV, DROP/TRUNCATE, live log)  
+4. Timeline « Auj. » hydration fix (`nowMs` + stable percentages)  
+5. Prisma `MailServerConfig` migration + client stamp  
 
 ## Conventions
 
