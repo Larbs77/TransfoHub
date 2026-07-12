@@ -23,6 +23,11 @@ export default async function AppLayout({
     redirect("/login");
   }
 
+  // File-based maintenance user → critical console only
+  if (session.isMaintenance) {
+    redirect("/maintenance/db");
+  }
+
   if (session.mustChangePwd) {
     redirect("/change-password");
   }

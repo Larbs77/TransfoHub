@@ -326,3 +326,40 @@ model FavoriChantier {
   createdAt  DateTime @default(now())
   chantier   Chantier @relation(fields: [chantierId], references: [id], onDelete: Cascade)
 }
+
+/// SMTP mail server configuration (per-client / bank). Used by lib/mail for outbound mail.
+model MailServerConfig {
+  id                       String    @id @default(uuid())
+  /// Friendly label, e.g. "BOA Exchange" / "SMTP Client X"
+  name                     String    @default("Serveur principal")
+  host                     String    @default("")
+  port                     Int       @default(587)
+  /// Security mode: none | starttls | ssl
+  security                 String    @default("starttls")
+  auth_user                String    @default("")
+  /// Encrypted at rest (aes-256-gcm via SESSION_SECRET); empty = no auth
+  auth_password_enc        String    @default("")
+  from_email               String    @default("")
+  from_name                String    @default("")
+  reply_to                 String    @default("")
+  /// Reject unauthorized TLS certificates (disable only for lab/self-signed)
+  tls_reject_unauthorized  Boolean   @default(true)
+  connection_timeout_ms    Int       @default(10000)
+  greeting_timeout_ms      Int       @default(10000)
+  socket_timeout_ms        Int       @default(30000)
+  pool                     Boolean   @default(false)
+  max_connections          Int       @default(5)
+  /// Optional HELO/EHLO hostname
+  local_hostname           String    @default("")
+  notes                    String    @default("")
+  is_active                Boolean   @default(true)
+  /// Only one default used for sendMail() when no config id is passed
+  is_default               Boolean   @default(true)
+  last_test_at             DateTime?
+  last_test_ok             Boolean?
+  last_test_message        String    @default("")
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  @@index([is_default, is_active])
+}

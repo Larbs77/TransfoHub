@@ -56,7 +56,19 @@ function timelineMonthLineClass(month: number): string {
   return "border-l border-muted/30";
 }
 
-export function ChantierTimelinePMO({ chantierTimeline }: { chantierTimeline: TimelineItemPMO[] }) {
+/** Stable CSS percentage string (avoids SSR/client float serialization drift). */
+function pct(value: number): string {
+  return `${(Math.round(value * 1e4) / 1e4).toFixed(4)}%`;
+}
+
+export function ChantierTimelinePMO({
+  chantierTimeline,
+  nowMs,
+}: {
+  chantierTimeline: TimelineItemPMO[];
+  /** Fixed reference time (ms) from the server to avoid hydration mismatches on the “Auj.” marker. */
+  nowMs?: number;
+}) {
   const router = useRouter();
 
   if (chantierTimeline.length === 0) {
@@ -87,9 +99,10 @@ export function ChantierTimelinePMO({ chantierTimeline }: { chantierTimeline: Ti
     d.setMonth(d.getMonth() + 6);
   }
 
-  const nowTs = Date.now();
+  // Prefer server-provided nowMs so SSR HTML matches hydration (no Date.now() drift).
+  const nowTs = nowMs ?? 0;
   const todayPos =
-    nowTs >= minDate && nowTs <= maxDate
+    nowMs != null && nowTs >= minDate && nowTs <= maxDate
       ? ((nowTs - minDate) / range) * 100
       : null;
 
@@ -138,7 +151,7 @@ export function ChantierTimelinePMO({ chantierTimeline }: { chantierTimeline: Ti
             <span
               key={i}
               className={`absolute top-0 -translate-x-1/2 text-[10px] capitalize leading-none ${timelineMonthLabelClass(m.month)}`}
-              style={{ left: `${m.pos}%` }}
+              style={{ left: pct(m.pos) }}
             >
               {m.label}
             </span>
@@ -146,7 +159,7 @@ export function ChantierTimelinePMO({ chantierTimeline }: { chantierTimeline: Ti
           {todayPos != null && (
             <span
               className="absolute top-[12px] z-10 -translate-x-1/2 text-[8px] font-semibold leading-none text-rose-600 dark:text-rose-400"
-              style={{ left: `${todayPos}%` }}
+              style={{ left: pct(todayPos) }}
               title={format(new Date(nowTs), "dd MMMM yyyy", { locale: fr })}
             >
               Auj.
@@ -195,21 +208,21 @@ export function ChantierTimelinePMO({ chantierTimeline }: { chantierTimeline: Ti
                       <div
                         key={i}
                         className={`absolute top-0 bottom-0 ${timelineMonthLineClass(m.month)}`}
-                        style={{ left: `${m.pos}%` }}
+                        style={{ left: pct(m.pos) }}
                       />
                     ))}
                     {todayPos != null && (
                       <div
                         className="pointer-events-none absolute top-0 bottom-0 z-[5] w-px bg-gradient-to-b from-rose-500 via-rose-500 to-rose-400/80 shadow-[0_0_6px_rgba(244,63,94,0.55)]"
-                        style={{ left: `${todayPos}%` }}
+                        style={{ left: pct(todayPos) }}
                         title="Aujourd'hui"
                       />
                     )}
                     <div
                       className="absolute top-1 bottom-1 z-[1] flex cursor-pointer items-center overflow-hidden rounded transition-opacity hover:opacity-85 hover:ring-2 hover:ring-ring hover:ring-offset-1 ring-offset-background"
                       style={{
-                        left: `${left}%`,
-                        width: `${width}%`,
+                        left: pct(left),
+                        width: pct(width),
                         backgroundColor: barColor,
                         opacity,
                         border: c.isMine ? "2px solid " + color : undefined,

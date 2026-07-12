@@ -27,6 +27,9 @@ import {
   Presentation,
   LogOut,
   ShieldCheck,
+  Mail,
+  Wrench,
+  Database,
 } from "lucide-react";
 import { AlertBell } from "@/components/alert-bell";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -92,6 +95,22 @@ const ALL_SECTIONS: NavSection[] = [
       { href: "/admin/users", label: "Utilisateurs", icon: Users },
       { href: "/admin/roles", label: "Rôles", icon: ShieldCheck },
       { href: "/settings", label: "Paramètres", icon: Settings },
+    ],
+  },
+  {
+    label: "Technique",
+    icon: Wrench,
+    items: [
+      {
+        href: "/admin/messagerie",
+        label: "Serveur De Messagerie",
+        icon: Mail,
+      },
+      {
+        href: "/admin/donnees",
+        label: "Import / Purge",
+        icon: Database,
+      },
     ],
   },
 ];

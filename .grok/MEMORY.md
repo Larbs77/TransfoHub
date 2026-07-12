@@ -98,9 +98,18 @@ This file is for **agents and humans** working on TransfoHub. Grok project rules
 
 ---
 
+## Mail / SMTP
+
+- Page: `/admin/messagerie` — nav **Technique → Serveur De Messagerie** (Admin only).
+- DB: `MailServerConfig`; password `auth_password_enc` via `lib/mail-crypto.ts`.
+- App API: `lib/mail.ts` → `sendMail()`, `sendTestMail()`, `getDefaultMailConfig()`.
+- Future features must use `sendMail()` only (no ad-hoc transporters).
+- Migration: `20260711220000_add_mail_server_config`.
+
 ## Suggested next work (open)
 
-- **SMTP server connection** on branch `SMTP-Server-Connection` (current focus).  
+- Wire future notifications/invitations to `sendMail()`.  
+- Optional: multiple named SMTP profiles UI (model already supports multi-row + `is_default`).  
 - Push `main` + `v0.3.1` to origin if not already.  
 - Optional: map more `requireRole` call sites to `requirePageAccess`.  
 - Optional: admin ability to clear another user's avatar.  

@@ -27,6 +27,16 @@ export const APP_PAGES: AppPage[] = [
   { path: "/admin/users", label: "Utilisateurs", section: "Administration" },
   { path: "/admin/roles", label: "Rôles", section: "Administration" },
   { path: "/settings", label: "Paramètres", section: "Administration" },
+  {
+    path: "/admin/messagerie",
+    label: "Serveur De Messagerie",
+    section: "Technique",
+  },
+  {
+    path: "/admin/donnees",
+    label: "Import / Purge",
+    section: "Technique",
+  },
 ];
 
 export const ALL_PAGE_PATHS = APP_PAGES.map((p) => p.path);

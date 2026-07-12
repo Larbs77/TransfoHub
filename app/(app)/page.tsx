@@ -35,7 +35,11 @@ export default async function Home() {
     return (
       <div className="min-h-screen bg-background">
         <main className="mx-auto max-w-7xl space-y-6 p-6">
-          <DashboardPMO stats={stats} dashboardType={session.dashboardType || "complete"} />
+          <DashboardPMO
+            stats={stats}
+            dashboardType={session.dashboardType || "complete"}
+            nowMs={Date.now()}
+          />
         </main>
       </div>
     );
@@ -194,7 +198,10 @@ export default async function Home() {
             <CardTitle>Timeline Chantiers</CardTitle>
           </CardHeader>
           <CardContent>
-            <ChantierTimelineChart chantierTimeline={stats.chantierTimeline} />
+            <ChantierTimelineChart
+              chantierTimeline={stats.chantierTimeline}
+              nowMs={Date.now()}
+            />
           </CardContent>
         </Card>
       </main>

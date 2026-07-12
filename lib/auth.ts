@@ -19,6 +19,8 @@ export interface SessionData {
   mustChangePwd: boolean;
   ressourceId: string | null;
   dashboardType: DashboardType;
+  /** File-based system maintenance user (not in DB). */
+  isMaintenance?: boolean;
 }
 
 // ── iron-session config ────────────────────────────────
@@ -104,13 +106,32 @@ export async function resetAttempts(userId: string) {
 
 // ── Auth guards ────────────────────────────────────────
 
+export function isMaintenanceSession(
+  session: Partial<SessionData> | null | undefined
+): boolean {
+  return !!session?.isMaintenance;
+}
+
 export async function requireAuth(): Promise<SessionData> {
   const session = await getSession();
   if (!session.userId) {
     redirect("/login");
   }
+  // Maintenance user is confined to /maintenance/*
+  if (session.isMaintenance) {
+    redirect("/maintenance/db");
+  }
   if (session.mustChangePwd) {
     redirect("/change-password");
+  }
+  return session as SessionData;
+}
+
+/** Auth for the critical DB maintenance console only. */
+export async function requireMaintenanceAuth(): Promise<SessionData> {
+  const session = await getSession();
+  if (!session.userId || !session.isMaintenance) {
+    redirect("/login");
   }
   return session as SessionData;
 }

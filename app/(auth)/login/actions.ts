@@ -7,6 +7,12 @@ import {
   checkAndIncrementAttempts,
   resetAttempts,
 } from "@/lib/auth";
+import {
+  isMaintenanceUsername,
+  verifyMaintenanceLogin,
+  MAINTENANCE_USER_ID,
+  MAINTENANCE_ROLE,
+} from "@/lib/maintenance-auth";
 import { redirect } from "next/navigation";
 
 export async function loginAction(
@@ -19,6 +25,24 @@ export async function loginAction(
 
   if (!username || !password) {
     return { error: "Nom d'utilisateur et mot de passe requis." };
+  }
+
+  // ── Maintenance user (file-based, not in DB) ─────────
+  if (isMaintenanceUsername(username)) {
+    const creds = verifyMaintenanceLogin(username, password);
+    if (!creds) {
+      return { error: "Identifiants invalides." };
+    }
+    const session = await getSession();
+    session.userId = MAINTENANCE_USER_ID;
+    session.username = creds.username;
+    session.role = MAINTENANCE_ROLE;
+    session.mustChangePwd = false;
+    session.ressourceId = null;
+    session.dashboardType = "complete";
+    session.isMaintenance = true;
+    await session.save();
+    redirect("/maintenance/db");
   }
 
   const user = await prisma.user.findUnique({ where: { username } });
@@ -66,7 +90,7 @@ export async function loginAction(
     data: { last_login: new Date() },
   });
 
-  // Create session
+  // Create session (normal app user)
   const session = await getSession();
   session.userId = user.id;
   session.username = user.username;
@@ -74,6 +98,7 @@ export async function loginAction(
   session.mustChangePwd = user.must_change_pwd;
   session.ressourceId = user.ressourceId;
   session.dashboardType = (user.dashboard_type as "complete" | "limited") || "complete";
+  session.isMaintenance = false;
   await session.save();
 
   if (user.must_change_pwd) {

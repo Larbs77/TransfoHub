@@ -166,7 +166,16 @@ function KpiCard({
   );
 }
 
-export function DashboardPMO({ stats, dashboardType }: { stats: PMODashboardStats; dashboardType: "complete" | "limited" }) {
+export function DashboardPMO({
+  stats,
+  dashboardType,
+  nowMs,
+}: {
+  stats: PMODashboardStats;
+  dashboardType: "complete" | "limited";
+  /** Server clock snapshot — keeps the timeline “Auj.” marker hydration-safe. */
+  nowMs?: number;
+}) {
   const isLimited = dashboardType === "limited";
 
   return (
@@ -326,7 +335,10 @@ export function DashboardPMO({ stats, dashboardType }: { stats: PMODashboardStat
           <CardDescription>Tous les chantiers du programme — vos chantiers sont mis en surbrillance</CardDescription>
         </CardHeader>
         <CardContent>
-          <ChantierTimelinePMO chantierTimeline={stats.chantierTimeline} />
+          <ChantierTimelinePMO
+            chantierTimeline={stats.chantierTimeline}
+            nowMs={nowMs}
+          />
         </CardContent>
       </Card>
     </div>

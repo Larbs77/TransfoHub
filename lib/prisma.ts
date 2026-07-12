@@ -10,17 +10,17 @@ const globalForPrisma = globalThis as unknown as {
  * Bump whenever the Prisma schema gains fields/models so HMR drops a stale
  * singleton (otherwise findUnique rejects unknown select fields).
  */
-const PRISMA_MODEL_STAMP = "user-theme-pref-v2";
+const PRISMA_MODEL_STAMP = "mail-server-config-v2";
 
 function clientLooksCurrent(client: PrismaClient): boolean {
   try {
-    // Runtime check: User delegate must expose avatar_url on its DMMF/fields
-    const user = (client as unknown as { user?: { fields?: Record<string, unknown> } })
-      .user;
-    if (!user) return false;
-    // Prisma 7 client: probe that a dummy select shape is accepted by checking
-    // the generated runtime data model via $extends isn't available; instead
-    // force recreate when stamp mismatches (primary path).
+    const c = client as unknown as {
+      user?: unknown;
+      mailServerConfig?: { findFirst?: unknown };
+    };
+    // Force recreate when new models are missing (stale HMR singleton).
+    if (!c.user) return false;
+    if (typeof c.mailServerConfig?.findFirst !== "function") return false;
     return true;
   } catch {
     return false;
