@@ -13,11 +13,27 @@ function normalizeName(name: string): string {
   return name.trim().replace(/\s+/g, " ");
 }
 
+async function resolveOwnerFromEquipe(equipeId: string | null | undefined) {
+  if (!equipeId) {
+    return { equipeId: null as string | null, owner: "" };
+  }
+  const equipe = await prisma.equipe.findUnique({ where: { id: equipeId } });
+  if (!equipe) {
+    throw new Error(
+      "Équipe introuvable. Créez-la dans Administration → Équipes."
+    );
+  }
+  if (!equipe.is_active) {
+    // Allow keeping inactive team on existing rows; creation path checks separately
+  }
+  return { equipeId: equipe.id, owner: equipe.name };
+}
+
 function validatePayload(data: {
   name: string;
   description?: string;
   frequency?: string;
-  owner?: string;
+  equipeId?: string | null;
   short_label?: string;
   color?: string;
   position?: number;
@@ -41,7 +57,7 @@ function validatePayload(data: {
     name,
     description: (data.description ?? "").trim(),
     frequency: (data.frequency ?? "").trim(),
-    owner: (data.owner ?? "").trim(),
+    equipeId: data.equipeId?.trim() || null,
     short_label: (data.short_label ?? "").trim(),
     color,
     position,
@@ -53,6 +69,11 @@ export async function getComiteParametresForAdmin() {
   await requireComiteParametresAdmin();
   return prisma.comiteParametre.findMany({
     orderBy: [{ position: "asc" }, { name: "asc" }],
+    include: {
+      equipe: {
+        select: { id: true, name: true, is_active: true },
+      },
+    },
   });
 }
 
@@ -74,6 +95,7 @@ export async function getComiteParametresForSelect(opts?: {
       description: true,
       frequency: true,
       owner: true,
+      equipeId: true,
       short_label: true,
       color: true,
       position: true,
@@ -86,32 +108,58 @@ export async function createComiteParametre(data: {
   name: string;
   description?: string;
   frequency?: string;
-  owner?: string;
+  equipeId?: string | null;
   short_label?: string;
   color?: string;
   position?: number;
   is_active?: boolean;
 }) {
   await requireComiteParametresAdmin();
-  const payload = validatePayload(data);
+  const base = validatePayload(data);
+
+  if (!base.equipeId) {
+    throw new Error("Le propriétaire (équipe) est obligatoire.");
+  }
 
   const existing = await prisma.comiteParametre.findUnique({
-    where: { name: payload.name },
+    where: { name: base.name },
   });
   if (existing) {
     throw new Error("Un type de comité avec ce nom existe déjà.");
   }
 
+  const equipe = await prisma.equipe.findUnique({
+    where: { id: base.equipeId },
+  });
+  if (!equipe || !equipe.is_active) {
+    throw new Error(
+      "Sélectionnez une équipe active (Administration → Équipes)."
+    );
+  }
+
   // Default position = end of list
+  let position = base.position;
   if (data.position === undefined || data.position === null) {
     const last = await prisma.comiteParametre.findFirst({
       orderBy: { position: "desc" },
       select: { position: true },
     });
-    payload.position = (last?.position ?? -1) + 1;
+    position = (last?.position ?? -1) + 1;
   }
 
-  await prisma.comiteParametre.create({ data: payload });
+  await prisma.comiteParametre.create({
+    data: {
+      name: base.name,
+      description: base.description,
+      frequency: base.frequency,
+      short_label: base.short_label,
+      color: base.color,
+      position,
+      is_active: base.is_active,
+      equipeId: equipe.id,
+      owner: equipe.name,
+    },
+  });
   revalidatePath("/admin/comites-parametres");
   revalidatePath("/comites");
   revalidatePath("/calendrier");
@@ -123,7 +171,7 @@ export async function updateComiteParametre(
     name: string;
     description?: string;
     frequency?: string;
-    owner?: string;
+    equipeId?: string | null;
     short_label?: string;
     color?: string;
     position?: number;
@@ -131,28 +179,53 @@ export async function updateComiteParametre(
   }
 ) {
   await requireComiteParametresAdmin();
-  const payload = validatePayload(data);
+  const base = validatePayload(data);
 
   const current = await prisma.comiteParametre.findUnique({ where: { id } });
   if (!current) throw new Error("Type de comité introuvable.");
 
+  if (!base.equipeId) {
+    throw new Error("Le propriétaire (équipe) est obligatoire.");
+  }
+
   const clash = await prisma.comiteParametre.findFirst({
-    where: { name: payload.name, NOT: { id } },
+    where: { name: base.name, NOT: { id } },
   });
   if (clash) {
     throw new Error("Un type de comité avec ce nom existe déjà.");
   }
 
+  const { equipeId, owner } = await resolveOwnerFromEquipe(base.equipeId);
+  // When changing team, require active; when keeping same inactive team, allow
+  if (equipeId && equipeId !== current.equipeId) {
+    const equipe = await prisma.equipe.findUnique({ where: { id: equipeId } });
+    if (!equipe?.is_active) {
+      throw new Error(
+        "Sélectionnez une équipe active (Administration → Équipes)."
+      );
+    }
+  }
+
   await prisma.$transaction(async (tx) => {
     await tx.comiteParametre.update({
       where: { id },
-      data: payload,
+      data: {
+        name: base.name,
+        description: base.description,
+        frequency: base.frequency,
+        short_label: base.short_label,
+        color: base.color,
+        position: base.position,
+        is_active: base.is_active,
+        equipeId,
+        owner,
+      },
     });
     // Keep meeting rows in sync when the instance name changes
-    if (current.name !== payload.name) {
+    if (current.name !== base.name) {
       await tx.comite.updateMany({
         where: { instance: current.name },
-        data: { instance: payload.name },
+        data: { instance: base.name },
       });
     }
   });

@@ -6,6 +6,7 @@ import {
   hashPassword,
   validatePasswordComplexity,
 } from "@/lib/auth";
+import { identityFromRessource } from "@/lib/ressource-user";
 import { revalidatePath } from "next/cache";
 
 async function requireUsersAdmin() {
@@ -53,27 +54,70 @@ export async function getUsers() {
       locked_until: true,
       last_login: true,
       ressourceId: true,
-      ressource: { select: { id: true, nom_complet: true } },
+      ressource: {
+        select: {
+          id: true,
+          nom_complet: true,
+          email: true,
+          telephone: true,
+          equipeHierarchie: { select: { id: true, name: true } },
+          equipesFonctionnelles: {
+            select: { equipe: { select: { id: true, name: true } } },
+          },
+        },
+      },
       createdAt: true,
       updatedAt: true,
     },
   });
 }
 
+/** Active resources without an app account — for user creation link. */
+export async function getRessourcesWithoutAccount() {
+  await requireUsersAdmin();
+  return prisma.ressource.findMany({
+    where: { user: null, actif: true },
+    orderBy: { nom_complet: "asc" },
+    select: {
+      id: true,
+      nom_complet: true,
+      email: true,
+      telephone: true,
+      type: true,
+      equipeHierarchieId: true,
+    },
+  });
+}
+
+export type NewRessourcePayload = {
+  nom_complet: string;
+  email?: string;
+  telephone?: string;
+  type: string;
+  organisation?: string;
+  tarif_journalier?: number;
+  capacite_jours_mois?: number;
+  profilId?: string | null;
+  equipeHierarchieId: string;
+  equipeFonctionnelleIds?: string[];
+};
+
 export async function createUser(data: {
   username: string;
   password: string;
   role: string;
-  first_name?: string;
-  last_name?: string;
-  phone?: string;
-  email?: string;
+  /** Link to an existing resource without account (required if not creating resource). */
   ressourceId?: string | null;
+  /** Create a new resource and attach the account. */
+  newRessource?: NewRessourcePayload | null;
 }) {
   await requireUsersAdmin();
 
+  const username = data.username.trim();
+  if (!username) throw new Error("Le nom d'utilisateur est obligatoire.");
+
   const existing = await prisma.user.findUnique({
-    where: { username: data.username },
+    where: { username },
   });
   if (existing) throw new Error("Ce nom d'utilisateur existe déjà.");
 
@@ -84,29 +128,98 @@ export async function createUser(data: {
     throw new Error("Rôle invalide ou désactivé.");
   }
 
-  const emailError = validateEmail(data.email ?? "");
-  if (emailError) throw new Error(emailError);
-  const phoneError = validatePhone(data.phone ?? "");
-  if (phoneError) throw new Error(phoneError);
-
   const complexityError = validatePasswordComplexity(data.password);
   if (complexityError) throw new Error(complexityError);
 
+  const hasExisting = !!data.ressourceId?.trim();
+  const hasNew = !!data.newRessource?.nom_complet?.trim();
+  if (!hasExisting && !hasNew) {
+    throw new Error(
+      "Choisissez une ressource existante ou créez-en une pour ce compte."
+    );
+  }
+  if (hasExisting && hasNew) {
+    throw new Error(
+      "Choisissez soit une ressource existante, soit une nouvelle ressource — pas les deux."
+    );
+  }
+
   const password_hash = await hashPassword(data.password);
-  await prisma.user.create({
-    data: {
-      username: data.username,
-      password_hash,
-      first_name: data.first_name?.trim() ?? "",
-      last_name: data.last_name?.trim() ?? "",
-      phone: data.phone?.trim() ?? "",
-      email: normalizeEmail(data.email ?? ""),
-      role: data.role,
-      must_change_pwd: true,
-      ressourceId: data.ressourceId || null,
-    },
+
+  await prisma.$transaction(async (tx) => {
+    let ressourceId: string;
+    let identity: {
+      first_name: string;
+      last_name: string;
+      email: string;
+      phone: string;
+    };
+
+    if (hasExisting) {
+      const ressource = await tx.ressource.findUnique({
+        where: { id: data.ressourceId!.trim() },
+        include: { user: { select: { id: true } } },
+      });
+      if (!ressource) throw new Error("Ressource introuvable.");
+      if (ressource.user) {
+        throw new Error("Cette ressource a déjà un compte applicatif.");
+      }
+      ressourceId = ressource.id;
+      identity = identityFromRessource(ressource);
+    } else {
+      const nr = data.newRessource!;
+      const equipeId = nr.equipeHierarchieId?.trim();
+      if (!equipeId) {
+        throw new Error("L'équipe hiérarchique de la ressource est obligatoire.");
+      }
+      const equipe = await tx.equipe.findUnique({ where: { id: equipeId } });
+      if (!equipe || !equipe.is_active) {
+        throw new Error("Équipe hiérarchique invalide ou inactive.");
+      }
+      const nom = nr.nom_complet.trim();
+      if (!nom) throw new Error("Le nom de la ressource est obligatoire.");
+
+      const created = await tx.ressource.create({
+        data: {
+          nom_complet: nom,
+          email: (nr.email ?? "").trim(),
+          telephone: (nr.telephone ?? "").trim(),
+          type: nr.type || "Interne",
+          organisation: (nr.organisation ?? "").trim(),
+          tarif_journalier: nr.tarif_journalier ?? 0,
+          capacite_jours_mois: nr.capacite_jours_mois ?? 20,
+          actif: true,
+          profilId: nr.profilId || null,
+          equipeHierarchieId: equipeId,
+        },
+      });
+      const fnIds = [...new Set((nr.equipeFonctionnelleIds ?? []).filter(Boolean))];
+      if (fnIds.length > 0) {
+        await tx.ressourceEquipeFonctionnelle.createMany({
+          data: fnIds.map((eid) => ({
+            ressourceId: created.id,
+            equipeId: eid,
+          })),
+        });
+      }
+      ressourceId = created.id;
+      identity = identityFromRessource(created);
+    }
+
+    await tx.user.create({
+      data: {
+        username,
+        password_hash,
+        role: data.role,
+        must_change_pwd: true,
+        ressourceId,
+        ...identity,
+      },
+    });
   });
+
   revalidatePath("/admin/users");
+  revalidatePath("/ressources");
 }
 
 export async function updateUserProfile(
@@ -118,6 +231,7 @@ export async function updateUserProfile(
     email: string;
     role?: string;
     dashboard_type?: "complete" | "limited";
+    /** Changing linked resource is not supported when identity lives on ressource. */
     ressourceId?: string | null;
   }
 ) {
@@ -141,23 +255,48 @@ export async function updateUserProfile(
     }
   }
 
-  await prisma.user.update({
+  const current = await prisma.user.findUnique({
     where: { id },
-    data: {
-      first_name: data.first_name.trim(),
-      last_name: data.last_name.trim(),
-      phone: data.phone.trim(),
-      email: normalizeEmail(data.email),
-      ...(data.role ? { role: data.role } : {}),
-      ...(data.dashboard_type
-        ? { dashboard_type: data.dashboard_type }
-        : {}),
-      ...(data.ressourceId !== undefined
-        ? { ressourceId: data.ressourceId || null }
-        : {}),
-    },
+    select: { ressourceId: true },
   });
+
+  const first_name = data.first_name.trim();
+  const last_name = data.last_name.trim();
+  const phone = data.phone.trim();
+  const email = normalizeEmail(data.email);
+  const nom_complet = `${first_name} ${last_name}`.trim();
+
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id },
+      data: {
+        first_name,
+        last_name,
+        phone,
+        email,
+        ...(data.role ? { role: data.role } : {}),
+        ...(data.dashboard_type
+          ? { dashboard_type: data.dashboard_type }
+          : {}),
+        // Keep existing ressourceId; do not allow unlinking
+      },
+    });
+
+    // Mirror identity onto the linked resource (master people data)
+    if (current?.ressourceId) {
+      await tx.ressource.update({
+        where: { id: current.ressourceId },
+        data: {
+          nom_complet: nom_complet || first_name,
+          email,
+          telephone: phone,
+        },
+      });
+    }
+  });
+
   revalidatePath("/admin/users");
+  revalidatePath("/ressources");
 }
 
 export async function updateUserRole(id: string, role: string) {

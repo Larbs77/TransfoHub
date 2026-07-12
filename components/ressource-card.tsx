@@ -2,7 +2,15 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Pencil, Trash2, ArrowRight, FolderKanban, ShieldAlert, Building2 } from "lucide-react";
+import {
+  Pencil,
+  Trash2,
+  ArrowRight,
+  FolderKanban,
+  ShieldAlert,
+  Building2,
+  UserCircle,
+} from "lucide-react";
 import { deleteRessource } from "@/app/(app)/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,12 +38,35 @@ interface RessourceWithStats {
   tarif_journalier: number;
   capacite_jours_mois: number;
   actif: boolean;
+  profilId?: string | null;
+  equipeHierarchieId?: string | null;
+  equipeHierarchie?: { id: string; name: string; is_active: boolean } | null;
+  equipesFonctionnelles?: {
+    equipeId: string;
+    equipe?: { id: string; name: string; is_active: boolean };
+  }[];
+  user?: {
+    id: string;
+    username: string;
+    role: string;
+    is_active: boolean;
+  } | null;
   createdAt: Date;
   updatedAt: Date;
   _count: { membres: number; raids: number };
 }
 
-export function RessourceCard({ ressource }: { ressource: RessourceWithStats }) {
+export function RessourceCard({
+  ressource,
+  equipes = [],
+  activeRoles = [],
+  canCreateAccount = false,
+}: {
+  ressource: RessourceWithStats;
+  equipes?: { id: string; name: string; is_active: boolean }[];
+  activeRoles?: { code: string; label: string }[];
+  canCreateAccount?: boolean;
+}) {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -45,7 +76,7 @@ export function RessourceCard({ ressource }: { ressource: RessourceWithStats }) 
       <Card className="flex flex-col">
         <CardHeader className="pb-2">
           <div className="space-y-1">
-            <CardDescription className="flex items-center gap-1.5">
+            <CardDescription className="flex flex-wrap items-center gap-1.5">
               <Badge
                 style={{
                   backgroundColor: RESSOURCE_TYPE_COLORS[ressource.type],
@@ -60,6 +91,15 @@ export function RessourceCard({ ressource }: { ressource: RessourceWithStats }) 
               >
                 {ressource.actif ? "Actif" : "Inactif"}
               </Badge>
+              {ressource.user ? (
+                <Badge className="text-[10px] bg-blue-600 hover:bg-blue-600">
+                  Compte
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-[10px]">
+                  Sans compte
+                </Badge>
+              )}
             </CardDescription>
             <CardTitle className="text-sm leading-snug">
               {ressource.nom_complet}
@@ -84,12 +124,22 @@ export function RessourceCard({ ressource }: { ressource: RessourceWithStats }) 
             </div>
             <div>
               <div className="text-sm font-medium flex items-center justify-center gap-1 min-h-[1.75rem]">
-                <Building2 className="size-4 text-muted-foreground" />
-                <span className="truncate">{ressource.organisation || "—"}</span>
+                <Building2 className="size-4 text-muted-foreground shrink-0" />
+                <span className="truncate">
+                  {ressource.equipeHierarchie?.name ||
+                    ressource.organisation ||
+                    "—"}
+                </span>
               </div>
-              <div className="text-xs text-muted-foreground">Organisation</div>
+              <div className="text-xs text-muted-foreground">Équipe</div>
             </div>
           </div>
+          {ressource.user && (
+            <div className="flex items-center justify-center gap-1 text-xs text-muted-foreground">
+              <UserCircle className="size-3.5" />
+              {ressource.user.username}
+            </div>
+          )}
           {ressource.tarif_journalier > 0 && (
             <div className="text-xs text-muted-foreground text-center">
               TJM: {ressource.tarif_journalier.toLocaleString("fr-MA")} MAD/jour
@@ -132,6 +182,9 @@ export function RessourceCard({ ressource }: { ressource: RessourceWithStats }) 
           open={editOpen}
           onOpenChange={(open) => !open && setEditOpen(false)}
           ressource={ressource}
+          equipes={equipes}
+          activeRoles={activeRoles}
+          canCreateAccount={canCreateAccount}
         />
       )}
 

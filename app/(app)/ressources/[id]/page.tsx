@@ -91,6 +91,13 @@ export default async function RessourceDetailPage({ params }: Props) {
             >
               {ressource.actif ? "Actif" : "Inactif"}
             </Badge>
+            {ressource.user ? (
+              <Badge className="bg-blue-600 hover:bg-blue-600">
+                Compte · {ressource.user.username}
+              </Badge>
+            ) : (
+              <Badge variant="outline">Sans compte</Badge>
+            )}
           </div>
           <h1 className="text-2xl font-bold tracking-tight">
             {ressource.nom_complet}
@@ -108,7 +115,16 @@ export default async function RessourceDetailPage({ params }: Props) {
                 {ressource.telephone}
               </span>
             )}
-            {ressource.organisation && (
+            {ressource.equipeHierarchie && (
+              <span className="flex items-center gap-1">
+                <Building2 className="size-3.5" />
+                {ressource.equipeHierarchie.name}
+                {(ressource.equipesFonctionnelles?.length ?? 0) > 0
+                  ? ` · +${ressource.equipesFonctionnelles.length} fonct.`
+                  : ""}
+              </span>
+            )}
+            {!ressource.equipeHierarchie && ressource.organisation && (
               <span className="flex items-center gap-1">
                 <Building2 className="size-3.5" />
                 {ressource.organisation}

@@ -4,7 +4,15 @@ import { prisma } from "@/lib/prisma";
 import { scoreCriticite } from "@/lib/utils-pmo";
 import { revalidatePath } from "next/cache";
 import { PHASES } from "@/lib/jalon-labels";
-import { requireAuth, requireRole, requireChantierAccess, getUserChantierIds } from "@/lib/auth";
+import {
+  requireAuth,
+  requireRole,
+  requireChantierAccess,
+  getUserChantierIds,
+  hashPassword,
+  validatePasswordComplexity,
+} from "@/lib/auth";
+import { identityFromRessource } from "@/lib/ressource-user";
 
 // ── Progress Calculation ─────────────────────────────
 
@@ -696,6 +704,388 @@ export async function getDashboardPMO() {
     decisionTimelineData,
     actionCompletionByDomaine,
     chantierTimeline,
+  };
+}
+
+/** RAID row for personal dashboard (table + kanban + calendar). */
+export type PersonalRaidRow = {
+  id: string;
+  type: string;
+  intitule: string;
+  description: string;
+  statut: string;
+  domaine: string;
+  categorie: string;
+  responsable: string;
+  strategie: string;
+  mitigation: string;
+  commentaires: string;
+  date_identification: Date | null;
+  date_revision: Date | null;
+  date_echeance: Date | null;
+  chantierId: string | null;
+  chantierCode: string | null;
+  chantierNom: string | null;
+  chantier: { id: string; code: string; nom: string } | null;
+  impact: number | null;
+  probabilite: number | null;
+  responsableRessourceId: string | null;
+  comiteId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  isMine: boolean;
+};
+
+/**
+ * Personal dashboard: scoped to the signed-in user's resource —
+ * chantiers membership, RAID (as responsable or on their chantiers),
+ * hierarchical + functional teams, and time entries.
+ */
+export async function getPersonalDashboard() {
+  const session = await requireAuth();
+  const now = new Date();
+
+  if (!session.ressourceId) {
+    return {
+      hasRessource: false as const,
+      displayName: session.username,
+      teams: [] as {
+        id: string;
+        name: string;
+        kind: "hierarchie" | "fonctionnelle";
+      }[],
+      chantiers: [] as {
+        id: string;
+        code: string;
+        nom: string;
+        domaine: string;
+        priorite: string;
+        statut: string;
+        avancement: number;
+        date_debut: Date;
+        date_fin: Date;
+        role: string;
+        equipe: string;
+        charge_pourcentage: number;
+      }[],
+      kpis: {
+        chantiersCount: 0,
+        activeChantiers: 0,
+        avgProgress: 0,
+        myRaidTotal: 0,
+        myActionsOpen: 0,
+        myActionsOverdue: 0,
+        myRisksOpen: 0,
+        myRisksCritical: 0,
+        myDecisionsPending: 0,
+        hoursThisMonth: 0,
+        capacityDaysMonth: 20,
+        chargePctMonth: 0,
+      },
+      raids: [] as PersonalRaidRow[],
+      tempsRecent: [] as {
+        id: string;
+        date_lundi: Date;
+        jours: number;
+        chantierId: string;
+        chantierCode: string;
+        chantierNom: string;
+      }[],
+      raidTypeCounts: {} as Record<string, number>,
+      actionStatusCounts: {} as Record<string, number>,
+      tempsByChantier: [] as { code: string; nom: string; jours: number }[],
+    };
+  }
+
+  const ressource = await prisma.ressource.findUnique({
+    where: { id: session.ressourceId },
+    include: {
+      equipeHierarchie: { select: { id: true, name: true } },
+      equipesFonctionnelles: {
+        include: { equipe: { select: { id: true, name: true } } },
+      },
+      membres: {
+        include: {
+          chantier: {
+            select: {
+              id: true,
+              code: true,
+              nom: true,
+              domaine: true,
+              priorite: true,
+              statut: true,
+              avancement: true,
+              date_debut: true,
+              date_fin: true,
+            },
+          },
+        },
+      },
+      user: {
+        select: { first_name: true, last_name: true, username: true },
+      },
+    },
+  });
+
+  if (!ressource) {
+    return getPersonalDashboardEmpty(session.username);
+  }
+
+  const displayName =
+    ressource.nom_complet ||
+    `${ressource.user?.first_name ?? ""} ${ressource.user?.last_name ?? ""}`.trim() ||
+    session.username;
+
+  const teams: {
+    id: string;
+    name: string;
+    kind: "hierarchie" | "fonctionnelle";
+  }[] = [];
+  if (ressource.equipeHierarchie) {
+    teams.push({
+      id: ressource.equipeHierarchie.id,
+      name: ressource.equipeHierarchie.name,
+      kind: "hierarchie",
+    });
+  }
+  for (const link of ressource.equipesFonctionnelles) {
+    if (!teams.some((t) => t.id === link.equipe.id)) {
+      teams.push({
+        id: link.equipe.id,
+        name: link.equipe.name,
+        kind: "fonctionnelle",
+      });
+    }
+  }
+
+  const chantierIds = [
+    ...new Set(ressource.membres.map((m) => m.chantier.id)),
+  ];
+
+  const chantiers = ressource.membres.map((m) => ({
+    id: m.chantier.id,
+    code: m.chantier.code,
+    nom: m.chantier.nom,
+    domaine: m.chantier.domaine,
+    priorite: m.chantier.priorite,
+    statut: m.chantier.statut,
+    avancement: m.chantier.avancement,
+    date_debut: m.chantier.date_debut,
+    date_fin: m.chantier.date_fin,
+    role: m.role,
+    equipe: m.equipe,
+    charge_pourcentage: m.charge_pourcentage,
+  }));
+
+  // RAID: assigned to me as responsable resource, OR on my chantiers
+  const raidsRaw = await prisma.raid.findMany({
+    where: {
+      OR: [
+        { responsableRessourceId: session.ressourceId },
+        ...(chantierIds.length > 0
+          ? [{ chantierId: { in: chantierIds } }]
+          : []),
+      ],
+    },
+    orderBy: { updatedAt: "desc" },
+    include: {
+      chantier: { select: { id: true, code: true, nom: true } },
+    },
+  });
+
+  const raids = raidsRaw.map((r) => ({
+    id: r.id,
+    type: r.type,
+    intitule: r.intitule,
+    description: r.description,
+    statut: r.statut,
+    domaine: r.domaine,
+    categorie: r.categorie,
+    responsable: r.responsable,
+    strategie: r.strategie,
+    mitigation: r.mitigation,
+    commentaires: r.commentaires,
+    date_identification: r.date_identification,
+    date_revision: r.date_revision,
+    date_echeance: r.date_echeance,
+    chantierId: r.chantierId,
+    chantierCode: r.chantier?.code ?? null,
+    chantierNom: r.chantier?.nom ?? null,
+    chantier: r.chantier
+      ? { id: r.chantier.id, code: r.chantier.code, nom: r.chantier.nom }
+      : null,
+    impact: r.impact,
+    probabilite: r.probabilite,
+    responsableRessourceId: r.responsableRessourceId,
+    comiteId: r.comiteId,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+    isMine: r.responsableRessourceId === session.ressourceId,
+  }));
+
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+  const saisies = await prisma.saisieTemps.findMany({
+    where: {
+      ressourceId: session.ressourceId,
+      date_lundi: { gte: new Date(now.getFullYear(), now.getMonth() - 2, 1) },
+    },
+    include: {
+      chantier: { select: { id: true, code: true, nom: true } },
+    },
+    orderBy: { date_lundi: "desc" },
+  });
+
+  const tempsRecent = saisies.slice(0, 20).map((s) => ({
+    id: s.id,
+    date_lundi: s.date_lundi,
+    jours: s.jours_travailles ?? 0,
+    chantierId: s.chantierId,
+    chantierCode: s.chantier.code,
+    chantierNom: s.chantier.nom,
+  }));
+
+  const hoursThisMonth = saisies
+    .filter((s) => s.date_lundi >= monthStart && s.date_lundi <= monthEnd)
+    .reduce((sum, s) => sum + (s.jours_travailles ?? 0), 0);
+
+  const capacityDaysMonth = ressource.capacite_jours_mois || 20;
+  const chargePctMonth =
+    capacityDaysMonth > 0
+      ? Math.round((hoursThisMonth / capacityDaysMonth) * 100)
+      : 0;
+
+  const myRaids = raids.filter((r) => r.isMine);
+  const myActions = myRaids.filter((r) => r.type === "Action");
+  const myActionsOpen = myActions.filter(
+    (a) => a.statut !== "Clôturé" && a.statut !== "Abandonné"
+  );
+  const myActionsOverdue = myActionsOpen.filter(
+    (a) => a.date_echeance && a.date_echeance < now
+  );
+  const myRisks = myRaids.filter((r) => r.type === "Risque");
+  const myRisksOpen = myRisks.filter((r) => r.statut !== "Clos");
+  const myRisksCritical = myRisksOpen.filter(
+    (r) =>
+      r.probabilite &&
+      r.impact &&
+      scoreCriticite(r.impact, r.probabilite) >= 12
+  );
+  const myDecisionsPending = myRaids.filter(
+    (r) => r.type === "Décision" && r.statut === "En attente"
+  ).length;
+
+  const activeChantiers = chantiers.filter(
+    (c) => c.statut !== "Non démarré" && c.statut !== "Clôturé"
+  ).length;
+  const avgProgress =
+    chantiers.length > 0
+      ? Math.round(
+          chantiers.reduce((s, c) => s + (c.avancement || 0), 0) /
+            chantiers.length
+        )
+      : 0;
+
+  const raidTypeCounts: Record<string, number> = {};
+  for (const r of raids) {
+    raidTypeCounts[r.type] = (raidTypeCounts[r.type] ?? 0) + 1;
+  }
+  const actionStatusCounts: Record<string, number> = {};
+  for (const a of myActions) {
+    actionStatusCounts[a.statut] = (actionStatusCounts[a.statut] ?? 0) + 1;
+  }
+
+  const tempsMap = new Map<string, { code: string; nom: string; jours: number }>();
+  for (const t of tempsRecent) {
+    const cur = tempsMap.get(t.chantierId) ?? {
+      code: t.chantierCode,
+      nom: t.chantierNom,
+      jours: 0,
+    };
+    cur.jours += t.jours;
+    tempsMap.set(t.chantierId, cur);
+  }
+  const tempsByChantier = Array.from(tempsMap.values()).sort(
+    (a, b) => b.jours - a.jours
+  );
+
+  return {
+    hasRessource: true as const,
+    displayName,
+    teams,
+    chantiers,
+    kpis: {
+      chantiersCount: chantiers.length,
+      activeChantiers,
+      avgProgress,
+      myRaidTotal: myRaids.length,
+      myActionsOpen: myActionsOpen.length,
+      myActionsOverdue: myActionsOverdue.length,
+      myRisksOpen: myRisksOpen.length,
+      myRisksCritical: myRisksCritical.length,
+      myDecisionsPending,
+      hoursThisMonth,
+      capacityDaysMonth,
+      chargePctMonth,
+    },
+    raids,
+    tempsRecent,
+    raidTypeCounts,
+    actionStatusCounts,
+    tempsByChantier,
+  };
+}
+
+function getPersonalDashboardEmpty(username: string) {
+  return {
+    hasRessource: false as const,
+    displayName: username,
+    teams: [] as {
+      id: string;
+      name: string;
+      kind: "hierarchie" | "fonctionnelle";
+    }[],
+    chantiers: [] as {
+      id: string;
+      code: string;
+      nom: string;
+      domaine: string;
+      priorite: string;
+      statut: string;
+      avancement: number;
+      date_debut: Date;
+      date_fin: Date;
+      role: string;
+      equipe: string;
+      charge_pourcentage: number;
+    }[],
+    kpis: {
+      chantiersCount: 0,
+      activeChantiers: 0,
+      avgProgress: 0,
+      myRaidTotal: 0,
+      myActionsOpen: 0,
+      myActionsOverdue: 0,
+      myRisksOpen: 0,
+      myRisksCritical: 0,
+      myDecisionsPending: 0,
+      hoursThisMonth: 0,
+      capacityDaysMonth: 20,
+      chargePctMonth: 0,
+    },
+    raids: [] as PersonalRaidRow[],
+    tempsRecent: [] as {
+      id: string;
+      date_lundi: Date;
+      jours: number;
+      chantierId: string;
+      chantierCode: string;
+      chantierNom: string;
+    }[],
+    raidTypeCounts: {} as Record<string, number>,
+    actionStatusCounts: {} as Record<string, number>,
+    tempsByChantier: [] as { code: string; nom: string; jours: number }[],
   };
 }
 
@@ -1495,14 +1885,35 @@ export async function deleteProfilRessource(id: string) {
 
 // ── Ressource CRUD ──────────────────────────────────
 
+const ressourcePeopleInclude = {
+  profil: {
+    select: { id: true, nom: true, type_ressource: true, tjm_defaut: true },
+  },
+  equipeHierarchie: {
+    select: { id: true, name: true, is_active: true },
+  },
+  equipesFonctionnelles: {
+    include: {
+      equipe: { select: { id: true, name: true, is_active: true } },
+    },
+  },
+  user: {
+    select: {
+      id: true,
+      username: true,
+      role: true,
+      is_active: true,
+      last_login: true,
+    },
+  },
+  _count: { select: { membres: true, raids: true } },
+} as const;
+
 export async function getRessources() {
   await requireRole("Admin", "Programme_Office", "Workforce_Manager");
   return prisma.ressource.findMany({
     orderBy: { nom_complet: "asc" },
-    include: {
-      profil: { select: { id: true, nom: true, type_ressource: true, tjm_defaut: true } },
-      _count: { select: { membres: true, raids: true } },
-    },
+    include: ressourcePeopleInclude,
   });
 }
 
@@ -1511,7 +1922,7 @@ export async function getRessourceById(id: string) {
   return prisma.ressource.findUnique({
     where: { id },
     include: {
-      profil: { select: { id: true, nom: true, type_ressource: true, tjm_defaut: true } },
+      ...ressourcePeopleInclude,
       membres: {
         include: {
           chantier: {
@@ -1589,6 +2000,19 @@ export async function getRessourcesForSelect() {
   });
 }
 
+async function assertEquipeHierarchie(equipeHierarchieId: string | null | undefined) {
+  const id = equipeHierarchieId?.trim() || "";
+  if (!id) {
+    throw new Error("L'équipe hiérarchique (rattachement banque) est obligatoire.");
+  }
+  const equipe = await prisma.equipe.findUnique({ where: { id } });
+  if (!equipe) throw new Error("Équipe hiérarchique introuvable.");
+  if (!equipe.is_active) {
+    throw new Error("L'équipe hiérarchique sélectionnée est inactive.");
+  }
+  return id;
+}
+
 export async function createRessource(data: {
   nom_complet: string;
   email: string;
@@ -1599,11 +2023,86 @@ export async function createRessource(data: {
   capacite_jours_mois: number;
   actif: boolean;
   profilId?: string | null;
+  equipeHierarchieId: string;
+  equipeFonctionnelleIds?: string[];
+  /** Optional app account creation (Admin only for roles other than default). */
+  createAccount?: {
+    username: string;
+    password: string;
+    role: string;
+  } | null;
 }) {
   await requireRole("Admin", "Workforce_Manager");
-  await prisma.ressource.create({ data });
+  const equipeHierarchieId = await assertEquipeHierarchie(data.equipeHierarchieId);
+
+  if (data.createAccount) {
+    // Account creation is admin-gated (role assignment)
+    await requireRole("Admin");
+  }
+
+  const ressource = await prisma.$transaction(async (tx) => {
+    const created = await tx.ressource.create({
+      data: {
+        nom_complet: data.nom_complet.trim(),
+        email: data.email.trim(),
+        telephone: data.telephone.trim(),
+        type: data.type,
+        organisation: data.organisation.trim(),
+        tarif_journalier: data.tarif_journalier,
+        capacite_jours_mois: data.capacite_jours_mois,
+        actif: data.actif,
+        profilId: data.profilId || null,
+        equipeHierarchieId,
+      },
+    });
+
+    const fnIds = data.equipeFonctionnelleIds ?? [];
+    if (fnIds.length > 0) {
+      await tx.ressourceEquipeFonctionnelle.createMany({
+        data: [...new Set(fnIds)].map((equipeId) => ({
+          ressourceId: created.id,
+          equipeId,
+        })),
+      });
+    }
+
+    if (data.createAccount) {
+      const username = data.createAccount.username.trim();
+      if (!username) throw new Error("Le nom d'utilisateur est obligatoire.");
+      const existing = await tx.user.findUnique({ where: { username } });
+      if (existing) throw new Error("Ce nom d'utilisateur existe déjà.");
+
+      const appRole = await tx.appRole.findUnique({
+        where: { code: data.createAccount.role },
+      });
+      if (!appRole || !appRole.is_active) {
+        throw new Error("Rôle invalide ou désactivé.");
+      }
+
+      const complexityError = validatePasswordComplexity(data.createAccount.password);
+      if (complexityError) throw new Error(complexityError);
+
+      const password_hash = await hashPassword(data.createAccount.password);
+      const identity = identityFromRessource(created);
+      await tx.user.create({
+        data: {
+          username,
+          password_hash,
+          role: data.createAccount.role,
+          must_change_pwd: true,
+          ressourceId: created.id,
+          ...identity,
+        },
+      });
+    }
+
+    return created;
+  });
+
   revalidatePath("/");
   revalidatePath("/ressources");
+  revalidatePath("/admin/users");
+  return { id: ressource.id };
 }
 
 export async function updateRessource(
@@ -1618,22 +2117,115 @@ export async function updateRessource(
     capacite_jours_mois: number;
     actif: boolean;
     profilId?: string | null;
+    equipeHierarchieId: string;
+    equipeFonctionnelleIds?: string[];
   }
 ) {
   await requireRole("Admin", "Workforce_Manager");
-  await prisma.ressource.update({ where: { id }, data });
+  const equipeHierarchieId = await assertEquipeHierarchie(data.equipeHierarchieId);
+
+  await prisma.$transaction(async (tx) => {
+    const updated = await tx.ressource.update({
+      where: { id },
+      data: {
+        nom_complet: data.nom_complet.trim(),
+        email: data.email.trim(),
+        telephone: data.telephone.trim(),
+        type: data.type,
+        organisation: data.organisation.trim(),
+        tarif_journalier: data.tarif_journalier,
+        capacite_jours_mois: data.capacite_jours_mois,
+        actif: data.actif,
+        profilId: data.profilId || null,
+        equipeHierarchieId,
+      },
+    });
+
+    await tx.ressourceEquipeFonctionnelle.deleteMany({ where: { ressourceId: id } });
+    const fnIds = [...new Set((data.equipeFonctionnelleIds ?? []).filter(Boolean))];
+    if (fnIds.length > 0) {
+      await tx.ressourceEquipeFonctionnelle.createMany({
+        data: fnIds.map((equipeId) => ({ ressourceId: id, equipeId })),
+      });
+    }
+
+    // Keep linked account identity in sync with master people data
+    const identity = identityFromRessource(updated);
+    await tx.user.updateMany({
+      where: { ressourceId: id },
+      data: identity,
+    });
+  });
+
   revalidatePath("/");
   revalidatePath("/ressources");
   revalidatePath(`/ressources/${id}`);
+  revalidatePath("/admin/users");
+}
+
+export async function createAccountForRessource(
+  ressourceId: string,
+  data: { username: string; password: string; role: string }
+) {
+  await requireRole("Admin");
+
+  const ressource = await prisma.ressource.findUnique({
+    where: { id: ressourceId },
+    include: { user: { select: { id: true } } },
+  });
+  if (!ressource) throw new Error("Ressource introuvable.");
+  if (ressource.user) {
+    throw new Error("Cette ressource a déjà un compte applicatif.");
+  }
+
+  const username = data.username.trim();
+  if (!username) throw new Error("Le nom d'utilisateur est obligatoire.");
+  const existing = await prisma.user.findUnique({ where: { username } });
+  if (existing) throw new Error("Ce nom d'utilisateur existe déjà.");
+
+  const appRole = await prisma.appRole.findUnique({ where: { code: data.role } });
+  if (!appRole || !appRole.is_active) {
+    throw new Error("Rôle invalide ou désactivé.");
+  }
+
+  const complexityError = validatePasswordComplexity(data.password);
+  if (complexityError) throw new Error(complexityError);
+
+  const password_hash = await hashPassword(data.password);
+  const identity = identityFromRessource(ressource);
+
+  await prisma.user.create({
+    data: {
+      username,
+      password_hash,
+      role: data.role,
+      must_change_pwd: true,
+      ressourceId: ressource.id,
+      ...identity,
+    },
+  });
+
+  revalidatePath("/ressources");
+  revalidatePath(`/ressources/${ressourceId}`);
+  revalidatePath("/admin/users");
 }
 
 export async function deleteRessource(id: string) {
   await requireRole("Admin", "Workforce_Manager");
   const counts = await prisma.ressource.findUnique({
     where: { id },
-    include: { _count: { select: { membres: true, raids: true } } },
+    include: {
+      user: { select: { id: true, username: true } },
+      _count: { select: { membres: true, raids: true } },
+    },
   });
-  if (counts && (counts._count.membres > 0 || counts._count.raids > 0)) {
+  if (!counts) throw new Error("Ressource introuvable.");
+  if (counts.user) {
+    throw new Error(
+      `Impossible de supprimer : un compte applicatif « ${counts.user.username} » est lié. Supprimez d'abord le compte (Administration → Utilisateurs).`
+    );
+  }
+  if (counts._count.membres > 0 || counts._count.raids > 0) {
     throw new Error(
       `Impossible de supprimer : ${counts._count.membres} membre(s) d'équipe et ${counts._count.raids} élément(s) RAID lié(s).`
     );
@@ -1941,6 +2533,119 @@ export async function getCapaciteGlobale(annee: number) {
       avgCharge,
     };
   });
+}
+
+/**
+ * Personal capacity for the signed-in user's resource (same rules as Capacité heatmap).
+ * Year-scoped monthly charge for Mon Tableau de bord.
+ */
+export async function getPersonalCapacite(annee: number) {
+  const session = await requireAuth();
+  if (!session.ressourceId) return null;
+
+  const r = await prisma.ressource.findUnique({
+    where: { id: session.ressourceId },
+    include: {
+      membres: {
+        include: {
+          chantier: {
+            select: {
+              date_debut: true,
+              date_fin: true,
+              statut: true,
+              code: true,
+              nom: true,
+            },
+          },
+        },
+      },
+      saisiesTemps: {
+        where: {
+          date_lundi: {
+            gte: new Date(annee, 0, 1),
+            lt: new Date(annee + 1, 0, 1),
+          },
+        },
+      },
+    },
+  });
+
+  if (!r || !r.actif) return null;
+
+  const capacite = r.capacite_jours_mois;
+  const months: {
+    mois: number;
+    jours_planifies: number;
+    jours_travailles: number;
+    charge_pct: number;
+    chantiers: { code: string; nom: string; charge_pourcentage: number }[];
+  }[] = [];
+
+  for (let month = 0; month < 12; month++) {
+    const monthStart = new Date(annee, month, 1);
+    const monthEnd = new Date(annee, month + 1, 0);
+
+    let joursPlanifies = 0;
+    const chantiers: {
+      code: string;
+      nom: string;
+      charge_pourcentage: number;
+    }[] = [];
+
+    for (const m of r.membres) {
+      const chantierDebut = new Date(m.chantier.date_debut);
+      const chantierFin = new Date(m.chantier.date_fin);
+      if (m.chantier.statut === "Clôturé") continue;
+      if (chantierDebut <= monthEnd && chantierFin >= monthStart) {
+        joursPlanifies += (m.charge_pourcentage / 100) * capacite;
+        chantiers.push({
+          code: m.chantier.code,
+          nom: m.chantier.nom,
+          charge_pourcentage: m.charge_pourcentage,
+        });
+      }
+    }
+
+    let joursTravailles = 0;
+    for (const s of r.saisiesTemps) {
+      const sDate = new Date(s.date_lundi);
+      if (sDate.getMonth() === month) {
+        joursTravailles += s.jours_travailles;
+      }
+    }
+
+    months.push({
+      mois: month + 1,
+      jours_planifies: Math.round(joursPlanifies * 10) / 10,
+      jours_travailles: Math.round(joursTravailles * 10) / 10,
+      charge_pct:
+        capacite > 0 ? Math.round((joursPlanifies / capacite) * 100) : 0,
+      chantiers,
+    });
+  }
+
+  const avgCharge = Math.round(
+    months.reduce((s, m) => s + m.charge_pct, 0) / 12
+  );
+
+  const now = new Date();
+  const currentMonth =
+    months.find(
+      (m) =>
+        m.mois === now.getMonth() + 1 && annee === now.getFullYear()
+    ) ?? months[now.getMonth()];
+
+  return {
+    id: r.id,
+    nom_complet: r.nom_complet,
+    type: r.type,
+    organisation: r.organisation,
+    capacite,
+    months,
+    avgCharge,
+    currentCharge: currentMonth?.charge_pct ?? 0,
+    annee,
+  };
 }
 
 export async function getBurnRateChantier(chantierId: string) {

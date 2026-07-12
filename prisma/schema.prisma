@@ -88,19 +88,39 @@ model Ressource {
   capacite_jours_mois Int              @default(20)
   actif               Boolean          @default(true)
   profilId            String?
+  /// Hierarchical home team in the bank (required at application level).
+  equipeHierarchieId  String?
   createdAt           DateTime         @default(now())
   updatedAt           DateTime         @updatedAt
   membres             MembreEquipe[]
   raids               Raid[]
   profil              ProfilRessource? @relation(fields: [profilId], references: [id])
+  equipeHierarchie    Equipe?          @relation("RessourceEquipeHierarchie", fields: [equipeHierarchieId], references: [id], onDelete: SetNull)
+  equipesFonctionnelles RessourceEquipeFonctionnelle[]
   saisiesTemps        SaisieTemps[]
   user                User?
+
+  @@index([equipeHierarchieId])
+}
+
+/// Functional multi-team membership for a resource (in addition to hierarchical team).
+model RessourceEquipeFonctionnelle {
+  id          String    @id @default(uuid())
+  ressourceId String
+  equipeId    String
+  createdAt   DateTime  @default(now())
+  ressource   Ressource @relation(fields: [ressourceId], references: [id], onDelete: Cascade)
+  equipe      Equipe    @relation(fields: [equipeId], references: [id], onDelete: Cascade)
+
+  @@unique([ressourceId, equipeId])
+  @@index([equipeId])
 }
 
 model User {
   id              String     @id @default(uuid())
   username        String     @unique
   password_hash   String
+  /// Identity fields kept in sync with linked Ressource (source of truth for people data).
   first_name      String     @default("")
   last_name       String     @default("")
   phone           String     @default("")
@@ -112,6 +132,7 @@ model User {
   role            String     @default("PMO_Chantier")
   must_change_pwd Boolean    @default(true)
   is_active       Boolean    @default(true)
+  /// App account is always a Ressource (1:1). Enforced on create; nullable only for legacy rows.
   ressourceId     String?    @unique
   failed_attempts Int        @default(0)
   dashboard_type  String     @default("complete")
@@ -200,13 +221,32 @@ model Comite {
   raids              Raid[]
 }
 
+/// Bank teams / owning org units (admin-managed catalog).
+model Equipe {
+  id          String            @id @default(uuid())
+  name        String            @unique
+  description String            @default("")
+  position    Int               @default(0)
+  is_active   Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  comiteParametres ComiteParametre[]
+  ressourcesHierarchie Ressource[] @relation("RessourceEquipeHierarchie")
+  ressourcesFonctionnelles RessourceEquipeFonctionnelle[]
+
+  @@index([position])
+  @@index([is_active])
+}
+
 /// Parameter table for committee types (instances) — admin-managed catalog.
 model ComiteParametre {
   id          String   @id @default(uuid())
   name        String   @unique
   description String   @default("")
   frequency   String   @default("")
+  /// Denormalized team name (kept in sync with Equipe for display / legacy).
   owner       String   @default("")
+  equipeId    String?
   /// Short label for tabs / filters (e.g. CTR). Falls back to name in UI if empty.
   short_label String   @default("")
   color       String   @default("#6b7280")
@@ -214,9 +254,11 @@ model ComiteParametre {
   is_active   Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  equipe      Equipe?  @relation(fields: [equipeId], references: [id], onDelete: SetNull)
 
   @@index([position])
   @@index([is_active])
+  @@index([equipeId])
 }
 
 model Settings {

@@ -1,5 +1,7 @@
 import { getDashboardStats, getDashboardPMO, getCapaciteGlobale } from "./actions";
 import { requireAuth } from "@/lib/auth";
+import { getRoleByCode, roleCanAccessPage } from "@/lib/roles";
+import { redirect } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -28,6 +30,12 @@ import { DashboardPMO } from "@/components/dashboard-pmo";
 
 export default async function Home() {
   const session = await requireAuth();
+  const role = await getRoleByCode(session.role);
+  // Honour role page permissions — do not allow bypassing a disabled "Tableau de bord"
+  if (!roleCanAccessPage(role, "/")) {
+    redirect("/mon-tableau-de-bord");
+  }
+
   const isPMO = session.role === "PMO_Chantier";
 
   if (isPMO) {

@@ -30,6 +30,8 @@ import {
   Mail,
   Wrench,
   Database,
+  UsersRound,
+  LayoutPanelLeft,
 } from "lucide-react";
 import { AlertBell } from "@/components/alert-bell";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -95,6 +97,11 @@ const ALL_SECTIONS: NavSection[] = [
       { href: "/admin/users", label: "Utilisateurs", icon: Users },
       { href: "/admin/roles", label: "Rôles", icon: ShieldCheck },
       {
+        href: "/admin/equipes",
+        label: "Équipes",
+        icon: UsersRound,
+      },
+      {
         href: "/admin/comites-parametres",
         label: "Paramètres comités",
         icon: CalendarCheck,
@@ -130,6 +137,34 @@ function canAccessPath(allowedPages: string[], href: string): boolean {
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(href + "/");
+}
+
+/** Top Général dashboard links: home and/or personal dashboard. */
+function resolveGeneralDashboardLinks(allowedPages: string[], role: string) {
+  const canHome = role === "Admin" || canAccessPath(allowedPages, "/");
+  const canMine =
+    role === "Admin" ||
+    canAccessPath(allowedPages, "/mon-tableau-de-bord") ||
+    !canHome; // if no global dashboard, always offer personal
+
+  const links: { href: string; label: string }[] = [];
+  if (canHome) {
+    links.push({ href: "/", label: "Tableau de bord" });
+  }
+  if (canMine) {
+    links.push({
+      href: "/mon-tableau-de-bord",
+      label: "Mon Tableau de bord",
+    });
+  }
+  // Fallback: at least personal dashboard
+  if (links.length === 0) {
+    links.push({
+      href: "/mon-tableau-de-bord",
+      label: "Mon Tableau de bord",
+    });
+  }
+  return links;
 }
 
 function SidebarSection({
@@ -240,6 +275,11 @@ export function NavBar({ children }: { children?: React.ReactNode }) {
       .filter((section) => section.items.length > 0);
   }, [user.allowedPages]);
 
+  const generalLinks = useMemo(
+    () => resolveGeneralDashboardLinks(user.allowedPages, user.role),
+    [user.allowedPages, user.role]
+  );
+
   // Close mobile menu on route change
   useEffect(() => {
     setMobileOpen(false);
@@ -323,41 +363,57 @@ export function NavBar({ children }: { children?: React.ReactNode }) {
           )}
         </div>
 
-        {/* Dashboard link */}
-        <div className={`pt-3 ${collapsed ? "px-2" : "px-3"}`}>
-          {collapsed ? (
-            <Tooltip delayDuration={0}>
-              <TooltipTrigger asChild>
-                <Link
-                  href="/"
-                  onClick={closeMobile}
-                  className={`flex items-center justify-center rounded-lg p-2.5 transition-colors ${
-                    pathname === "/"
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                  }`}
-                >
-                  <LayoutDashboard className="size-5" />
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent side="right" sideOffset={8}>
-                Tableau de bord
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            <Link
-              href="/"
-              onClick={closeMobile}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                pathname === "/"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-              }`}
-            >
-              <LayoutDashboard className="size-4" />
-              Tableau de bord
-            </Link>
+        {/* Général: Tableau de bord + Mon Tableau de bord */}
+        <div className={`pt-3 space-y-0.5 ${collapsed ? "px-2" : "px-3"}`}>
+          {!collapsed && (
+            <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Général
+            </p>
           )}
+          {generalLinks.map((link) => {
+            const active = isActive(pathname, link.href);
+            const Icon =
+              link.href === "/mon-tableau-de-bord"
+                ? LayoutPanelLeft
+                : LayoutDashboard;
+            if (collapsed) {
+              return (
+                <Tooltip key={link.href} delayDuration={0}>
+                  <TooltipTrigger asChild>
+                    <Link
+                      href={link.href}
+                      onClick={closeMobile}
+                      className={`flex items-center justify-center rounded-lg p-2.5 transition-colors ${
+                        active
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                      }`}
+                    >
+                      <Icon className="size-5" />
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={8}>
+                    {link.label}
+                  </TooltipContent>
+                </Tooltip>
+              );
+            }
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                onClick={closeMobile}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                  active
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                }`}
+              >
+                <Icon className="size-4" />
+                {link.label}
+              </Link>
+            );
+          })}
         </div>
 
         {/* Sections */}

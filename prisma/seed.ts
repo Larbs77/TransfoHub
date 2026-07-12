@@ -20,6 +20,7 @@ async function main() {
   await prisma.chantier.deleteMany();
   await prisma.comite.deleteMany();
   await prisma.comiteParametre.deleteMany();
+  await prisma.equipe.deleteMany();
   await prisma.rmd.deleteMany();
   // Detach users from resources before wiping the resource catalog
   await prisma.user.updateMany({ data: { ressourceId: null } });
@@ -81,6 +82,42 @@ async function main() {
   await prisma.settings.create({
     data: { id: 1, seuil_relance_jours: 3, seuil_qa_critique_heures: 48 },
   });
+
+  // Bank teams (owners for committee types)
+  const equipesData = [
+    {
+      name: "Bureau Programme",
+      description: "Bureau du programme de transformation",
+      position: 0,
+    },
+    {
+      name: "Direction Technologie",
+      description: "Direction des technologies et SI",
+      position: 1,
+    },
+    {
+      name: "Assurance Qualité",
+      description: "Équipe assurance qualité",
+      position: 2,
+    },
+    {
+      name: "Direction Générale",
+      description: "Direction générale",
+      position: 3,
+    },
+    {
+      name: "Architecture Entreprise",
+      description: "Architecture d'entreprise",
+      position: 4,
+    },
+  ];
+  const equipeByName: Record<string, string> = {};
+  for (const eq of equipesData) {
+    const created = await prisma.equipe.create({
+      data: { ...eq, is_active: true },
+    });
+    equipeByName[eq.name] = created.id;
+  }
 
   // Catalog of committee types (instances) — admin-managed
   const comiteParametres = [
@@ -149,7 +186,13 @@ async function main() {
     },
   ];
   for (const cp of comiteParametres) {
-    await prisma.comiteParametre.create({ data: { ...cp, is_active: true } });
+    await prisma.comiteParametre.create({
+      data: {
+        ...cp,
+        is_active: true,
+        equipeId: equipeByName[cp.owner] ?? null,
+      },
+    });
   }
 
   // Default status configurations
@@ -389,12 +432,29 @@ async function main() {
     { nom_complet: "Salma Benjelloun", type: "Externe", organisation: "CGI", tarif_journalier: 9000, capacite_jours_mois: 20, email: "s.benjelloun@cgi.com", profil: "Chef de projet" },
   ];
 
+  const defaultEquipeId =
+    equipeByName["Bureau Programme"] ??
+    Object.values(equipeByName)[0] ??
+    null;
+
   const createdRessources: Record<string, string> = {};
   for (const res of ressourcesData) {
     const profilId = createdProfils[`${res.type}:${res.profil}`] ?? null;
     const { profil, ...restData } = res;
+    // Hierarchical team: interne BMCE → Bureau Programme; others tech/programme defaults
+    const equipeHierarchieId =
+      res.organisation === "BMCE"
+        ? equipeByName["Bureau Programme"] ?? defaultEquipeId
+        : equipeByName["Direction Technologie"] ?? defaultEquipeId;
     const created = await prisma.ressource.create({
-      data: { ...restData, actif: true, telephone: "", email: res.email, profilId },
+      data: {
+        ...restData,
+        actif: true,
+        telephone: "",
+        email: res.email,
+        profilId,
+        equipeHierarchieId,
+      },
     });
     createdRessources[res.nom_complet] = created.id;
   }

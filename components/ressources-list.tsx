@@ -53,7 +53,20 @@ interface RessourceWithStats {
   capacite_jours_mois: number;
   actif: boolean;
   profilId?: string | null;
+  equipeHierarchieId?: string | null;
   profil?: { id: string; nom: string; type_ressource: string; tjm_defaut: number } | null;
+  equipeHierarchie?: { id: string; name: string; is_active: boolean } | null;
+  equipesFonctionnelles?: {
+    equipeId: string;
+    equipe?: { id: string; name: string; is_active: boolean };
+  }[];
+  user?: {
+    id: string;
+    username: string;
+    role: string;
+    is_active: boolean;
+    last_login?: Date | null;
+  } | null;
   createdAt: Date;
   updatedAt: Date;
   _count: { membres: number; raids: number };
@@ -61,6 +74,9 @@ interface RessourceWithStats {
 
 interface Props {
   ressources: RessourceWithStats[];
+  equipes?: { id: string; name: string; is_active: boolean }[];
+  activeRoles?: { code: string; label: string }[];
+  canCreateAccount?: boolean;
 }
 
 type ViewMode = "grid" | "table";
@@ -190,7 +206,12 @@ const ACTIF_OPTIONS = [
   { value: "false", label: "Inactif" },
 ];
 
-export function RessourcesList({ ressources }: Props) {
+export function RessourcesList({
+  ressources,
+  equipes = [],
+  activeRoles = [],
+  canCreateAccount = false,
+}: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState<string[]>([]);
@@ -234,7 +255,9 @@ export function RessourcesList({ ressources }: Props) {
         (r) =>
           r.nom_complet.toLowerCase().includes(q) ||
           r.email.toLowerCase().includes(q) ||
-          r.organisation.toLowerCase().includes(q)
+          r.organisation.toLowerCase().includes(q) ||
+          (r.equipeHierarchie?.name ?? "").toLowerCase().includes(q) ||
+          (r.user?.username ?? "").toLowerCase().includes(q)
       );
     }
     if (filterType.length > 0) {
@@ -401,7 +424,15 @@ export function RessourcesList({ ressources }: Props) {
                 Aucune ressource trouvée
               </p>
             ) : (
-              paginated.map((r) => <RessourceCard key={r.id} ressource={r} />)
+              paginated.map((r) => (
+                <RessourceCard
+                  key={r.id}
+                  ressource={r}
+                  equipes={equipes}
+                  activeRoles={activeRoles}
+                  canCreateAccount={canCreateAccount}
+                />
+              ))
             )}
           </div>
           {pageSize > 0 && totalPages > 1 && (
@@ -426,17 +457,13 @@ export function RessourcesList({ ressources }: Props) {
                   <SortHeader label="Type" field="type" current={sortField} dir={sortDir} onSort={handleSort} />
                 </TableHead>
                 <TableHead>Profil</TableHead>
-                <TableHead>
-                  <SortHeader label="Organisation" field="organisation" current={sortField} dir={sortDir} onSort={handleSort} />
-                </TableHead>
+                <TableHead>Équipe hier.</TableHead>
+                <TableHead>Compte</TableHead>
                 <TableHead>
                   <SortHeader label="Chantiers" field="membres" current={sortField} dir={sortDir} onSort={handleSort} />
                 </TableHead>
                 <TableHead>
                   <SortHeader label="RAID" field="raids" current={sortField} dir={sortDir} onSort={handleSort} />
-                </TableHead>
-                <TableHead>
-                  <SortHeader label="TJM" field="tarif" current={sortField} dir={sortDir} onSort={handleSort} />
                 </TableHead>
                 <TableHead>Statut</TableHead>
                 <TableHead className="w-[100px]">Actions</TableHead>
@@ -456,7 +483,12 @@ export function RessourcesList({ ressources }: Props) {
                 paginated.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="font-medium">
-                      {r.nom_complet}
+                      <div>{r.nom_complet}</div>
+                      {r.email ? (
+                        <div className="text-[11px] text-muted-foreground">
+                          {r.email}
+                        </div>
+                      ) : null}
                     </TableCell>
                     <TableCell>
                       <Badge
@@ -473,18 +505,29 @@ export function RessourcesList({ ressources }: Props) {
                       {r.profil?.nom || "—"}
                     </TableCell>
                     <TableCell className="text-sm">
-                      {r.organisation || "—"}
+                      <div>{r.equipeHierarchie?.name || "—"}</div>
+                      {(r.equipesFonctionnelles?.length ?? 0) > 0 && (
+                        <div className="text-[11px] text-muted-foreground">
+                          +{r.equipesFonctionnelles!.length} fonct.
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {r.user ? (
+                        <Badge className="text-[10px] bg-blue-600 hover:bg-blue-600">
+                          {r.user.username}
+                        </Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          Sans compte
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="text-center">
                       {r._count.membres}
                     </TableCell>
                     <TableCell className="text-center">
                       {r._count.raids}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {r.tarif_journalier > 0
-                        ? `${r.tarif_journalier.toLocaleString("fr-MA")} MAD`
-                        : "—"}
                     </TableCell>
                     <TableCell>
                       <Badge
@@ -541,6 +584,9 @@ export function RessourcesList({ ressources }: Props) {
               open={!!editRessource}
               onOpenChange={(open) => !open && setEditRessource(null)}
               ressource={editRessource}
+              equipes={equipes}
+              activeRoles={activeRoles}
+              canCreateAccount={canCreateAccount}
             />
           )}
 

@@ -29,6 +29,7 @@ import { CalendarView, type CalendarEvent } from "./calendar-view";
 import { ActionKanban } from "./action-kanban";
 import { deleteRaid } from "@/app/(app)/actions";
 import { scoreCriticite } from "@/lib/utils-pmo";
+import { useUser } from "@/components/user-provider";
 import {
   RAID_TYPE_COLORS,
   RAID_TYPE_LABELS,
@@ -46,6 +47,9 @@ import {
   getStatutOrderFromConfig,
   type StatusConfigItem,
 } from "@/lib/raid-labels";
+
+/** Mon RAID = assigned to me; all = équipes & chantiers (full list scope). */
+type RaidScope = "mine" | "all";
 
 interface RaidRow {
   id: string;
@@ -612,25 +616,111 @@ function RaidTable({
   );
 }
 
+function isRaidAssignedToMe(
+  r: RaidRow,
+  ressourceId: string | null,
+  displayName: string
+): boolean {
+  if (ressourceId && r.responsableRessourceId === ressourceId) return true;
+  if (!ressourceId && displayName.trim()) {
+    const name = displayName.trim().toLowerCase();
+    const resp = (r.responsable || "").trim().toLowerCase();
+    if (resp && (resp === name || resp.includes(name) || name.includes(resp))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function RaidScopeToggles({
+  scope,
+  onChange,
+  mineCount,
+  allCount,
+}: {
+  scope: RaidScope;
+  onChange: (s: RaidScope) => void;
+  mineCount: number;
+  allCount: number;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-start gap-2 sm:gap-3">
+      <button
+        type="button"
+        onClick={() => onChange("mine")}
+        className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-all ${
+          scope === "mine"
+            ? "border-primary bg-primary text-primary-foreground shadow-sm"
+            : "border-primary/25 bg-background text-primary/80 hover:border-primary/50 hover:bg-primary/5"
+        }`}
+      >
+        Mon RAID
+        <span
+          className={`ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-semibold ${
+            scope === "mine"
+              ? "bg-primary-foreground/20 text-primary-foreground"
+              : "bg-primary/10 text-primary"
+          }`}
+        >
+          {mineCount}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("all")}
+        className={`rounded-full border-2 px-3 py-1.5 text-xs font-semibold transition-all ${
+          scope === "all"
+            ? "border-[#00BDBB] bg-[#00BDBB] text-white shadow-md shadow-[#00BDBB]/25"
+            : "border-[#00BDBB] bg-[#00BDBB]/15 text-[#0A3C74] ring-1 ring-[#00BDBB]/30 hover:bg-[#00BDBB]/25 hover:shadow-sm dark:text-[#5ad4d2]"
+        }`}
+      >
+        RAID Équipes &amp; Chantiers
+        <span
+          className={`ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold ${
+            scope === "all"
+              ? "bg-white/25 text-white"
+              : "bg-[#00BDBB] text-white"
+          }`}
+        >
+          {allCount}
+        </span>
+      </button>
+    </div>
+  );
+}
+
 export function RaidList({ items, filterType, initialProbabilite, initialImpact, initialStatut, initialOverdue, initialCritical, statusConfigs }: Props) {
+  const { ressourceId, displayName } = useUser();
+  const [raidScope, setRaidScope] = useState<RaidScope>("mine");
   const [editItem, setEditItem] = useState<RaidRow | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const mineCount = useMemo(
+    () =>
+      items.filter((r) => isRaidAssignedToMe(r, ressourceId, displayName)).length,
+    [items, ressourceId, displayName]
+  );
+
+  const scopedItems = useMemo(() => {
+    if (raidScope === "all") return items;
+    return items.filter((r) => isRaidAssignedToMe(r, ressourceId, displayName));
+  }, [items, raidScope, ressourceId, displayName]);
+
   // Group by type
   const grouped = useMemo(() => {
     const map = new Map<string, RaidRow[]>();
-    for (const r of items) {
+    for (const r of scopedItems) {
       const list = map.get(r.type) ?? [];
       list.push(r);
       map.set(r.type, list);
     }
     return map;
-  }, [items]);
+  }, [scopedItems]);
 
   // Calendar events
   const calendarEvents: CalendarEvent[] = useMemo(() => {
-    return items
+    return scopedItems
       .filter((r) => r.date_echeance || r.date_revision || r.date_identification)
       .map((r) => ({
         id: r.id,
@@ -650,16 +740,27 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
             : "",
         },
       }));
-  }, [items]);
+  }, [scopedItems]);
 
   const typeOrder = ["Action", "Risque", "Information", "Décision"] as const;
+
+  const scopeBar = (
+    <RaidScopeToggles
+      scope={raidScope}
+      onChange={setRaidScope}
+      mineCount={mineCount}
+      allCount={items.length}
+    />
+  );
 
   // If filtered to a single type, show table directly (no type tabs)
   if (filterType) {
     const typeItems = grouped.get(filterType) ?? [];
+    const typeCalendar = calendarEvents.filter((e) => e.type === filterType);
     return (
       <>
-        <Tabs defaultValue="table" className="space-y-4">
+        <div className="mb-4">{scopeBar}</div>
+        <Tabs defaultValue="table" className="space-y-4" key={`scope-${raidScope}-${filterType}`}>
           <TabsList>
             <TabsTrigger value="table" className="gap-2">
               Tableau
@@ -698,7 +799,7 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
             </TabsContent>
           )}
           <TabsContent value="calendrier">
-            <CalendarView events={calendarEvents} />
+            <CalendarView events={typeCalendar} />
           </TabsContent>
         </Tabs>
 
@@ -733,7 +834,12 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
 
   return (
     <>
-      <Tabs defaultValue={firstType} className="space-y-4">
+      <div className="mb-4">{scopeBar}</div>
+      <Tabs
+        defaultValue={firstType}
+        className="space-y-4"
+        key={`scope-${raidScope}-all`}
+      >
         <TabsList className="h-auto p-1 gap-1 flex-wrap">
           {typeOrder.map((t) => {
             const count = grouped.get(t)?.length ?? 0;

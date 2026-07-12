@@ -6,7 +6,7 @@ import {
   Pencil,
   Trash2,
   Search,
-  CalendarCheck,
+  UsersRound,
   ToggleLeft,
   ToggleRight,
 } from "lucide-react";
@@ -28,153 +28,71 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import type { EquipeOption } from "@/lib/comite-labels";
 import {
-  createComiteParametre,
-  updateComiteParametre,
-  deleteComiteParametre,
-  setComiteParametreActive,
+  createEquipe,
+  updateEquipe,
+  deleteEquipe,
+  setEquipeActive,
 } from "./actions";
 
-export type ComiteParametreRow = {
+export type EquipeRow = {
   id: string;
   name: string;
   description: string;
-  frequency: string;
-  owner: string;
-  equipeId: string | null;
-  short_label: string;
-  color: string;
   position: number;
   is_active: boolean;
+  comiteCount: number;
   createdAt: Date;
   updatedAt: Date;
-  equipe?: { id: string; name: string; is_active: boolean } | null;
 };
-
-const PRESET_COLORS = [
-  "#2563eb",
-  "#059669",
-  "#0d9488",
-  "#7c3aed",
-  "#dc2626",
-  "#ea580c",
-  "#ca8a04",
-  "#0891b2",
-  "#db2777",
-  "#4b5563",
-];
-
-const FREQUENCY_SUGGESTIONS = [
-  "Hebdomadaire",
-  "Bi-hebdomadaire",
-  "Bi-mensuel",
-  "Mensuel",
-  "Trimestriel",
-  "Semestriel",
-  "Annuel",
-  "Ad hoc",
-];
 
 const emptyForm = {
   name: "",
   description: "",
-  frequency: "",
-  equipeId: "",
-  short_label: "",
-  color: "#2563eb",
   position: 0,
   is_active: true,
 };
 
-export function ComiteParametreManagement({
+export function EquipeManagement({
   initialRows,
-  equipes,
 }: {
-  initialRows: ComiteParametreRow[];
-  equipes: EquipeOption[];
+  initialRows: EquipeRow[];
 }) {
   const [rows, setRows] = useState(initialRows);
   const [search, setSearch] = useState("");
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editing, setEditing] = useState<ComiteParametreRow | null>(null);
+  const [editing, setEditing] = useState<EquipeRow | null>(null);
   const [form, setForm] = useState(emptyForm);
-  const [deleteTarget, setDeleteTarget] = useState<ComiteParametreRow | null>(
-    null
-  );
-
-  const equipeOptionsForForm = useMemo(() => {
-    // Active teams + currently selected inactive team (edit)
-    const active = equipes.filter((e) => e.is_active);
-    if (form.equipeId) {
-      const current = equipes.find((e) => e.id === form.equipeId);
-      if (current && !current.is_active) {
-        return [...active, current].sort(
-          (a, b) =>
-            (a.position ?? 0) - (b.position ?? 0) ||
-            a.name.localeCompare(b.name)
-        );
-      }
-    }
-    return active;
-  }, [equipes, form.equipeId]);
+  const [deleteTarget, setDeleteTarget] = useState<EquipeRow | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((r) =>
-      [
-        r.name,
-        r.short_label,
-        r.description,
-        r.frequency,
-        r.owner,
-        r.equipe?.name ?? "",
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(q)
+      [r.name, r.description].join(" ").toLowerCase().includes(q)
     );
   }, [rows, search]);
-
-  function ownerLabel(row: ComiteParametreRow) {
-    return row.equipe?.name || row.owner || "—";
-  }
 
   function openCreate() {
     setEditing(null);
     setError("");
-    const defaultEquipe =
-      equipes.find((e) => e.is_active)?.id ?? equipes[0]?.id ?? "";
     setForm({
       ...emptyForm,
-      equipeId: defaultEquipe,
       position:
         rows.length > 0 ? Math.max(...rows.map((r) => r.position)) + 1 : 0,
     });
     setDialogOpen(true);
   }
 
-  function openEdit(row: ComiteParametreRow) {
+  function openEdit(row: EquipeRow) {
     setEditing(row);
     setError("");
     setForm({
       name: row.name,
       description: row.description,
-      frequency: row.frequency,
-      equipeId: row.equipeId ?? row.equipe?.id ?? "",
-      short_label: row.short_label,
-      color: row.color || "#6b7280",
       position: row.position,
       is_active: row.is_active,
     });
@@ -183,26 +101,12 @@ export function ComiteParametreManagement({
 
   function handleSave() {
     setError("");
-    if (!form.equipeId) {
-      setError("Le propriétaire (équipe) est obligatoire.");
-      return;
-    }
     startTransition(async () => {
       try {
-        const payload = {
-          name: form.name,
-          description: form.description,
-          frequency: form.frequency,
-          equipeId: form.equipeId,
-          short_label: form.short_label,
-          color: form.color,
-          position: form.position,
-          is_active: form.is_active,
-        };
         if (editing) {
-          await updateComiteParametre(editing.id, payload);
+          await updateEquipe(editing.id, form);
         } else {
-          await createComiteParametre(payload);
+          await createEquipe(form);
         }
         setDialogOpen(false);
         window.location.reload();
@@ -212,11 +116,11 @@ export function ComiteParametreManagement({
     });
   }
 
-  function handleToggle(row: ComiteParametreRow) {
+  function handleToggle(row: EquipeRow) {
     setError("");
     startTransition(async () => {
       try {
-        await setComiteParametreActive(row.id, !row.is_active);
+        await setEquipeActive(row.id, !row.is_active);
         setRows((prev) =>
           prev.map((r) =>
             r.id === row.id ? { ...r, is_active: !r.is_active } : r
@@ -233,7 +137,7 @@ export function ComiteParametreManagement({
     setError("");
     startTransition(async () => {
       try {
-        await deleteComiteParametre(deleteTarget.id);
+        await deleteEquipe(deleteTarget.id);
         setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
         setDeleteTarget(null);
       } catch (e) {
@@ -248,43 +152,35 @@ export function ComiteParametreManagement({
         <CardHeader>
           <div className="flex items-start gap-3">
             <div className="flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-              <CalendarCheck className="size-5 text-[#00BDBB]" />
+              <UsersRound className="size-5 text-[#00BDBB]" />
             </div>
             <div className="flex-1">
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#00BDBB]">
                 Administration
               </p>
               <CardTitle className="text-2xl text-primary">
-                Paramètres comités
+                Gestion des équipes
               </CardTitle>
               <CardDescription className="mt-1">
-                Catalogue des types d&apos;instances de comités (nom, fréquence,
-                équipe propriétaire). Le propriétaire est choisi parmi les{" "}
-                <span className="font-medium text-foreground">Équipes</span>{" "}
-                administrées.
+                Catalogue des équipes / unités organisationnelles de la banque.
+                Utilisé comme propriétaire des types de comités (Paramètres
+                comités).
               </CardDescription>
             </div>
             <CardAction>
-              <Button onClick={openCreate} disabled={equipes.length === 0}>
+              <Button onClick={openCreate}>
                 <Plus className="size-4" />
-                Nouveau type
+                Nouvelle équipe
               </Button>
             </CardAction>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {equipes.length === 0 && (
-            <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
-              Aucune équipe définie. Créez d&apos;abord des équipes dans{" "}
-              <span className="font-medium">Administration → Équipes</span>.
-            </p>
-          )}
-
           <div className="relative max-w-md">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               className="pl-9"
-              placeholder="Rechercher un type de comité…"
+              placeholder="Rechercher une équipe…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -300,9 +196,8 @@ export function ComiteParametreManagement({
                 <tr>
                   <th className="px-3 py-2.5 font-medium">Ordre</th>
                   <th className="px-3 py-2.5 font-medium">Nom</th>
-                  <th className="px-3 py-2.5 font-medium">Libellé court</th>
-                  <th className="px-3 py-2.5 font-medium">Fréquence</th>
-                  <th className="px-3 py-2.5 font-medium">Propriétaire</th>
+                  <th className="px-3 py-2.5 font-medium">Description</th>
+                  <th className="px-3 py-2.5 font-medium">Comités</th>
                   <th className="px-3 py-2.5 font-medium">Statut</th>
                   <th className="px-3 py-2.5 font-medium text-right">Actions</th>
                 </tr>
@@ -311,11 +206,10 @@ export function ComiteParametreManagement({
                 {filtered.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={6}
                       className="px-3 py-10 text-center text-muted-foreground"
                     >
-                      Aucun type de comité
-                      {search ? " pour cette recherche" : ""}.
+                      Aucune équipe{search ? " pour cette recherche" : ""}.
                     </td>
                   </tr>
                 ) : (
@@ -327,28 +221,13 @@ export function ComiteParametreManagement({
                       <td className="px-3 py-2.5 tabular-nums text-muted-foreground">
                         {row.position}
                       </td>
-                      <td className="px-3 py-2.5">
-                        <div className="flex items-start gap-2">
-                          <span
-                            className="mt-1.5 size-2.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: row.color }}
-                            title={row.color}
-                          />
-                          <div>
-                            <p className="font-medium leading-tight">{row.name}</p>
-                            {row.description ? (
-                              <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                                {row.description}
-                              </p>
-                            ) : null}
-                          </div>
-                        </div>
-                      </td>
+                      <td className="px-3 py-2.5 font-medium">{row.name}</td>
                       <td className="px-3 py-2.5 text-muted-foreground">
-                        {row.short_label || "—"}
+                        {row.description || "—"}
                       </td>
-                      <td className="px-3 py-2.5">{row.frequency || "—"}</td>
-                      <td className="px-3 py-2.5">{ownerLabel(row)}</td>
+                      <td className="px-3 py-2.5 tabular-nums">
+                        {row.comiteCount}
+                      </td>
                       <td className="px-3 py-2.5">
                         <Badge
                           variant={row.is_active ? "default" : "secondary"}
@@ -358,7 +237,7 @@ export function ComiteParametreManagement({
                               : ""
                           }
                         >
-                          {row.is_active ? "Actif" : "Inactif"}
+                          {row.is_active ? "Active" : "Inactive"}
                         </Badge>
                       </td>
                       <td className="px-3 py-2.5">
@@ -411,10 +290,10 @@ export function ComiteParametreManagement({
       </Card>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {editing ? "Modifier le type de comité" : "Nouveau type de comité"}
+              {editing ? "Modifier l'équipe" : "Nouvelle équipe"}
             </DialogTitle>
           </DialogHeader>
           <div className="grid gap-4">
@@ -424,19 +303,11 @@ export function ComiteParametreManagement({
               </label>
               <Input
                 value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="ex. Comité Programme"
-                required
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <label className="text-sm font-medium">Libellé court</label>
-              <Input
-                value={form.short_label}
                 onChange={(e) =>
-                  setForm((f) => ({ ...f, short_label: e.target.value }))
+                  setForm((f) => ({ ...f, name: e.target.value }))
                 }
-                placeholder="ex. CTR (affiché dans les onglets)"
+                placeholder="ex. Bureau Programme"
+                required
               />
             </div>
             <div className="grid gap-1.5">
@@ -447,97 +318,22 @@ export function ComiteParametreManagement({
                 onChange={(e) =>
                   setForm((f) => ({ ...f, description: e.target.value }))
                 }
-                placeholder="Rôle de cette instance de gouvernance…"
+                placeholder="Rôle de l'équipe dans la banque…"
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-1.5">
-                <label className="text-sm font-medium">Fréquence</label>
-                <Input
-                  list="comite-frequency-suggestions"
-                  value={form.frequency}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, frequency: e.target.value }))
-                  }
-                  placeholder="ex. Mensuel"
-                />
-                <datalist id="comite-frequency-suggestions">
-                  {FREQUENCY_SUGGESTIONS.map((f) => (
-                    <option key={f} value={f} />
-                  ))}
-                </datalist>
-              </div>
-              <div className="grid gap-1.5">
-                <label className="text-sm font-medium">
-                  Propriétaire (équipe){" "}
-                  <span className="text-destructive">*</span>
-                </label>
-                <Select
-                  value={form.equipeId || undefined}
-                  onValueChange={(v) =>
-                    setForm((f) => ({ ...f, equipeId: v }))
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Choisir une équipe" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {equipeOptionsForForm.map((eq) => (
-                      <SelectItem key={eq.id} value={eq.id}>
-                        {eq.name}
-                        {!eq.is_active ? " (inactive)" : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {equipeOptionsForForm.length === 0 && (
-                  <p className="text-[11px] text-muted-foreground">
-                    Aucune équipe active — créez-en dans Administration →
-                    Équipes.
-                  </p>
-                )}
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-1.5">
-                <label className="text-sm font-medium">Ordre d&apos;affichage</label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={form.position}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      position: Number(e.target.value) || 0,
-                    }))
-                  }
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <label className="text-sm font-medium">Couleur</label>
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    type="color"
-                    value={form.color}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, color: e.target.value }))
-                    }
-                    className="size-9 cursor-pointer rounded border border-input bg-transparent p-0.5"
-                  />
-                  <div className="flex flex-wrap gap-1">
-                    {PRESET_COLORS.map((c) => (
-                      <button
-                        key={c}
-                        type="button"
-                        className="size-5 rounded-full border border-black/10 ring-offset-background transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        style={{ backgroundColor: c }}
-                        onClick={() => setForm((f) => ({ ...f, color: c }))}
-                        title={c}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">Ordre d&apos;affichage</label>
+              <Input
+                type="number"
+                min={0}
+                value={form.position}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    position: Number(e.target.value) || 0,
+                  }))
+                }
+              />
             </div>
             <label className="flex items-center gap-2 cursor-pointer select-none rounded-md border px-3 py-2 hover:bg-accent/50 transition-colors">
               <input
@@ -549,7 +345,7 @@ export function ComiteParametreManagement({
                 className="size-4 rounded border-input accent-primary"
               />
               <span className="text-sm font-medium">
-                Actif (proposé dans « Nouveau comité »)
+                Active (proposée comme propriétaire de comité)
               </span>
             </label>
             {error && dialogOpen && (
@@ -564,9 +360,7 @@ export function ComiteParametreManagement({
             </DialogClose>
             <Button
               type="button"
-              disabled={
-                isPending || !form.name.trim() || !form.equipeId
-              }
+              disabled={isPending || !form.name.trim()}
               onClick={handleSave}
             >
               {editing ? "Enregistrer" : "Créer"}
@@ -581,14 +375,14 @@ export function ComiteParametreManagement({
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Supprimer le type de comité</DialogTitle>
+            <DialogTitle>Supprimer l&apos;équipe</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             Confirmez la suppression de{" "}
             <span className="font-medium text-foreground">
               {deleteTarget?.name}
             </span>
-            . Impossible s&apos;il existe encore des séances liées.
+            . Impossible s&apos;il reste des types de comités liés.
           </p>
           {error && deleteTarget && (
             <p className="text-sm text-destructive">{error}</p>

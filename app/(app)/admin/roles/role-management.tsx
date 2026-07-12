@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   Shield,
   ShieldOff,
@@ -86,6 +87,7 @@ export function RoleManagement({
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">(
     "all"
   );
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -175,6 +177,7 @@ export function RoleManagement({
           await createRole(form);
         }
         setDialogOpen(false);
+        router.refresh();
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Erreur");
       }
@@ -186,6 +189,7 @@ export function RoleManagement({
     startTransition(async () => {
       try {
         await setRoleActive(role.id, !role.is_active);
+        router.refresh();
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Erreur");
       }

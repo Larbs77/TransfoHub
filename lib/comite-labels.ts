@@ -29,9 +29,19 @@ export type ComiteParametreOption = {
   description: string;
   frequency: string;
   owner: string;
+  equipeId?: string | null;
   short_label: string;
   color: string;
   position: number;
+  is_active: boolean;
+};
+
+/** Team option for owner selects. */
+export type EquipeOption = {
+  id: string;
+  name: string;
+  description?: string;
+  position?: number;
   is_active: boolean;
 };
 

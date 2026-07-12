@@ -10,6 +10,11 @@ export type AppPage = {
 
 export const APP_PAGES: AppPage[] = [
   { path: "/", label: "Tableau de bord", section: "Général" },
+  {
+    path: "/mon-tableau-de-bord",
+    label: "Mon Tableau de bord",
+    section: "Général",
+  },
   { path: "/chantiers", label: "Chantiers", section: "Suivi Opérationnel" },
   { path: "/adherences", label: "Adhérences", section: "Suivi Opérationnel" },
   { path: "/raid", label: "RAID", section: "Suivi Opérationnel" },
@@ -26,6 +31,11 @@ export const APP_PAGES: AppPage[] = [
   { path: "/capacite", label: "Capacité", section: "Ressources" },
   { path: "/admin/users", label: "Utilisateurs", section: "Administration" },
   { path: "/admin/roles", label: "Rôles", section: "Administration" },
+  {
+    path: "/admin/equipes",
+    label: "Équipes",
+    section: "Administration",
+  },
   {
     path: "/admin/comites-parametres",
     label: "Paramètres comités",
@@ -71,6 +81,7 @@ export const DEFAULT_ROLE_PAGES: Record<string, string[]> = {
   Admin: [...ALL_PAGE_PATHS],
   Programme_Office: [
     "/",
+    "/mon-tableau-de-bord",
     "/chantiers",
     "/adherences",
     "/raid",
@@ -87,6 +98,7 @@ export const DEFAULT_ROLE_PAGES: Record<string, string[]> = {
   ],
   PMO_Chantier: [
     "/",
+    "/mon-tableau-de-bord",
     "/chantiers",
     "/adherences",
     "/raid",
@@ -99,6 +111,7 @@ export const DEFAULT_ROLE_PAGES: Record<string, string[]> = {
   ],
   Workforce_Manager: [
     "/",
+    "/mon-tableau-de-bord",
     "/saisie-temps",
     "/calendrier",
     "/ressources",

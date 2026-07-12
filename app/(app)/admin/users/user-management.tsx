@@ -44,6 +44,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { MultiSelect } from "@/components/ui/multi-select";
 import { UserAvatar } from "@/components/user-avatar";
 import {
   createUser,
@@ -57,6 +58,7 @@ import {
 } from "./actions";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
+import { RESSOURCE_TYPE_LABELS } from "@/lib/ressource-labels";
 
 type UserRow = {
   id: string;
@@ -74,7 +76,14 @@ type UserRow = {
   locked_until: Date | null;
   last_login: Date | null;
   ressourceId: string | null;
-  ressource: { id: string; nom_complet: string } | null;
+  ressource: {
+    id: string;
+    nom_complet: string;
+    email?: string;
+    telephone?: string;
+    equipeHierarchie?: { id: string; name: string } | null;
+    equipesFonctionnelles?: { equipe: { id: string; name: string } }[];
+  } | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -86,6 +95,21 @@ type ActiveRole = {
   chantier_scope: string;
 };
 
+type RessourceOption = {
+  id: string;
+  nom_complet: string;
+  email: string;
+  telephone: string;
+  type: string;
+  equipeHierarchieId: string | null;
+};
+
+type EquipeOption = {
+  id: string;
+  name: string;
+  is_active: boolean;
+};
+
 type ProfileForm = {
   first_name: string;
   last_name: string;
@@ -93,7 +117,6 @@ type ProfileForm = {
   email: string;
   role: string;
   dashboard_type: "complete" | "limited";
-  ressourceId: string;
 };
 
 function displayName(u: Pick<UserRow, "first_name" | "last_name" | "username">) {
@@ -103,11 +126,13 @@ function displayName(u: Pick<UserRow, "first_name" | "last_name" | "username">) 
 
 export function UserManagement({
   initialUsers,
-  ressources,
+  ressourcesDisponibles,
+  equipes,
   activeRoles,
 }: {
   initialUsers: UserRow[];
-  ressources: { id: string; nom_complet: string }[];
+  ressourcesDisponibles: RessourceOption[];
+  equipes: EquipeOption[];
   activeRoles: ActiveRole[];
 }) {
   const [search, setSearch] = useState("");
@@ -129,15 +154,27 @@ export function UserManagement({
     activeRoles[0]?.code ??
     "";
 
+  const activeEquipes = useMemo(
+    () => equipes.filter((e) => e.is_active),
+    [equipes]
+  );
+
   // Add form state
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [newFirstName, setNewFirstName] = useState("");
-  const [newLastName, setNewLastName] = useState("");
-  const [newPhone, setNewPhone] = useState("");
-  const [newEmail, setNewEmail] = useState("");
   const [newRole, setNewRole] = useState<string>(defaultRoleCode);
+  const [ressourceMode, setRessourceMode] = useState<"existing" | "new">(
+    "existing"
+  );
   const [newRessourceId, setNewRessourceId] = useState<string>("");
+  const [newResNom, setNewResNom] = useState("");
+  const [newResEmail, setNewResEmail] = useState("");
+  const [newResPhone, setNewResPhone] = useState("");
+  const [newResType, setNewResType] = useState("Interne");
+  const [newResEquipeHier, setNewResEquipeHier] = useState(
+    activeEquipes[0]?.id ?? ""
+  );
+  const [newResEquipeFn, setNewResEquipeFn] = useState<string[]>([]);
   const [resetPwdValue, setResetPwdValue] = useState("");
   const [error, setError] = useState("");
 
@@ -148,7 +185,6 @@ export function UserManagement({
     email: "",
     role: "",
     dashboard_type: "complete",
-    ressourceId: "",
   });
 
   const roleMeta = (code: string) =>
@@ -218,12 +254,17 @@ export function UserManagement({
   const resetAddForm = () => {
     setNewUsername("");
     setNewPassword("");
-    setNewFirstName("");
-    setNewLastName("");
-    setNewPhone("");
-    setNewEmail("");
     setNewRole(defaultRoleCode);
+    setRessourceMode(
+      ressourcesDisponibles.length > 0 ? "existing" : "new"
+    );
     setNewRessourceId("");
+    setNewResNom("");
+    setNewResEmail("");
+    setNewResPhone("");
+    setNewResType("Interne");
+    setNewResEquipeHier(activeEquipes[0]?.id ?? "");
+    setNewResEquipeFn([]);
   };
 
   const openEdit = (user: UserRow) => {
@@ -235,7 +276,6 @@ export function UserManagement({
       email: user.email ?? "",
       role: user.role,
       dashboard_type: (user.dashboard_type as "complete" | "limited") || "complete",
-      ressourceId: user.ressourceId ?? "",
     });
     setError("");
   };
@@ -248,14 +288,23 @@ export function UserManagement({
           username: newUsername.trim(),
           password: newPassword,
           role: newRole,
-          first_name: newFirstName,
-          last_name: newLastName,
-          phone: newPhone,
-          email: newEmail,
-          ressourceId: newRessourceId || null,
+          ressourceId:
+            ressourceMode === "existing" ? newRessourceId || null : null,
+          newRessource:
+            ressourceMode === "new"
+              ? {
+                  nom_complet: newResNom,
+                  email: newResEmail,
+                  telephone: newResPhone,
+                  type: newResType,
+                  equipeHierarchieId: newResEquipeHier,
+                  equipeFonctionnelleIds: newResEquipeFn,
+                }
+              : null,
         });
         setShowAdd(false);
         resetAddForm();
+        window.location.reload();
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Erreur");
       }
@@ -274,9 +323,9 @@ export function UserManagement({
           email: editForm.email,
           role: editForm.role,
           dashboard_type: editForm.dashboard_type,
-          ressourceId: editForm.ressourceId || null,
         });
         setShowEdit(null);
+        window.location.reload();
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Erreur");
       }
@@ -675,24 +724,13 @@ export function UserManagement({
             <DialogTitle>Nouvel utilisateur</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Prénom</label>
-                <Input
-                  value={newFirstName}
-                  onChange={(e) => setNewFirstName(e.target.value)}
-                  placeholder="Jean"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Nom</label>
-                <Input
-                  value={newLastName}
-                  onChange={(e) => setNewLastName(e.target.value)}
-                  placeholder="Dupont"
-                />
-              </div>
-            </div>
+            <p className="text-xs text-muted-foreground">
+              Un compte applicatif est toujours lié à une{" "}
+              <span className="font-medium text-foreground">ressource</span>{" "}
+              (personne du programme). Identité (nom, contact) = données de la
+              ressource.
+            </p>
+
             <div className="space-y-2">
               <label className="text-sm font-medium">
                 Nom d&apos;utilisateur
@@ -702,26 +740,6 @@ export function UserManagement({
                 onChange={(e) => setNewUsername(e.target.value)}
                 placeholder="ex: j.dupont"
               />
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">E-mail</label>
-                <Input
-                  type="email"
-                  value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
-                  placeholder="jean.dupont@banque.ma"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Téléphone</label>
-                <Input
-                  type="tel"
-                  value={newPhone}
-                  onChange={(e) => setNewPhone(e.target.value)}
-                  placeholder="+212 6 …"
-                />
-              </div>
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">
@@ -756,29 +774,137 @@ export function UserManagement({
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
+
+            <div className="space-y-2 rounded-md border p-3">
               <label className="text-sm font-medium">
-                Ressource liée (optionnel)
+                Ressource <span className="text-destructive">*</span>
               </label>
-              <Select
-                value={newRessourceId || "none"}
-                onValueChange={(v) =>
-                  setNewRessourceId(v === "none" ? "" : v)
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Aucune" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Aucune</SelectItem>
-                  {ressources.map((r) => (
-                    <SelectItem key={r.id} value={r.id}>
-                      {r.nom_complet}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex flex-wrap gap-3 text-sm">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="ressourceMode"
+                    checked={ressourceMode === "existing"}
+                    onChange={() => setRessourceMode("existing")}
+                    disabled={ressourcesDisponibles.length === 0}
+                  />
+                  Ressource existante
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="ressourceMode"
+                    checked={ressourceMode === "new"}
+                    onChange={() => setRessourceMode("new")}
+                  />
+                  Créer une ressource
+                </label>
+              </div>
+
+              {ressourceMode === "existing" ? (
+                <Select
+                  value={newRessourceId || undefined}
+                  onValueChange={setNewRessourceId}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choisir une ressource sans compte" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ressourcesDisponibles.map((r) => (
+                      <SelectItem key={r.id} value={r.id}>
+                        {r.nom_complet}
+                        {r.email ? ` — ${r.email}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <div className="space-y-3 pt-1">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium">Nom complet *</label>
+                    <Input
+                      value={newResNom}
+                      onChange={(e) => setNewResNom(e.target.value)}
+                      placeholder="Prénom Nom"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium">E-mail</label>
+                      <Input
+                        type="email"
+                        value={newResEmail}
+                        onChange={(e) => setNewResEmail(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium">Téléphone</label>
+                      <Input
+                        value={newResPhone}
+                        onChange={(e) => setNewResPhone(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium">Type</label>
+                      <Select
+                        value={newResType}
+                        onValueChange={setNewResType}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(RESSOURCE_TYPE_LABELS).map(
+                            ([k, v]) => (
+                              <SelectItem key={k} value={k}>
+                                {v}
+                              </SelectItem>
+                            )
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium">
+                        Équipe hiérarchique *
+                      </label>
+                      <Select
+                        value={newResEquipeHier || undefined}
+                        onValueChange={setNewResEquipeHier}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Équipe" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {activeEquipes.map((e) => (
+                            <SelectItem key={e.id} value={e.id}>
+                              {e.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium">
+                      Équipes fonctionnelles
+                    </label>
+                    <MultiSelect
+                      options={activeEquipes.map((e) => ({
+                        value: e.id,
+                        label: e.name,
+                      }))}
+                      selected={newResEquipeFn}
+                      onChange={setNewResEquipeFn}
+                      placeholder="Optionnel"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
+
             {error && (
               <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {error}
@@ -792,7 +918,13 @@ export function UserManagement({
             <Button
               onClick={handleCreate}
               disabled={
-                isPending || !newUsername.trim() || !newPassword || !newRole
+                isPending ||
+                !newUsername.trim() ||
+                !newPassword ||
+                !newRole ||
+                (ressourceMode === "existing" && !newRessourceId) ||
+                (ressourceMode === "new" &&
+                  (!newResNom.trim() || !newResEquipeHier))
               }
             >
               {isPending ? "Création..." : "Créer"}
@@ -930,30 +1062,25 @@ export function UserManagement({
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Ressource liée</label>
-              <Select
-                value={editForm.ressourceId || "none"}
-                onValueChange={(v) =>
-                  setEditForm((f) => ({
-                    ...f,
-                    ressourceId: v === "none" ? "" : v,
-                  }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Aucune" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Aucune</SelectItem>
-                  {ressources.map((r) => (
-                    <SelectItem key={r.id} value={r.id}>
-                      {r.nom_complet}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {showEdit?.ressource && (
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Ressource liée (identité)
+                </p>
+                <p className="font-medium">{showEdit.ressource.nom_complet}</p>
+                {showEdit.ressource.equipeHierarchie && (
+                  <p className="text-xs text-muted-foreground">
+                    Équipe : {showEdit.ressource.equipeHierarchie.name}
+                    {(showEdit.ressource.equipesFonctionnelles?.length ?? 0) >
+                      0 &&
+                      ` · +${showEdit.ressource.equipesFonctionnelles!.length} fonct.`}
+                  </p>
+                )}
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Modifier le nom / contact met aussi à jour la fiche ressource.
+                </p>
+              </div>
+            )}
             {error && (
               <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {error}

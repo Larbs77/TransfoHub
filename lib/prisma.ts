@@ -10,7 +10,7 @@ const globalForPrisma = globalThis as unknown as {
  * Bump whenever the Prisma schema gains fields/models so HMR drops a stale
  * singleton (otherwise findUnique rejects unknown select fields).
  */
-const PRISMA_MODEL_STAMP = "comite-parametre-v1";
+const PRISMA_MODEL_STAMP = "ressource-equipes-user-v1";
 
 function clientLooksCurrent(client: PrismaClient): boolean {
   try {
@@ -18,11 +18,15 @@ function clientLooksCurrent(client: PrismaClient): boolean {
       user?: unknown;
       mailServerConfig?: { findFirst?: unknown };
       comiteParametre?: { findMany?: unknown };
+      equipe?: { findMany?: unknown };
+      ressourceEquipeFonctionnelle?: { findMany?: unknown };
     };
     // Force recreate when new models are missing (stale HMR singleton).
     if (!c.user) return false;
     if (typeof c.mailServerConfig?.findFirst !== "function") return false;
     if (typeof c.comiteParametre?.findMany !== "function") return false;
+    if (typeof c.equipe?.findMany !== "function") return false;
+    if (typeof c.ressourceEquipeFonctionnelle?.findMany !== "function") return false;
     return true;
   } catch {
     return false;

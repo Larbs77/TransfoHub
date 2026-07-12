@@ -57,12 +57,9 @@ export async function getActiveRolesForSelect() {
 
 function normalizePages(pages: string[]): string[] {
   const allowed = new Set(ALL_PAGE_PATHS);
-  const unique = [...new Set(pages.filter((p) => allowed.has(p)))];
-  // Always include home if any page is selected
-  if (unique.length > 0 && !unique.includes("/")) {
-    unique.unshift("/");
-  }
-  return unique;
+  // Preserve admin choices exactly — do not force-add "/" (Tableau de bord).
+  // That was re-enabling home access every time a role was saved without it.
+  return [...new Set(pages.filter((p) => allowed.has(p)))];
 }
 
 function validateScope(scope: string): string {
