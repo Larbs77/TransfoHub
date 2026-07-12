@@ -1250,6 +1250,28 @@ export async function getNextComiteNumero(instance: string) {
   return (last?.numero ?? 0) + 1;
 }
 
+async function assertValidComiteInstance(
+  instance: string,
+  opts?: { requireActive?: boolean }
+) {
+  const name = instance.trim();
+  if (!name) throw new Error("L'instance de comité est obligatoire.");
+  const param = await prisma.comiteParametre.findUnique({
+    where: { name },
+  });
+  if (!param) {
+    throw new Error(
+      "Type de comité inconnu. Définissez-le dans Administration → Paramètres comités."
+    );
+  }
+  if (opts?.requireActive !== false && !param.is_active) {
+    throw new Error(
+      "Ce type de comité est inactif. Réactivez-le dans Paramètres comités ou choisissez une autre instance."
+    );
+  }
+  return name;
+}
+
 export async function createComite(data: {
   instance: string;
   numero: number;
@@ -1261,9 +1283,13 @@ export async function createComite(data: {
   invitation_envoyee: boolean;
 }) {
   await requireRole("Admin", "Programme_Office");
+  const instance = await assertValidComiteInstance(data.instance, {
+    requireActive: true,
+  });
   await prisma.comite.create({
     data: {
       ...data,
+      instance,
       date: new Date(data.date),
     },
   });
@@ -1284,10 +1310,19 @@ export async function updateComite(
   }
 ) {
   await requireRole("Admin", "Programme_Office");
+  // Allow keeping a deactivated type on existing meetings; new type must be active
+  const current = await prisma.comite.findUnique({
+    where: { id },
+    select: { instance: true },
+  });
+  const instance = await assertValidComiteInstance(data.instance, {
+    requireActive: current?.instance !== data.instance.trim(),
+  });
   await prisma.comite.update({
     where: { id },
     data: {
       ...data,
+      instance,
       date: new Date(data.date),
     },
   });

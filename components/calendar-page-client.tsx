@@ -21,9 +21,11 @@ import {
   CATEGORIE_LIST,
 } from "@/lib/raid-labels";
 import {
-  INSTANCE_LABELS,
-  INSTANCE_COLORS,
   STATUT_COMITE_LABELS,
+  displayLabelForInstance,
+  colorForInstance,
+  orderedInstanceNames,
+  type ComiteParametreOption,
 } from "@/lib/comite-labels";
 
 interface RaidItem {
@@ -57,11 +59,16 @@ interface ComiteItem {
 interface Props {
   raidItems: RaidItem[];
   comites: ComiteItem[];
+  instances?: ComiteParametreOption[];
 }
 
 type SourceFilter = "__all__" | "raid" | "comites";
 
-export function CalendarPageClient({ raidItems, comites }: Props) {
+export function CalendarPageClient({
+  raidItems,
+  comites,
+  instances = [],
+}: Props) {
   const [search, setSearch] = useState("");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("__all__");
   const [raidTypeFilter, setRaidTypeFilter] = useState("__all__");
@@ -134,17 +141,17 @@ export function CalendarPageClient({ raidItems, comites }: Props) {
       for (const c of comites) {
         // Apply filters
         if (instanceFilter !== "__all__" && c.instance !== instanceFilter) continue;
-        const label = `${INSTANCE_LABELS[c.instance] ?? c.instance} #${c.numero}`;
+        const label = `${displayLabelForInstance(c.instance, instances)} #${c.numero}`;
         if (q && !label.toLowerCase().includes(q) && !c.ordre_du_jour.toLowerCase().includes(q)) continue;
 
         result.push({
           id: `comite-${c.id}`,
           date: new Date(c.date),
           label,
-          color: INSTANCE_COLORS[c.instance] ?? "#6b7280",
+          color: colorForInstance(c.instance, instances),
           sublabel: c.heure_casablanca ? `${c.heure_casablanca} (Casa)` : "Comité",
           details: {
-            "Instance": INSTANCE_LABELS[c.instance] ?? c.instance,
+            "Instance": displayLabelForInstance(c.instance, instances),
             "Numéro": `#${c.numero}`,
             "Heure Casablanca": c.heure_casablanca || "",
             "Heure Belgique": c.heure_belgique || "",
@@ -157,7 +164,7 @@ export function CalendarPageClient({ raidItems, comites }: Props) {
     }
 
     return result;
-  }, [raidItems, comites, search, effectiveSource, raidTypeFilter, domaineFilter, categorieFilter, instanceFilter, responsableFilter]);
+  }, [raidItems, comites, instances, search, effectiveSource, raidTypeFilter, domaineFilter, categorieFilter, instanceFilter, responsableFilter]);
 
   const showRaidFilters = effectiveSource === "__all__" || effectiveSource === "raid";
   const showComiteFilters = effectiveSource === "__all__" || effectiveSource === "comites";
@@ -260,8 +267,13 @@ export function CalendarPageClient({ raidItems, comites }: Props) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__all__">Toutes instances</SelectItem>
-              {Object.entries(INSTANCE_LABELS).map(([key, label]) => (
-                <SelectItem key={key} value={key}>{label}</SelectItem>
+              {orderedInstanceNames(
+                instances,
+                comites.map((c) => c.instance)
+              ).map((key) => (
+                <SelectItem key={key} value={key}>
+                  {displayLabelForInstance(key, instances)}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -283,10 +295,16 @@ export function CalendarPageClient({ raidItems, comites }: Props) {
         )}
         {(effectiveSource === "__all__" || effectiveSource === "comites") && (
           <>
-            {Object.entries(INSTANCE_COLORS).map(([inst, color]) => (
+            {orderedInstanceNames(
+              instances,
+              comites.map((c) => c.instance)
+            ).map((inst) => (
               <span key={inst} className="flex items-center gap-1">
-                <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: color }} />
-                {INSTANCE_LABELS[inst]}
+                <span
+                  className="inline-block size-2.5 rounded-full"
+                  style={{ backgroundColor: colorForInstance(inst, instances) }}
+                />
+                {displayLabelForInstance(inst, instances)}
               </span>
             ))}
           </>

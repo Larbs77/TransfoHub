@@ -36,10 +36,12 @@ import { RaidFormDialog } from "./raid-form-dialog";
 import { CalendarView, type CalendarEvent } from "./calendar-view";
 import { deleteComite, deleteRaid } from "@/app/(app)/actions";
 import {
-  INSTANCE_LABELS,
-  INSTANCE_COLORS,
   STATUT_COMITE_LABELS,
   STATUT_COMITE_COLORS,
+  orderedInstanceNames,
+  displayLabelForInstance,
+  colorForInstance,
+  type ComiteParametreOption,
 } from "@/lib/comite-labels";
 import {
   RAID_TYPE_COLORS,
@@ -87,6 +89,7 @@ interface ComiteRow {
 
 interface Props {
   comites: ComiteRow[];
+  instances?: ComiteParametreOption[];
 }
 
 type ViewFilter = "week" | "upcoming" | "past" | "all";
@@ -125,7 +128,7 @@ function SortHeader({
   );
 }
 
-const INSTANCE_ORDER = Object.keys(INSTANCE_LABELS);
+
 
 const VIEW_CONFIG: { key: ViewFilter; label: string; icon: typeof CalendarDays }[] = [
   { key: "week", label: "Cette semaine", icon: CalendarDays },
@@ -423,7 +426,7 @@ function InstanceTable({
   );
 }
 
-export function ComitesList({ comites }: Props) {
+export function ComitesList({ comites, instances = [] }: Props) {
   const [viewFilter, setViewFilter] = useState<ViewFilter>("week");
   const [editComite, setEditComite] = useState<ComiteRow | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -461,20 +464,29 @@ export function ComitesList({ comites }: Props) {
     return map;
   }, [filtered]);
 
+  const instanceOrder = useMemo(
+    () =>
+      orderedInstanceNames(
+        instances,
+        comites.map((c) => c.instance)
+      ),
+    [instances, comites]
+  );
+
   // Instances that have data, in order
-  const instancesWithData = INSTANCE_ORDER.filter((i) => grouped.has(i));
-  const firstInstance = instancesWithData[0] ?? INSTANCE_ORDER[0];
+  const instancesWithData = instanceOrder.filter((i) => grouped.has(i));
+  const firstInstance = instancesWithData[0] ?? instanceOrder[0] ?? "calendrier";
 
   // Calendar events from filtered comités
   const calendarEvents: CalendarEvent[] = useMemo(() => {
     return filtered.map((c) => ({
       id: c.id,
       date: new Date(c.date),
-      label: `${INSTANCE_LABELS[c.instance] ?? c.instance} #${c.numero}`,
-      color: INSTANCE_COLORS[c.instance] ?? "#6b7280",
+      label: `${displayLabelForInstance(c.instance, instances)} #${c.numero}`,
+      color: colorForInstance(c.instance, instances),
       sublabel: c.heure_casablanca ? `${c.heure_casablanca} (Casa) / ${c.heure_belgique} (Belgique)` : undefined,
       details: {
-        "Instance": INSTANCE_LABELS[c.instance] ?? c.instance,
+        "Instance": displayLabelForInstance(c.instance, instances),
         "Numéro": `#${c.numero}`,
         "Heure Casablanca": c.heure_casablanca || "",
         "Heure Belgique": c.heure_belgique || "",
@@ -483,7 +495,7 @@ export function ComitesList({ comites }: Props) {
         "Invitation envoyée": c.invitation_envoyee ? "Oui" : "Non",
       },
     }));
-  }, [filtered]);
+  }, [filtered, instances]);
 
   return (
     <>
@@ -532,10 +544,10 @@ export function ComitesList({ comites }: Props) {
       ) : (
         <Tabs defaultValue={firstInstance} key={viewFilter} className="space-y-4">
           <TabsList className="h-auto p-1 gap-1 flex-wrap">
-            {INSTANCE_ORDER.map((inst) => {
+            {instanceOrder.map((inst) => {
               const count = grouped.get(inst)?.length ?? 0;
               if (count === 0) return null;
-              const color = INSTANCE_COLORS[inst] ?? "#6b7280";
+              const color = colorForInstance(inst, instances);
               return (
                 <TabsTrigger
                   key={inst}
@@ -546,7 +558,9 @@ export function ComitesList({ comites }: Props) {
                     className="inline-block size-2.5 rounded-full shrink-0"
                     style={{ backgroundColor: color }}
                   />
-                  <span className="text-xs">{INSTANCE_LABELS[inst] ?? inst}</span>
+                  <span className="text-xs">
+                    {displayLabelForInstance(inst, instances)}
+                  </span>
                   <span className="ml-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
                     {count}
                   </span>
@@ -559,13 +573,15 @@ export function ComitesList({ comites }: Props) {
             </TabsTrigger>
           </TabsList>
 
-          {INSTANCE_ORDER.map((inst) => {
+          {instanceOrder.map((inst) => {
             if (!grouped.has(inst)) return null;
             return (
               <TabsContent key={inst} value={inst}>
                 <div
                   className="rounded-lg border-l-4 bg-card overflow-hidden"
-                  style={{ borderLeftColor: INSTANCE_COLORS[inst] ?? "#6b7280" }}
+                  style={{
+                    borderLeftColor: colorForInstance(inst, instances),
+                  }}
                 >
                   <InstanceTable
                     comites={grouped.get(inst) ?? []}
@@ -591,6 +607,7 @@ export function ComitesList({ comites }: Props) {
           open={!!editComite}
           onOpenChange={(open) => !open && setEditComite(null)}
           comite={editComite}
+          instances={instances}
         />
       )}
 

@@ -62,7 +62,7 @@ export function AuthBrandShell({ children }: { children: React.ReactNode }) {
       {/* Footer brand strip */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center pb-4">
         <p className="text-[11px] font-medium tracking-wide text-[#0A3C74]/70">
-          Bank of Africa · Transformation Bancaire
+          Bank Of Africa — {new Date().getFullYear()} © — Program Office
         </p>
       </div>
     </div>

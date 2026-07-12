@@ -19,6 +19,7 @@ async function main() {
   await prisma.raid.deleteMany();
   await prisma.chantier.deleteMany();
   await prisma.comite.deleteMany();
+  await prisma.comiteParametre.deleteMany();
   await prisma.rmd.deleteMany();
   // Detach users from resources before wiping the resource catalog
   await prisma.user.updateMany({ data: { ressourceId: null } });
@@ -80,6 +81,76 @@ async function main() {
   await prisma.settings.create({
     data: { id: 1, seuil_relance_jours: 3, seuil_qa_critique_heures: 48 },
   });
+
+  // Catalog of committee types (instances) — admin-managed
+  const comiteParametres = [
+    {
+      name: "Comité Programme",
+      description: "Instance de pilotage du programme de transformation bancaire",
+      frequency: "Bi-mensuel",
+      owner: "Bureau Programme",
+      short_label: "Comité Programme",
+      color: "#2563eb",
+      position: 0,
+    },
+    {
+      name: "Comité Technologique restreint (CTR)",
+      description: "Comité technologique en formation restreinte pour arbitrages techniques",
+      frequency: "Hebdomadaire",
+      owner: "Direction Technologie",
+      short_label: "CTR",
+      color: "#059669",
+      position: 1,
+    },
+    {
+      name: "Comité Technologique Plénier (CTP)",
+      description: "Comité technologique plénier pour décisions d'architecture et de capacité",
+      frequency: "Mensuel",
+      owner: "Direction Technologie",
+      short_label: "CTP",
+      color: "#0d9488",
+      position: 2,
+    },
+    {
+      name: "Comité Assurance Qualité",
+      description: "Suivi de la qualité, des tests et des critères d'acceptation",
+      frequency: "Mensuel",
+      owner: "Assurance Qualité",
+      short_label: "Comité Assurance Qualité",
+      color: "#7c3aed",
+      position: 3,
+    },
+    {
+      name: "Conseil",
+      description: "Instance de gouvernance stratégique et de validation exécutive",
+      frequency: "Trimestriel",
+      owner: "Direction Générale",
+      short_label: "Conseil",
+      color: "#dc2626",
+      position: 4,
+    },
+    {
+      name: "Design Authority Board",
+      description: "Autorité de design pour les choix d'architecture applicative et data",
+      frequency: "Bi-mensuel",
+      owner: "Architecture Entreprise",
+      short_label: "Design Authority Board",
+      color: "#ea580c",
+      position: 5,
+    },
+    {
+      name: "Kick-off",
+      description: "Séance de lancement d'un chantier ou d'un lot de transformation",
+      frequency: "Ad hoc",
+      owner: "Bureau Programme",
+      short_label: "Kick-off",
+      color: "#ca8a04",
+      position: 6,
+    },
+  ];
+  for (const cp of comiteParametres) {
+    await prisma.comiteParametre.create({ data: { ...cp, is_active: true } });
+  }
 
   // Default status configurations
   const statusConfigs = [

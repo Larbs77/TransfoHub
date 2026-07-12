@@ -26,6 +26,11 @@ export const APP_PAGES: AppPage[] = [
   { path: "/capacite", label: "Capacité", section: "Ressources" },
   { path: "/admin/users", label: "Utilisateurs", section: "Administration" },
   { path: "/admin/roles", label: "Rôles", section: "Administration" },
+  {
+    path: "/admin/comites-parametres",
+    label: "Paramètres comités",
+    section: "Administration",
+  },
   { path: "/settings", label: "Paramètres", section: "Administration" },
   {
     path: "/admin/messagerie",

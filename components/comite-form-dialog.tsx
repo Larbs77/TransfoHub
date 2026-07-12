@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { createComite, updateComite, getNextComiteNumero } from "@/app/(app)/actions";
 import {
   Dialog,
@@ -19,7 +19,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
-import { INSTANCE_LABELS, STATUT_COMITE_LABELS } from "@/lib/comite-labels";
+import {
+  INSTANCE_LABELS,
+  STATUT_COMITE_LABELS,
+  type ComiteParametreOption,
+} from "@/lib/comite-labels";
 
 interface ComiteData {
   id: string;
@@ -38,18 +42,55 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   comite?: ComiteData | null;
   defaultInstance?: string;
+  /** Active committee types from admin parameter table */
+  instances?: ComiteParametreOption[];
 }
 
 function toDateInput(d: Date) {
   return new Date(d).toISOString().split("T")[0];
 }
 
-export function ComiteFormDialog({ open, onOpenChange, comite, defaultInstance }: Props) {
+export function ComiteFormDialog({
+  open,
+  onOpenChange,
+  comite,
+  defaultInstance,
+  instances,
+}: Props) {
   const isEdit = !!comite;
   const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState("");
 
-  const [instance, setInstance] = useState(comite?.instance ?? defaultInstance ?? "Comité Programme");
+  const instanceOptions = useMemo(() => {
+    if (instances && instances.length > 0) {
+      return instances
+        .filter((p) => p.is_active || p.name === comite?.instance)
+        .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
+    }
+    // Fallback if catalog not loaded
+    return Object.keys(INSTANCE_LABELS).map((name, i) => ({
+      id: name,
+      name,
+      description: "",
+      frequency: "",
+      owner: "",
+      short_label: INSTANCE_LABELS[name] ?? name,
+      color: "#6b7280",
+      position: i,
+      is_active: true,
+    }));
+  }, [instances, comite?.instance]);
+
+  const defaultInst =
+    comite?.instance ??
+    defaultInstance ??
+    instanceOptions[0]?.name ??
+    "Comité Programme";
+
+  const [instance, setInstance] = useState(defaultInst);
   const [numero, setNumero] = useState(comite?.numero ?? 1);
+
+  const selectedParam = instanceOptions.find((p) => p.name === instance);
 
   const fetchNextNumero = useCallback(async (inst: string) => {
     if (isEdit) return;
@@ -69,24 +110,34 @@ export function ComiteFormDialog({ open, onOpenChange, comite, defaultInstance }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
-    const data = {
-      instance,
-      numero,
-      date,
-      heure_casablanca: heureCasa,
-      heure_belgique: heureBelgique,
-      statut,
-      ordre_du_jour: ordreDuJour,
-      invitation_envoyee: invitationEnvoyee,
-    };
-    if (isEdit) {
-      await updateComite(comite.id, data);
-    } else {
-      await createComite(data);
+    setFormError("");
+    if (!instance) {
+      setFormError("Sélectionnez un type d'instance de comité.");
+      return;
     }
-    setLoading(false);
-    onOpenChange(false);
+    setLoading(true);
+    try {
+      const data = {
+        instance,
+        numero,
+        date,
+        heure_casablanca: heureCasa,
+        heure_belgique: heureBelgique,
+        statut,
+        ordre_du_jour: ordreDuJour,
+        invitation_envoyee: invitationEnvoyee,
+      };
+      if (isEdit) {
+        await updateComite(comite.id, data);
+      } else {
+        await createComite(data);
+      }
+      onOpenChange(false);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Erreur d'enregistrement");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -103,16 +154,41 @@ export function ComiteFormDialog({ open, onOpenChange, comite, defaultInstance }
               <label className="text-sm font-medium">Instance</label>
               <Select value={instance} onValueChange={setInstance}>
                 <SelectTrigger className="w-full">
-                  <SelectValue />
+                  <SelectValue placeholder="Choisir une instance" />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.keys(INSTANCE_LABELS).map((key) => (
-                    <SelectItem key={key} value={key}>
-                      {key}
+                  {instanceOptions.map((opt) => (
+                    <SelectItem key={opt.id} value={opt.name}>
+                      <span className="flex items-center gap-2">
+                        <span
+                          className="inline-block size-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: opt.color }}
+                        />
+                        {opt.name}
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {selectedParam &&
+                (selectedParam.frequency ||
+                  selectedParam.owner ||
+                  selectedParam.description) && (
+                  <p className="text-[11px] leading-snug text-muted-foreground">
+                    {[
+                      selectedParam.frequency && `Fréquence : ${selectedParam.frequency}`,
+                      selectedParam.owner && `Propriétaire : ${selectedParam.owner}`,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                    {selectedParam.description ? (
+                      <>
+                        {(selectedParam.frequency || selectedParam.owner) && <br />}
+                        {selectedParam.description}
+                      </>
+                    ) : null}
+                  </p>
+                )}
             </div>
             <div className="grid gap-1.5">
               <label className="text-sm font-medium">N°</label>
@@ -187,6 +263,9 @@ export function ComiteFormDialog({ open, onOpenChange, comite, defaultInstance }
               placeholder="Points à aborder..."
             />
           </div>
+          {formError && (
+            <p className="text-sm text-destructive">{formError}</p>
+          )}
           <DialogFooter>
             <Button
               type="button"
@@ -195,7 +274,7 @@ export function ComiteFormDialog({ open, onOpenChange, comite, defaultInstance }
             >
               Annuler
             </Button>
-            <Button type="submit" disabled={loading}>
+            <Button type="submit" disabled={loading || instanceOptions.length === 0}>
               {loading && <Loader2 className="size-4 animate-spin" />}
               {isEdit ? "Enregistrer" : "Créer"}
             </Button>

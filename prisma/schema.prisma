@@ -200,6 +200,25 @@ model Comite {
   raids              Raid[]
 }
 
+/// Parameter table for committee types (instances) — admin-managed catalog.
+model ComiteParametre {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String   @default("")
+  frequency   String   @default("")
+  owner       String   @default("")
+  /// Short label for tabs / filters (e.g. CTR). Falls back to name in UI if empty.
+  short_label String   @default("")
+  color       String   @default("#6b7280")
+  position    Int      @default(0)
+  is_active   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([position])
+  @@index([is_active])
+}
+
 model Settings {
   id                       Int @id @default(autoincrement())
   seuil_relance_jours      Int @default(3)

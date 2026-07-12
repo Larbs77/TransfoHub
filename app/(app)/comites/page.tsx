@@ -1,11 +1,15 @@
 import { getComites } from "@/app/(app)/actions";
+import { getComiteParametresForSelect } from "@/app/(app)/admin/comites-parametres/actions";
 import { ComitesList } from "@/components/comites-list";
 import { AddComiteButton } from "@/components/add-comite-button";
 import { CalendarDays, CalendarClock, History, MailX } from "lucide-react";
 import { startOfWeek, endOfWeek, isWithinInterval, isBefore, isAfter } from "date-fns";
 
 export default async function ComitesPage() {
-  const allComites = await getComites();
+  const [allComites, instances] = await Promise.all([
+    getComites(),
+    getComiteParametresForSelect().catch(() => []),
+  ]);
 
   const now = new Date();
   const weekStart = startOfWeek(now, { weekStartsOn: 1 });
@@ -40,7 +44,7 @@ export default async function ComitesPage() {
               {allComites.length} comité(s) planifié(s) — {upcomingCount + thisWeekCount} à venir
             </p>
           </div>
-          <AddComiteButton />
+          <AddComiteButton instances={instances} />
         </div>
 
         {/* KPI Cards */}
@@ -58,7 +62,7 @@ export default async function ComitesPage() {
           ))}
         </div>
 
-        <ComitesList comites={allComites} />
+        <ComitesList comites={allComites} instances={instances} />
       </main>
     </div>
   );

@@ -94,6 +94,11 @@ const ALL_SECTIONS: NavSection[] = [
     items: [
       { href: "/admin/users", label: "Utilisateurs", icon: Users },
       { href: "/admin/roles", label: "Rôles", icon: ShieldCheck },
+      {
+        href: "/admin/comites-parametres",
+        label: "Paramètres comités",
+        icon: CalendarCheck,
+      },
       { href: "/settings", label: "Paramètres", icon: Settings },
     ],
   },
