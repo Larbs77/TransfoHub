@@ -50,10 +50,10 @@ export function AuthBrandShell({ children }: { children: React.ReactNode }) {
         </g>
       </svg>
 
-      {/* Soft white veil so content stays readable and sober */}
+      {/* Soft white veil (no backdrop-blur — expensive with animated/full-screen layers) */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 bg-white/55 backdrop-blur-[1px]"
+        className="pointer-events-none absolute inset-0 bg-white/60"
       />
 
       {/* Content */}

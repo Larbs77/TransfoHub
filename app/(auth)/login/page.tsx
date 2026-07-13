@@ -21,7 +21,7 @@ function LoginForm() {
   const [state, formAction, isPending] = useActionState(loginAction, null);
 
   return (
-    <Card className="w-full overflow-hidden border border-[#0A3C74]/10 bg-white/95 shadow-[0_20px_50px_-20px_rgba(10,60,116,0.28)] backdrop-blur-sm">
+    <Card className="w-full overflow-hidden border border-[#0A3C74]/10 bg-white shadow-[0_20px_50px_-20px_rgba(10,60,116,0.28)]">
       {/* Brand accent bar */}
       <div
         aria-hidden

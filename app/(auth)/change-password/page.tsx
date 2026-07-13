@@ -21,7 +21,7 @@ export default function ChangePasswordPage() {
   );
 
   return (
-    <Card className="w-full overflow-hidden border border-[#0A3C74]/10 bg-white/95 shadow-[0_20px_50px_-20px_rgba(10,60,116,0.28)] backdrop-blur-sm">
+    <Card className="w-full overflow-hidden border border-[#0A3C74]/10 bg-white shadow-[0_20px_50px_-20px_rgba(10,60,116,0.28)]">
       <div
         aria-hidden
         className="h-1 w-full bg-gradient-to-r from-[#0A3C74] via-[#00BDBB] to-[#0A3C74]"

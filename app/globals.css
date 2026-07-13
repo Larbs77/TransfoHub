@@ -185,21 +185,34 @@
     linear-gradient(165deg, #ffffff 0%, #f7fbfc 45%, #f3f7fb 100%);
 }
 
+/*
+ * Performance notes (login typing lag):
+ * - Avoid animating large elements with filter: blur (very expensive).
+ * - Pause remaining motion while an auth field is focused.
+ * - Prefer static soft orbs + light grid over continuous multi-layer anims.
+ */
 .auth-grid {
   background-image:
     linear-gradient(color-mix(in srgb, var(--boa-navy) 5%, transparent) 1px, transparent 1px),
     linear-gradient(90deg, color-mix(in srgb, var(--boa-navy) 5%, transparent) 1px, transparent 1px);
   background-size: 48px 48px;
   mask-image: radial-gradient(ellipse 75% 70% at 50% 45%, black 20%, transparent 75%);
-  animation: auth-grid-drift 28s linear infinite;
-  opacity: 0.85;
+  /* Slow, low-cost (background-position only) */
+  animation: auth-grid-drift 48s linear infinite;
+  opacity: 0.7;
+  contain: strict;
+  pointer-events: none;
 }
 
+/* Static decorative orbs — no continuous transform (blur+animate = main lag source) */
 .auth-orb {
   border-radius: 9999px;
-  filter: blur(48px);
-  opacity: 0.45;
-  animation: auth-orb-float 18s ease-in-out infinite;
+  /* Soft edge without animating a heavy filter */
+  filter: blur(28px);
+  opacity: 0.38;
+  pointer-events: none;
+  contain: strict;
+  will-change: auto;
 }
 
 .auth-orb-a {
@@ -207,8 +220,7 @@
   height: min(42vw, 420px);
   top: -8%;
   right: -6%;
-  background: color-mix(in srgb, var(--boa-teal) 35%, transparent);
-  animation-duration: 20s;
+  background: color-mix(in srgb, var(--boa-teal) 32%, transparent);
 }
 
 .auth-orb-b {
@@ -216,9 +228,7 @@
   height: min(36vw, 360px);
   bottom: -10%;
   left: -8%;
-  background: color-mix(in srgb, var(--boa-navy) 28%, transparent);
-  animation-duration: 24s;
-  animation-delay: -6s;
+  background: color-mix(in srgb, var(--boa-navy) 26%, transparent);
 }
 
 .auth-orb-c {
@@ -226,41 +236,27 @@
   height: min(28vw, 280px);
   top: 42%;
   left: 48%;
-  background: color-mix(in srgb, var(--boa-teal) 22%, transparent);
-  animation-duration: 16s;
-  animation-delay: -3s;
+  background: color-mix(in srgb, var(--boa-teal) 20%, transparent);
 }
 
 .auth-network {
-  opacity: 0.9;
+  opacity: 0.75;
+  pointer-events: none;
+  /* Static network — dash animation was continuous work every frame */
 }
 
 .auth-network-lines path {
-  stroke-dasharray: 8 14;
-  animation: auth-line-flow 12s linear infinite;
-}
-
-.auth-network-lines path:nth-child(2) {
-  animation-duration: 16s;
-  animation-direction: reverse;
-}
-
-.auth-network-lines path:nth-child(3) {
-  animation-duration: 14s;
+  stroke-dasharray: none;
 }
 
 .auth-node {
   fill: var(--boa-teal);
-  opacity: 0.55;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: auth-node-pulse 3.6s ease-in-out infinite;
+  opacity: 0.5;
 }
 
 .auth-node-delay {
-  animation-delay: 1.2s;
   fill: var(--boa-navy);
-  opacity: 0.4;
+  opacity: 0.38;
 }
 
 @keyframes auth-grid-drift {
@@ -272,45 +268,17 @@
   }
 }
 
-@keyframes auth-orb-float {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-  33% {
-    transform: translate3d(2%, -3%, 0) scale(1.05);
-  }
-  66% {
-    transform: translate3d(-3%, 2%, 0) scale(0.96);
-  }
-}
-
-@keyframes auth-line-flow {
-  0% {
-    stroke-dashoffset: 0;
-  }
-  100% {
-    stroke-dashoffset: -120;
-  }
-}
-
-@keyframes auth-node-pulse {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.9;
-    transform: scale(1.35);
+/* Freeze decorative motion while typing (login / change-password fields) */
+.auth-shell:has(input:focus),
+.auth-shell:has(textarea:focus),
+.auth-shell:has(button:focus) {
+  .auth-grid {
+    animation-play-state: paused !important;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .auth-grid,
-  .auth-orb,
-  .auth-network-lines path,
-  .auth-node {
+  .auth-grid {
     animation: none !important;
   }
 }
