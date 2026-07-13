@@ -47,18 +47,49 @@ export function isKanbanLeadershipRole(
   return false;
 }
 
+/**
+ * Pure client-side check for full RAID form edit (table « Modifier »).
+ * Mirrors canEditRaidForm server rules.
+ */
+export function canEditRaidFormClient(
+  item: {
+    chantierId: string | null;
+    responsableRessourceId?: string | null;
+  },
+  ctx: {
+    chantierScopeAll: boolean;
+    leadershipChantierIds: string[];
+    /** Current user's linked resource (assignee check). */
+    ressourceId?: string | null;
+  }
+): boolean {
+  if (ctx.chantierScopeAll) return true;
+  if (
+    ctx.ressourceId &&
+    item.responsableRessourceId &&
+    item.responsableRessourceId === ctx.ressourceId
+  ) {
+    return true;
+  }
+  if (!item.chantierId) return false;
+  return ctx.leadershipChantierIds.includes(item.chantierId);
+}
+
 /** Pure client-side check for Kanban drag (no Prisma). */
 export function canMoveRaidKanbanClient(
   item: {
     responsableRessourceId: string | null;
     chantierId: string | null;
     equipeId?: string | null;
+    categorie?: string | null;
   },
   ctx: {
     ressourceId: string | null;
     isProgramme: boolean;
     leadershipChantierIds: string[];
     institutionalEquipeId?: string | null;
+    /** Institutional team special category grants. */
+    specialCategories?: string[];
   }
 ): boolean {
   if (ctx.isProgramme) return true;
@@ -74,6 +105,15 @@ export function canMoveRaidKanbanClient(
     ctx.institutionalEquipeId &&
     item.equipeId &&
     item.equipeId === ctx.institutionalEquipeId
+  ) {
+    return true;
+  }
+  // Special institutional access by category
+  const cat = (item.categorie ?? "").trim();
+  if (
+    cat &&
+    ctx.specialCategories?.length &&
+    ctx.specialCategories.includes(cat)
   ) {
     return true;
   }
@@ -192,7 +232,9 @@ export function getStatutColor(type: string, statut: string): string {
   }
 }
 
-// ── Catégories ────────────────────────────────────────
+// ── Catégories / Domaines (fallback if DB catalog empty) ──
+// Canonical source of truth is RaidFieldOption (Paramètres). These lists are
+// used only as offline/seed fallbacks.
 export const CATEGORIE_LIST = [
   "Budget",
   "Fournisseur",
@@ -203,7 +245,6 @@ export const CATEGORIE_LIST = [
   "Technique",
 ] as const;
 
-// ── Domaines ──────────────────────────────────────────
 export const DOMAINE_LIST = [
   "Agence",
   "Monétique",
@@ -221,6 +262,53 @@ export const DOMAINE_LIST = [
   "Architecture et sécurité",
   "Programme Office",
 ] as const;
+
+export const RAID_FIELD_KINDS = ["categorie", "domaine"] as const;
+export type RaidFieldKind = (typeof RAID_FIELD_KINDS)[number];
+
+export type RaidFieldOptionItem = {
+  id: string;
+  kind: string;
+  label: string;
+  color: string;
+  position: number;
+};
+
+export function getLabelsForKind(
+  kind: RaidFieldKind,
+  options: RaidFieldOptionItem[] | undefined | null
+): string[] {
+  if (options?.length) {
+    const labels = options
+      .filter((o) => o.kind === kind)
+      .sort((a, b) => a.position - b.position || a.label.localeCompare(b.label, "fr"))
+      .map((o) => o.label);
+    if (labels.length) return labels;
+  }
+  return kind === "categorie" ? [...CATEGORIE_LIST] : [...DOMAINE_LIST];
+}
+
+export function getColorForFieldLabel(
+  kind: RaidFieldKind,
+  label: string,
+  options: RaidFieldOptionItem[] | undefined | null
+): string {
+  const found = options?.find((o) => o.kind === kind && o.label === label);
+  return found?.color ?? "#6b7280";
+}
+
+/** Merge catalog labels with values present on rows (legacy free-text). */
+export function mergeFieldLabelsWithData(
+  catalog: string[],
+  values: Array<string | null | undefined>
+): string[] {
+  const set = new Set(catalog);
+  for (const v of values) {
+    const t = (v ?? "").trim();
+    if (t) set.add(t);
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b, "fr"));
+}
 
 // ── Stratégies (Risque) ──────────────────────────────
 export const STRATEGIE_LIST = [

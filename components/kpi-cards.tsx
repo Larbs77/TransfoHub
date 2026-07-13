@@ -64,7 +64,7 @@ export function KpiCards({ stats }: { stats: Stats }) {
         label="Actions Actives"
         value={String(stats.totalActions)}
         subtitle="Non clôturées"
-        href="/raid/actions?statut=active"
+        href="/raid/actions?statut=active&scope=all"
       />
       <KpiCard
         icon={Clock}
@@ -72,14 +72,14 @@ export function KpiCards({ stats }: { stats: Stats }) {
         value={String(stats.overdueActions)}
         subtitle="Date dépassée"
         variant={stats.overdueActions > 0 ? "destructive" : "default"}
-        href="/raid/actions?overdue=true"
+        href="/raid/actions?overdue=true&scope=all"
       />
       <KpiCard
         icon={ShieldCheck}
         label="Risques Ouverts"
         value={String(stats.totalRisks)}
         subtitle="Non clos"
-        href="/raid/risques?statut=open"
+        href="/raid/risques?statut=open&scope=all"
       />
       <KpiCard
         icon={ShieldAlert}
@@ -87,7 +87,7 @@ export function KpiCards({ stats }: { stats: Stats }) {
         value={String(stats.criticalRisks)}
         subtitle="Score >= 12/25"
         variant={stats.criticalRisks > 0 ? "destructive" : "default"}
-        href="/raid/risques?critical=true"
+        href="/raid/risques?critical=true&scope=all"
       />
       <KpiCard
         icon={Gavel}
@@ -95,7 +95,7 @@ export function KpiCards({ stats }: { stats: Stats }) {
         value={String(stats.pendingDecisions)}
         subtitle="Non validées"
         variant={stats.pendingDecisions > 0 ? "warning" : "default"}
-        href="/raid/decisions?statut=En+attente"
+        href="/raid/decisions?statut=En+attente&scope=all"
       />
       <KpiCard
         icon={CalendarCheck}
@@ -122,7 +122,7 @@ export function KpiCards({ stats }: { stats: Stats }) {
         value={`${stats.actionCloseRate}%`}
         subtitle="Actions clôturées"
         variant={stats.actionCloseRate >= 50 ? "success" : "default"}
-        href="/raid/actions?statut=Clôturé"
+        href="/raid/actions?statut=Clôturé&scope=all"
       />
       <KpiCard
         icon={Activity}
@@ -146,7 +146,7 @@ export function KpiCards({ stats }: { stats: Stats }) {
         value={`${stats.riskMitigationRate}%`}
         subtitle="Avec stratégie"
         variant={stats.riskMitigationRate >= 70 ? "success" : "default"}
-        href="/raid/risques"
+        href="/raid/risques?scope=all"
       />
     </section>
   );

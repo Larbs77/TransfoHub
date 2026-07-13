@@ -278,12 +278,15 @@ async function main() {
   // Insert all RAID items
   const allItems = [...risks, ...actions, ...informations, ...decisions];
 
+  const { allocateNextRaidCode } = await import("../lib/raid-code");
   for (let i = 0; i < allItems.length; i++) {
     const item = allItems[i];
     const chantierId = chantiers.length > 0 ? pickChantier(i) : null;
+    const code = await allocateNextRaidCode(item.type);
 
     await prisma.raid.create({
       data: {
+        code,
         type: item.type,
         intitule: item.intitule,
         description: item.description,
@@ -302,7 +305,7 @@ async function main() {
         chantierId,
       },
     });
-    console.log(`Created [${item.type}] ${item.intitule}`);
+    console.log(`Created [${item.type}] ${code} ${item.intitule}`);
   }
 
   console.log(`\nDone! Created ${allItems.length} RAID items (${risks.length} risks, ${actions.length} actions, ${informations.length} informations, ${decisions.length} decisions).`);

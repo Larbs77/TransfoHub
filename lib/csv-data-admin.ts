@@ -4,7 +4,14 @@
  *
  * Field separator is PIPE `|` (not comma) so free text may contain commas.
  * Technical fields (id, createdAt, updatedAt) are never imported — system-managed.
+ * RAID `code` is optional on import (auto A_00001… if empty); included on export.
  */
+
+import {
+  isValidRaidCodeFormat,
+  normalizeRaidCode,
+  raidCodeMatchesType,
+} from "@/lib/raid-code";
 
 /** Delimiter used in all TransfoHub CSV exports/imports. */
 export const CSV_SEPARATOR = "|" as const;
@@ -80,6 +87,12 @@ export const RESSOURCE_CSV_COLUMNS: CsvColumn[] = [
 
 export const RAID_CSV_COLUMNS: CsvColumn[] = [
   {
+    key: "code",
+    header: "code",
+    description:
+      "Code RAID (A_00001 / R_… / I_… / D_…). Optionnel à l'import : auto-attribué si vide",
+  },
+  {
     key: "type",
     header: "type",
     required: true,
@@ -146,7 +159,7 @@ export const DATA_TABLE_META: Record<
   raid: {
     label: "RAID",
     description:
-      "Risques, Actions, Informations et Décisions (références chantier par code).",
+      "Risques, Actions, Informations et Décisions (code A_/R_/I_/D_#####, chantier par code).",
     columns: RAID_CSV_COLUMNS,
     fileBase: "raid",
   },
@@ -477,6 +490,7 @@ export function validateRaidRow(
   const responsable_email = (raw.responsable_email ?? "").trim().toLowerCase();
   const statut = (raw.statut ?? "").trim();
   const commentaires = (raw.commentaires ?? "").trim();
+  const codeRaw = (raw.code ?? "").trim();
 
   if (!type) errors.push("type obligatoire");
   else if (!isValidRaidType(type)) {
@@ -485,6 +499,26 @@ export function validateRaidRow(
     );
   }
   if (!intitule) errors.push("intitule obligatoire");
+
+  let code: string | null = null;
+  if (codeRaw) {
+    const normalized = normalizeRaidCode(codeRaw);
+    if (!isValidRaidCodeFormat(normalized)) {
+      errors.push(
+        `code invalide (« ${codeRaw} » — format A_00001 / R_… / I_… / D_…)`
+      );
+    } else if (
+      type &&
+      isValidRaidType(type) &&
+      !raidCodeMatchesType(normalized, type)
+    ) {
+      errors.push(
+        `code « ${normalized} » ne correspond pas au type « ${type} »`
+      );
+    } else {
+      code = normalized;
+    }
+  }
 
   const prob = parseOptionalInt(raw.probabilite ?? "", 1, 5);
   if (prob.error) errors.push(`probabilite : ${prob.error}`);
@@ -521,6 +555,7 @@ export function validateRaidRow(
   }
 
   const display: Record<string, string> = {
+    code: code ?? codeRaw,
     type,
     intitule,
     description,
@@ -548,6 +583,7 @@ export function validateRaidRow(
     errors: [],
     display,
     payload: {
+      code,
       type,
       intitule,
       description,

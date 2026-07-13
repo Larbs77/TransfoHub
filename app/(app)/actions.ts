@@ -15,9 +15,21 @@ import {
 } from "@/lib/auth";
 import { getRoleByCode, resolveRaidCreateScope } from "@/lib/roles";
 import {
+  canDeleteRaid,
+  canEditRaidForm,
   getActorDisplay,
+  getRaidFormEditContext,
+  getSpecialRaidCategoriesForSession,
   writeRaidAudit,
 } from "@/lib/raid-collaboration";
+import {
+  countUnreadNotifications,
+  listUserNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+  notifyRaidAssigned,
+  notifyRaidChanged,
+} from "@/lib/notifications";
 import {
   ensureChantierFunctionalTeam,
   resolveRaidEquipeId,
@@ -25,6 +37,7 @@ import {
 } from "@/lib/equipe-chantier";
 import { EQUIPE_TYPES } from "@/lib/equipe-types";
 import { identityFromRessource } from "@/lib/ressource-user";
+import { allocateNextRaidCode } from "@/lib/raid-code";
 
 // ── Progress Calculation ─────────────────────────────
 
@@ -97,6 +110,7 @@ export async function getRaidItems(type?: string) {
   if (chantierIds !== "all") {
     // Visible if: on my chantiers OR assigned to me OR same institutional team
     // (RAID.equipeId = institutional team when assignee is outside chantier)
+    // OR RAID.category granted via institutional team special access
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const or: any[] = [];
     if (chantierIds.length > 0) {
@@ -110,6 +124,10 @@ export async function getRaidItems(type?: string) {
       });
       if (me?.equipeHierarchieId) {
         or.push({ equipeId: me.equipeHierarchieId });
+      }
+      const specialCats = await getSpecialRaidCategoriesForSession(session);
+      if (specialCats.length > 0) {
+        or.push({ categorie: { in: specialCats } });
       }
     }
     if (or.length === 0) {
@@ -801,6 +819,7 @@ export async function getDashboardPMO() {
 /** RAID row for personal dashboard (table + kanban + calendar). */
 export type PersonalRaidRow = {
   id: string;
+  code: string;
   type: string;
   intitule: string;
   description: string;
@@ -971,6 +990,8 @@ export async function getPersonalDashboard() {
 
   // RAID: assigned to me, on my chantiers, OR same institutional team
   // (when assignee is outside chantier → equipeId = hierarchy team)
+  // OR special category grants on institutional team
+  const specialCats = await getSpecialRaidCategoriesForSession(session);
   const raidsRaw = await prisma.raid.findMany({
     where: {
       OR: [
@@ -980,6 +1001,9 @@ export async function getPersonalDashboard() {
           : []),
         ...(ressource.equipeHierarchieId
           ? [{ equipeId: ressource.equipeHierarchieId }]
+          : []),
+        ...(specialCats.length > 0
+          ? [{ categorie: { in: specialCats } }]
           : []),
       ],
     },
@@ -991,6 +1015,7 @@ export async function getPersonalDashboard() {
 
   const raids = raidsRaw.map((r) => ({
     id: r.id,
+    code: r.code,
     type: r.type,
     intitule: r.intitule,
     description: r.description,
@@ -1186,6 +1211,7 @@ function getPersonalDashboardEmpty(username: string) {
   };
 }
 
+/** Computed operational alerts (overdue actions, critical Q&A) — not stored. */
 export async function getAlerts() {
   const session = await requireAuth();
   const chantierIds = await getUserChantierIds(session);
@@ -1238,6 +1264,34 @@ export async function getAlerts() {
   return [...actionAlerts, ...qaAlerts];
 }
 
+/** Per-user persistent notifications + unread count. */
+export async function getMyNotifications(opts?: { unreadOnly?: boolean }) {
+  const session = await requireAuth();
+  if (session.isMaintenance) {
+    return { items: [] as Awaited<ReturnType<typeof listUserNotifications>>, unreadCount: 0 };
+  }
+  const [items, unreadCount] = await Promise.all([
+    listUserNotifications(session.userId, {
+      unreadOnly: opts?.unreadOnly,
+      limit: 50,
+    }),
+    countUnreadNotifications(session.userId),
+  ]);
+  return { items, unreadCount };
+}
+
+export async function markMyNotificationRead(notificationId: string) {
+  const session = await requireAuth();
+  if (session.isMaintenance) return;
+  await markNotificationRead(session.userId, notificationId);
+}
+
+export async function markAllMyNotificationsRead() {
+  const session = await requireAuth();
+  if (session.isMaintenance) return 0;
+  return markAllNotificationsRead(session.userId);
+}
+
 // ── Chantier CRUD ────────────────────────────────────
 
 export async function createChantier(data: {
@@ -1264,7 +1318,16 @@ export async function createChantier(data: {
   avancement: number;
   rmdIds?: string[];
 }) {
-  await requireRole("Admin", "Programme_Office");
+  const session = await requireAuth();
+  // Only rôles with périmètre données chantiers = « tous les chantiers »
+  if (session.role !== "Admin") {
+    const role = await getRoleByCode(session.role);
+    if (!role?.is_active || role.chantier_scope !== "all") {
+      throw new Error(
+        "Création de chantier non autorisée : réservée aux rôles avec le périmètre « tous les chantiers »."
+      );
+    }
+  }
   const created = await prisma.chantier.create({
     data: {
       code: data.code,
@@ -1472,8 +1535,10 @@ export async function createRaid(data: {
     responsableRessourceId: data.responsableRessourceId || null,
     chantierId: data.chantierId || null,
   });
+  const code = await allocateNextRaidCode(data.type);
   const created = await prisma.raid.create({
     data: {
+      code,
       type: data.type,
       intitule: data.intitule,
       description: data.description,
@@ -1500,7 +1565,7 @@ export async function createRaid(data: {
   await writeRaidAudit({
     raidId: created.id,
     action: "created",
-    summary: `Entrée créée par ${actor.actorName} — statut « ${data.statut || "—"} »`,
+    summary: `Entrée ${code} créée par ${actor.actorName} — statut « ${data.statut || "—"} »`,
     newValue: data.statut,
     actorUserId: actor.actorUserId,
     actorName: actor.actorName,
@@ -1520,7 +1585,26 @@ export async function createRaid(data: {
       actorName: actor.actorName,
       actorRessourceId: actor.actorRessourceId,
     });
+    await notifyRaidAssigned({
+      raidId: created.id,
+      code: created.code,
+      intitule: created.intitule,
+      assigneeRessourceId: data.responsableRessourceId,
+      actorUserId: actor.actorUserId,
+      actorName: actor.actorName,
+    });
   }
+  await notifyRaidChanged({
+    raidId: created.id,
+    code: created.code,
+    intitule: created.intitule,
+    chantierId: created.chantierId,
+    summary: data.responsableRessourceId
+      ? `Création et assignation à ${data.responsable || "ressource"}`
+      : "Création de l'entrée RAID",
+    actorUserId: actor.actorUserId,
+    actorName: actor.actorName,
+  });
   revalidatePath("/");
   revalidatePath("/raid");
   revalidatePath(`/raid/${created.id}`);
@@ -1552,11 +1636,33 @@ export async function updateRaid(
     comiteId: string | null;
   }
 ) {
-  await requireRole("Admin", "Programme_Office", "PMO_Chantier");
+  const session = await requireAuth();
+  const existing = await prisma.raid.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      code: true,
+      intitule: true,
+      chantierId: true,
+      responsableRessourceId: true,
+      statut: true,
+    },
+  });
+  if (!existing) throw new Error("Entrée RAID introuvable.");
+
+  // Edit form: scope « tous », assignee, or DC / suppléant / PMO du chantier lié
+  if (!(await canEditRaidForm(session, existing))) {
+    throw new Error(
+      "Modification non autorisée : réservée à l'assigné, aux rôles « tous les chantiers », ou au Directeur / Suppléant / PMO du chantier lié."
+    );
+  }
+
+  const actor = await getActorDisplay(session);
   const teamAssign = await resolveRaidEquipeId({
     responsableRessourceId: data.responsableRessourceId || null,
     chantierId: data.chantierId || null,
   });
+  // code is immutable — never updated here
   await prisma.raid.update({
     where: { id },
     data: {
@@ -1581,6 +1687,32 @@ export async function updateRaid(
       comiteId: data.comiteId || null,
     },
   });
+
+  const assigneeChanged =
+    (data.responsableRessourceId || null) !==
+    (existing.responsableRessourceId || null);
+  if (assigneeChanged && data.responsableRessourceId) {
+    await notifyRaidAssigned({
+      raidId: id,
+      code: existing.code,
+      intitule: data.intitule || existing.intitule,
+      assigneeRessourceId: data.responsableRessourceId,
+      actorUserId: actor.actorUserId,
+      actorName: actor.actorName,
+    });
+  }
+  await notifyRaidChanged({
+    raidId: id,
+    code: existing.code,
+    intitule: data.intitule || existing.intitule,
+    chantierId: data.chantierId || existing.chantierId,
+    summary: assigneeChanged
+      ? `Modification formulaire (assignation → ${data.responsable || "—"})`
+      : "Modification via formulaire",
+    actorUserId: actor.actorUserId,
+    actorName: actor.actorName,
+  });
+
   revalidatePath("/");
   revalidatePath("/raid");
   revalidatePath(`/raid/${id}`);
@@ -1589,8 +1721,20 @@ export async function updateRaid(
   revalidatePath("/ressources");
 }
 
+/** Context for showing the RAID form edit button (client). */
+export async function fetchRaidFormEditContext() {
+  const session = await requireAuth();
+  return getRaidFormEditContext(session);
+}
+
 export async function deleteRaid(id: string) {
-  await requireRole("Admin", "Programme_Office");
+  const session = await requireAuth();
+  // Delete: only rôles with périmètre chantiers = « tous les chantiers »
+  if (!(await canDeleteRaid(session))) {
+    throw new Error(
+      "Suppression non autorisée : réservée aux rôles avec le périmètre « tous les chantiers »."
+    );
+  }
   await prisma.raid.delete({ where: { id } });
   revalidatePath("/");
   revalidatePath("/raid");
@@ -1981,6 +2125,84 @@ export async function reorderStatusConfigs(type: string, orderedIds: string[]) {
     )
   );
   revalidatePath("/settings");
+  revalidatePath("/");
+}
+
+// ── RAID field options (Catégorie / Domaine) ──────────
+
+export async function getRaidFieldOptions(kind?: string) {
+  await requireAuth();
+  return prisma.raidFieldOption.findMany({
+    where: kind ? { kind } : undefined,
+    orderBy: [{ kind: "asc" }, { position: "asc" }, { label: "asc" }],
+  });
+}
+
+export async function createRaidFieldOption(data: {
+  kind: string;
+  label: string;
+  color: string;
+  position: number;
+}) {
+  await requireRole("Admin");
+  const kind = data.kind === "domaine" ? "domaine" : "categorie";
+  const label = data.label.trim();
+  if (!label) throw new Error("Libellé obligatoire");
+  await prisma.raidFieldOption.create({
+    data: {
+      kind,
+      label,
+      color: data.color || "#6b7280",
+      position: data.position,
+    },
+  });
+  revalidatePath("/settings");
+  revalidatePath("/raid");
+  revalidatePath("/calendrier");
+  revalidatePath("/");
+}
+
+export async function updateRaidFieldOption(
+  id: string,
+  data: { label?: string; color?: string; position?: number }
+) {
+  await requireRole("Admin");
+  const patch: { label?: string; color?: string; position?: number } = {};
+  if (data.label !== undefined) {
+    const label = data.label.trim();
+    if (!label) throw new Error("Libellé obligatoire");
+    patch.label = label;
+  }
+  if (data.color !== undefined) patch.color = data.color;
+  if (data.position !== undefined) patch.position = data.position;
+  await prisma.raidFieldOption.update({ where: { id }, data: patch });
+  revalidatePath("/settings");
+  revalidatePath("/raid");
+  revalidatePath("/calendrier");
+  revalidatePath("/");
+}
+
+export async function deleteRaidFieldOption(id: string) {
+  await requireRole("Admin");
+  await prisma.raidFieldOption.delete({ where: { id } });
+  revalidatePath("/settings");
+  revalidatePath("/raid");
+  revalidatePath("/calendrier");
+  revalidatePath("/");
+}
+
+export async function reorderRaidFieldOptions(kind: string, orderedIds: string[]) {
+  await requireRole("Admin");
+  const k = kind === "domaine" ? "domaine" : "categorie";
+  await prisma.$transaction(
+    orderedIds.map((id, index) =>
+      prisma.raidFieldOption.update({ where: { id }, data: { position: index } })
+    )
+  );
+  // Ensure all reordered rows keep the expected kind (defensive)
+  void k;
+  revalidatePath("/settings");
+  revalidatePath("/raid");
   revalidatePath("/");
 }
 

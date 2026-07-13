@@ -46,6 +46,14 @@ export async function getEquipesForAdmin() {
     orderBy: [{ type: "asc" }, { position: "asc" }, { name: "asc" }],
     include: {
       chantier: { select: { id: true, code: true, nom: true } },
+      raidCategorieAccess: {
+        select: {
+          raidFieldOptionId: true,
+          raidFieldOption: {
+            select: { id: true, label: true, color: true, kind: true },
+          },
+        },
+      },
       _count: {
         select: {
           comiteParametres: true,
@@ -69,9 +77,61 @@ export async function getEquipesForAdmin() {
     hierarchieCount: r._count.ressourcesHierarchie,
     fonctionnelCount: r._count.ressourcesFonctionnelles,
     raidCount: r._count.raids,
+    /** Special RAID category option IDs (institutionnelle only). */
+    raidCategorieOptionIds: r.raidCategorieAccess
+      .filter((a) => a.raidFieldOption.kind === "categorie")
+      .map((a) => a.raidFieldOptionId),
+    raidCategorieLabels: r.raidCategorieAccess
+      .filter((a) => a.raidFieldOption.kind === "categorie")
+      .map((a) => ({
+        id: a.raidFieldOption.id,
+        label: a.raidFieldOption.label,
+        color: a.raidFieldOption.color,
+      })),
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   }));
+}
+
+async function syncInstitutionalRaidCategorieAccess(
+  equipeId: string,
+  optionIds: string[] | undefined
+) {
+  if (optionIds === undefined) return;
+
+  const unique = [...new Set(optionIds.map((id) => id.trim()).filter(Boolean))];
+
+  if (unique.length === 0) {
+    await prisma.equipeRaidCategorieAccess.deleteMany({ where: { equipeId } });
+    return;
+  }
+
+  const valid = await prisma.raidFieldOption.findMany({
+    where: { id: { in: unique }, kind: "categorie" },
+    select: { id: true },
+  });
+  const validIds = new Set(valid.map((v) => v.id));
+  const toKeep = unique.filter((id) => validIds.has(id));
+
+  await prisma.$transaction(async (tx) => {
+    await tx.equipeRaidCategorieAccess.deleteMany({
+      where: {
+        equipeId,
+        ...(toKeep.length > 0
+          ? { raidFieldOptionId: { notIn: toKeep } }
+          : {}),
+      },
+    });
+    for (const raidFieldOptionId of toKeep) {
+      await tx.equipeRaidCategorieAccess.upsert({
+        where: {
+          equipeId_raidFieldOptionId: { equipeId, raidFieldOptionId },
+        },
+        create: { equipeId, raidFieldOptionId },
+        update: {},
+      });
+    }
+  });
 }
 
 /**
@@ -118,6 +178,8 @@ export async function createEquipe(data: {
   description?: string;
   position?: number;
   is_active?: boolean;
+  /** RaidFieldOption IDs (kind=categorie). Default none. */
+  raidCategorieOptionIds?: string[];
 }) {
   await requireEquipesAdmin();
   const payload = validateInstitutionnellePayload(data);
@@ -136,9 +198,14 @@ export async function createEquipe(data: {
     payload.position = (last?.position ?? -1) + 1;
   }
 
-  await prisma.equipe.create({ data: payload });
+  const created = await prisma.equipe.create({ data: payload });
+  await syncInstitutionalRaidCategorieAccess(
+    created.id,
+    data.raidCategorieOptionIds ?? []
+  );
   revalidatePath("/admin/equipes");
   revalidatePath("/admin/comites-parametres");
+  revalidatePath("/raid");
 }
 
 export async function updateEquipe(
@@ -148,6 +215,8 @@ export async function updateEquipe(
     description?: string;
     position?: number;
     is_active?: boolean;
+    /** RaidFieldOption IDs (kind=categorie). Only for institutionnelle. */
+    raidCategorieOptionIds?: string[];
   }
 ) {
   await requireEquipesAdmin();
@@ -156,6 +225,7 @@ export async function updateEquipe(
 
   if (current.type === EQUIPE_TYPES.fonctionnelle) {
     // Functional teams: only description / is_active (name follows chantier)
+    // No special RAID category access on functional teams.
     await prisma.equipe.update({
       where: { id },
       data: {
@@ -184,9 +254,14 @@ export async function updateEquipe(
     }
   });
 
+  if (data.raidCategorieOptionIds !== undefined) {
+    await syncInstitutionalRaidCategorieAccess(id, data.raidCategorieOptionIds);
+  }
+
   revalidatePath("/admin/equipes");
   revalidatePath("/admin/comites-parametres");
   revalidatePath("/comites");
+  revalidatePath("/raid");
 }
 
 export async function setEquipeActive(id: string, is_active: boolean) {

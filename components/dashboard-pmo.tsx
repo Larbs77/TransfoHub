@@ -200,7 +200,7 @@ export function DashboardPMO({
           label="Actions Actives"
           value={String(stats.totalActions)}
           subtitle="Non clôturées"
-          href="/raid/actions"
+          href="/raid/actions?scope=all"
         />
         <KpiCard
           icon={Clock}
@@ -208,14 +208,14 @@ export function DashboardPMO({
           value={String(stats.overdueActions)}
           subtitle="Date dépassée"
           variant={stats.overdueActions > 0 ? "destructive" : "default"}
-          href="/raid/actions?overdue=true"
+          href="/raid/actions?overdue=true&scope=all"
         />
         <KpiCard
           icon={ShieldCheck}
           label="Risques Ouverts"
           value={String(stats.totalRisks)}
           subtitle="Non clos"
-          href="/raid/risques"
+          href="/raid/risques?scope=all"
         />
         <KpiCard
           icon={ShieldAlert}
@@ -223,7 +223,7 @@ export function DashboardPMO({
           value={String(stats.criticalRisks)}
           subtitle="Score >= 12/25"
           variant={stats.criticalRisks > 0 ? "destructive" : "default"}
-          href="/raid/risques?critical=true"
+          href="/raid/risques?critical=true&scope=all"
         />
         <KpiCard
           icon={Gavel}
@@ -231,7 +231,7 @@ export function DashboardPMO({
           value={String(stats.pendingDecisions)}
           subtitle="Non validées"
           variant={stats.pendingDecisions > 0 ? "warning" : "default"}
-          href="/raid/decisions?statut=En+attente"
+          href="/raid/decisions?statut=En+attente&scope=all"
         />
         <KpiCard
           icon={TrendingUp}
@@ -239,7 +239,7 @@ export function DashboardPMO({
           value={`${stats.actionCloseRate}%`}
           subtitle="Actions clôturées"
           variant={stats.actionCloseRate >= 50 ? "success" : "default"}
-          href="/raid/actions"
+          href="/raid/actions?scope=all"
         />
       </section>
 

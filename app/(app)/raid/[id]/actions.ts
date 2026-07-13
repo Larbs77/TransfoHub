@@ -13,6 +13,10 @@ import {
   writeRaidAudit,
 } from "@/lib/raid-collaboration";
 import { resolveRaidEquipeId } from "@/lib/equipe-chantier";
+import {
+  notifyRaidAssigned,
+  notifyRaidChanged,
+} from "@/lib/notifications";
 
 function revalidateRaid(id: string, chantierId?: string | null) {
   revalidatePath("/raid");
@@ -29,6 +33,7 @@ async function loadRaidForCollab(id: string) {
     where: { id },
     select: {
       id: true,
+      code: true,
       type: true,
       intitule: true,
       statut: true,
@@ -36,6 +41,7 @@ async function loadRaidForCollab(id: string) {
       responsableRessourceId: true,
       equipeId: true,
       chantierId: true,
+      categorie: true,
     },
   });
 }
@@ -47,6 +53,8 @@ async function ensureAssignedIfNeeded(
   session: SessionData,
   raid: {
     id: string;
+    code?: string;
+    intitule?: string;
     responsableRessourceId: string | null;
     responsable: string;
     chantierId: string | null;
@@ -81,6 +89,10 @@ async function ensureAssignedIfNeeded(
     },
   });
 
+  // Keep in-memory raid in sync for subsequent status logic
+  raid.responsableRessourceId = session.ressourceId;
+  raid.responsable = nom;
+
   const teamHint = team.equipeName
     ? ` · ${team.kind === "fonctionnelle" ? "équipe chantier" : "équipe institutionnelle"} « ${team.equipeName} »`
     : "";
@@ -95,6 +107,7 @@ async function ensureAssignedIfNeeded(
     actorName: actor.actorName,
     actorRessourceId: actor.actorRessourceId,
   });
+  // Leadership notified by the parent action (status change) to avoid double notify.
 }
 
 export async function getRaidDetail(id: string) {
@@ -198,6 +211,16 @@ export async function addRaidComment(raidId: string, body: string) {
     actorRessourceId: actor.actorRessourceId,
   });
 
+  await notifyRaidChanged({
+    raidId,
+    code: raid.code,
+    intitule: raid.intitule,
+    chantierId: raid.chantierId,
+    summary: `Nouveau commentaire de ${actor.actorName}`,
+    actorUserId: actor.actorUserId,
+    actorName: actor.actorName,
+  });
+
   revalidateRaid(raidId, raid.chantierId);
   return comment;
 }
@@ -206,6 +229,8 @@ async function applyRaidStatusChange(
   session: SessionData,
   raid: {
     id: string;
+    code?: string;
+    intitule?: string;
     statut: string;
     responsableRessourceId: string | null;
     responsable: string;
@@ -252,6 +277,16 @@ async function applyRaidStatusChange(
     actorUserId: actor.actorUserId,
     actorName: actor.actorName,
     actorRessourceId: actor.actorRessourceId,
+  });
+
+  await notifyRaidChanged({
+    raidId: raid.id,
+    code: raid.code,
+    intitule: raid.intitule,
+    chantierId: raid.chantierId,
+    summary: `Statut : « ${oldStatut || "—"} » → « ${statut} »`,
+    actorUserId: actor.actorUserId,
+    actorName: actor.actorName,
   });
 
   revalidateRaid(raid.id, raid.chantierId);
@@ -362,6 +397,15 @@ export async function assignRaidToRessource(
       actorName: actor.actorName,
       actorRessourceId: actor.actorRessourceId,
     });
+    await notifyRaidChanged({
+      raidId,
+      code: raid.code,
+      intitule: raid.intitule,
+      chantierId: raid.chantierId,
+      summary: `Désassignation (était ${prevName})`,
+      actorUserId: actor.actorUserId,
+      actorName: actor.actorName,
+    });
     revalidateRaid(raidId, raid.chantierId);
     return;
   }
@@ -402,6 +446,24 @@ export async function assignRaidToRessource(
     actorUserId: actor.actorUserId,
     actorName: actor.actorName,
     actorRessourceId: actor.actorRessourceId,
+  });
+
+  await notifyRaidAssigned({
+    raidId,
+    code: raid.code,
+    intitule: raid.intitule,
+    assigneeRessourceId: target.id,
+    actorUserId: actor.actorUserId,
+    actorName: actor.actorName,
+  });
+  await notifyRaidChanged({
+    raidId,
+    code: raid.code,
+    intitule: raid.intitule,
+    chantierId: raid.chantierId,
+    summary: `Assigné à ${target.nom_complet}`,
+    actorUserId: actor.actorUserId,
+    actorName: actor.actorName,
   });
 
   revalidateRaid(raidId, raid.chantierId);
@@ -472,6 +534,17 @@ export async function autoAssignRaidToMe(raidId: string) {
     actorUserId: actor.actorUserId,
     actorName: actor.actorName,
     actorRessourceId: actor.actorRessourceId,
+  });
+
+  // Self-assign: no assignee self-notify; leadership informed
+  await notifyRaidChanged({
+    raidId,
+    code: raid.code,
+    intitule: raid.intitule,
+    chantierId: raid.chantierId,
+    summary: `${actor.actorName} s'est auto-assigné(e)`,
+    actorUserId: actor.actorUserId,
+    actorName: actor.actorName,
   });
 
   revalidateRaid(raidId, raid.chantierId);

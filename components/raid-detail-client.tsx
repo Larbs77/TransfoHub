@@ -89,6 +89,7 @@ type Comment = {
 
 type RaidDetail = {
   id: string;
+  code: string;
   type: string;
   intitule: string;
   description: string;
@@ -299,6 +300,13 @@ export function RaidDetailClient({
               </Link>
             </Button>
             <Badge
+              variant="outline"
+              className="font-mono text-xs font-bold tracking-wide border-[#0A3C74]/25 bg-white/90 text-[#0A3C74] shadow-sm dark:bg-card dark:text-foreground"
+              title="Code RAID"
+            >
+              {raid.code}
+            </Badge>
+            <Badge
               className="gap-1.5 text-xs font-semibold shadow-sm"
               style={{ backgroundColor: typeColor, color: "white" }}
             >
@@ -338,8 +346,42 @@ export function RaidDetailClient({
             {raid.intitule}
           </h1>
 
-          {/* Linked team (info only) */}
+          {/* Assigné (same chip style as équipe liée) */}
           <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-muted-foreground">
+              <UserCheck className="size-3.5 text-[#00BDBB]" />
+              Assigné
+            </span>
+            {raid.responsableRessource?.nom_complet || raid.responsable ? (
+              <span
+                className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-lg border border-[#0A3C74]/12 bg-white/80 px-3 py-1.5 text-sm shadow-sm dark:bg-card"
+                title={
+                  raid.responsableRessource?.nom_complet ||
+                  raid.responsable ||
+                  undefined
+                }
+              >
+                <span className="font-medium text-[#0A3C74] dark:text-foreground break-words">
+                  {raid.responsableRessource?.nom_complet || raid.responsable}
+                </span>
+                {isMine ? (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] border-teal-500/40 text-teal-800 dark:text-teal-200"
+                  >
+                    Moi
+                  </Badge>
+                ) : null}
+              </span>
+            ) : (
+              <span className="rounded-lg border border-dashed border-slate-300 bg-white/50 px-3 py-1.5 text-sm text-muted-foreground dark:border-muted">
+                Non assigné
+              </span>
+            )}
+          </div>
+
+          {/* Linked team (info only) */}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-muted-foreground">
               <Users className="size-3.5 text-[#00BDBB]" />
               Équipe liée
@@ -387,15 +429,6 @@ export function RaidDetailClient({
                 </Link>
               </span>
             )}
-            <span className="inline-flex items-center gap-1.5">
-              <UserCheck className="size-3.5 text-[#00BDBB]" />
-              <span>
-                <span className="text-xs text-muted-foreground">Assigné · </span>
-                {raid.responsableRessource?.nom_complet ||
-                  raid.responsable ||
-                  "Non assigné"}
-              </span>
-            </span>
             <span className="inline-flex items-center gap-1.5">
               <Calendar className="size-3.5 text-[#00BDBB]" />
               Créé le {fmtDate(raid.createdAt)}
@@ -684,14 +717,6 @@ export function RaidDetailClient({
                 <MetaRow
                   label="Échéance"
                   value={fmtDate(raid.date_echeance)}
-                />
-                <MetaRow
-                  label="Équipe (assignation)"
-                  value={
-                    raid.equipe?.name
-                      ? `${raid.equipe.name}`
-                      : "—"
-                  }
                 />
                 <MetaRow
                   label="Dernière MAJ"

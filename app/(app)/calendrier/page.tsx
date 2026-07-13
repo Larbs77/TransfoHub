@@ -1,12 +1,13 @@
-import { getRaidItems, getComites } from "@/app/(app)/actions";
+import { getRaidItems, getComites, getRaidFieldOptions } from "@/app/(app)/actions";
 import { getComiteParametresForSelect } from "@/app/(app)/admin/comites-parametres/actions";
 import { CalendarPageClient } from "@/components/calendar-page-client";
 
 export default async function CalendrierPage() {
-  const [raidItems, comites, instances] = await Promise.all([
+  const [raidItems, comites, instances, fieldOptions] = await Promise.all([
     getRaidItems(),
     getComites().catch(() => []),
     getComiteParametresForSelect().catch(() => []),
+    getRaidFieldOptions().catch(() => []),
   ]);
 
   return (
@@ -19,6 +20,7 @@ export default async function CalendrierPage() {
           raidItems={raidItems}
           comites={comites}
           instances={instances}
+          fieldOptions={fieldOptions}
         />
       </main>
     </div>

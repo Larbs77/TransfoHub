@@ -707,6 +707,11 @@ export function MonTableauDeBordClient({
                                         }
                                       >
                                         <td className="px-3 py-2 max-w-[280px]">
+                                          {r.code ? (
+                                            <span className="mb-0.5 block font-mono text-[11px] font-semibold text-[#0A3C74] dark:text-foreground">
+                                              {r.code}
+                                            </span>
+                                          ) : null}
                                           <span className="line-clamp-2 font-medium text-primary hover:underline">
                                             {r.intitule}
                                           </span>

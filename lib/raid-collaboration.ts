@@ -104,8 +104,55 @@ export async function writeRaidAudit(params: {
 export type RaidAccessShape = {
   responsableRessourceId: string | null;
   chantierId: string | null;
-  equipeId: string | null;
+  equipeId?: string | null;
+  /** Used for institutional team special category access. */
+  categorie?: string | null;
 };
+
+/**
+ * Categories granted as special RAID access to the user's institutional hierarchy team.
+ * Empty when: no resource, no institutional team, or team has no grants (default).
+ */
+export async function getSpecialRaidCategoriesForSession(
+  session: SessionData
+): Promise<string[]> {
+  if (!session.ressourceId) return [];
+  const me = await prisma.ressource.findUnique({
+    where: { id: session.ressourceId },
+    select: {
+      equipeHierarchieId: true,
+      equipeHierarchie: {
+        select: {
+          type: true,
+          is_active: true,
+          raidCategorieAccess: {
+            select: {
+              raidFieldOption: { select: { label: true, kind: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+  if (!me?.equipeHierarchieId || !me.equipeHierarchie) return [];
+  const team = me.equipeHierarchie;
+  if (team.type && team.type !== "institutionnelle") return [];
+  if (team.is_active === false) return [];
+  return team.raidCategorieAccess
+    .filter((a) => a.raidFieldOption.kind === "categorie")
+    .map((a) => a.raidFieldOption.label)
+    .filter((label) => label.trim().length > 0);
+}
+
+function hasSpecialCategoryAccess(
+  raid: RaidAccessShape,
+  specialCategories: string[]
+): boolean {
+  if (!specialCategories.length) return false;
+  const cat = (raid.categorie ?? "").trim();
+  if (!cat) return false;
+  return specialCategories.includes(cat);
+}
 
 /** Institutional Program Office team names (case-insensitive match). */
 const PROGRAMME_OFFICE_EQUIPE_NAMES = [
@@ -145,6 +192,7 @@ export async function isProgrammeLevelActor(
  * - Member of the linked chantier team (MembreEquipe)
  * - Same institutional team as the assignee
  * - Same derived RAID equipe (functional chantier team or institutional)
+ * - Institutional team special category grants (Paramètres équipes)
  */
 export async function canCollaborateOnRaid(
   session: SessionData,
@@ -203,6 +251,10 @@ export async function canCollaborateOnRaid(
     }
   }
 
+  // Special institutional access by RAID category
+  const specialCats = await getSpecialRaidCategoriesForSession(session);
+  if (hasSpecialCategoryAccess(raid, specialCats)) return true;
+
   return false;
 }
 
@@ -243,6 +295,7 @@ export async function canAssignRaid(
  * - Admin / Bureau Programme
  * - Directeur de chantier, suppléant, or PMO on the RAID's chantier team
  * - Same institutional team as assignee (when RAID is institutional-scoped)
+ * - Institutional team special category grants
  */
 export async function canMoveRaidOnKanban(
   session: SessionData,
@@ -250,6 +303,7 @@ export async function canMoveRaidOnKanban(
     responsableRessourceId: string | null;
     chantierId: string | null;
     equipeId?: string | null;
+    categorie?: string | null;
   }
 ): Promise<boolean> {
   if (await isProgrammeLevelActor(session)) {
@@ -282,6 +336,9 @@ export async function canMoveRaidOnKanban(
     }
   }
 
+  const specialCats = await getSpecialRaidCategoriesForSession(session);
+  if (hasSpecialCategoryAccess(raid, specialCats)) return true;
+
   if (!raid.chantierId) return false;
 
   const membres = await prisma.membreEquipe.findMany({
@@ -313,6 +370,81 @@ export async function getLeadershipChantierIds(
   return [...ids];
 }
 
+/**
+ * Who may open the full RAID edit form (table « Modifier ») / call updateRaid:
+ * 1. Role with chantier_scope = "all" (tous les chantiers) — includes Admin
+ * 2. Assignee (responsable ressource linked to the session)
+ * 3. Directeur de chantier of the RAID's linked chantier
+ * 4. Suppléant (directeur) of that chantier
+ * 5. PMO of that chantier team
+ *
+ * RAID without a chantier: scope "all" or assignee.
+ */
+export async function canEditRaidForm(
+  session: SessionData,
+  raid: {
+    chantierId: string | null;
+    responsableRessourceId?: string | null;
+  }
+): Promise<boolean> {
+  if (session.role === "Admin") return true;
+
+  const role = await getRoleByCode(session.role);
+  if (role?.is_active && role.chantier_scope === "all") return true;
+
+  // Assignee of the entry
+  if (
+    session.ressourceId &&
+    raid.responsableRessourceId &&
+    raid.responsableRessourceId === session.ressourceId
+  ) {
+    return true;
+  }
+
+  if (!session.ressourceId || !raid.chantierId) return false;
+
+  const membres = await prisma.membreEquipe.findMany({
+    where: {
+      chantierId: raid.chantierId,
+      ressourceId: session.ressourceId,
+    },
+    select: { role: true, is_directeur: true },
+  });
+  return membres.some((m) => isKanbanLeadershipRole(m.role, m.is_directeur));
+}
+
+/**
+ * Who may delete a RAID entry (table « Supprimer »):
+ * only roles with chantier_scope = "all" (tous les chantiers), including Admin.
+ */
+export async function canDeleteRaid(
+  session: SessionData
+): Promise<boolean> {
+  if (session.role === "Admin") return true;
+  const role = await getRoleByCode(session.role);
+  return !!(role?.is_active && role.chantier_scope === "all");
+}
+
+/** Client context for showing/hiding the form edit / delete buttons in RAID lists. */
+export async function getRaidFormEditContext(session: SessionData): Promise<{
+  /** Role périmètre chantiers = tous les chantiers (or Admin). */
+  chantierScopeAll: boolean;
+  /** Chantiers where user is DC / suppléant / PMO. Empty if chantierScopeAll. */
+  leadershipChantierIds: string[];
+}> {
+  if (session.role === "Admin") {
+    return { chantierScopeAll: true, leadershipChantierIds: [] };
+  }
+  const role = await getRoleByCode(session.role);
+  if (role?.is_active && role.chantier_scope === "all") {
+    return { chantierScopeAll: true, leadershipChantierIds: [] };
+  }
+  return {
+    chantierScopeAll: false,
+    leadershipChantierIds: await getLeadershipChantierIds(session),
+  };
+}
+
 /** Client context for Kanban drag permissions. */
 export async function getKanbanMoveContext(session: SessionData): Promise<{
   ressourceId: string | null;
@@ -320,6 +452,8 @@ export async function getKanbanMoveContext(session: SessionData): Promise<{
   leadershipChantierIds: string[];
   /** Institutional hierarchy team of the current user (for off-chantier RAID). */
   institutionalEquipeId: string | null;
+  /** Category labels granted via institutional team special access. */
+  specialCategories: string[];
 }> {
   const isProgramme =
     session.role === "Admin" || session.role === "Programme_Office";
@@ -338,6 +472,9 @@ export async function getKanbanMoveContext(session: SessionData): Promise<{
       ? []
       : await getLeadershipChantierIds(session),
     institutionalEquipeId,
+    specialCategories: isProgramme
+      ? []
+      : await getSpecialRaidCategoriesForSession(session),
   };
 }
 

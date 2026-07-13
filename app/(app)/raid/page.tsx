@@ -1,13 +1,20 @@
-import { getRaidItems, getStatusConfigs } from "@/app/(app)/actions";
+import { getRaidItems, getStatusConfigs, getRaidFieldOptions } from "@/app/(app)/actions";
 import { Card, CardContent } from "@/components/ui/card";
 import { RaidList } from "@/components/raid-list";
 import { AddRaidButton } from "@/components/add-raid-button";
 
-export default async function RaidPage() {
-  const [items, statusConfigs] = await Promise.all([
+interface Props {
+  searchParams: Promise<{ scope?: string }>;
+}
+
+export default async function RaidPage({ searchParams }: Props) {
+  const params = await searchParams;
+  const [items, statusConfigs, fieldOptions] = await Promise.all([
     getRaidItems(),
     getStatusConfigs(),
+    getRaidFieldOptions().catch(() => []),
   ]);
+  const initialRaidScope = params.scope === "all" ? "all" : "mine";
 
   return (
     <div className="min-h-screen bg-background">
@@ -23,7 +30,12 @@ export default async function RaidPage() {
         </div>
         <Card>
           <CardContent className="pt-6">
-            <RaidList items={items} statusConfigs={statusConfigs} />
+            <RaidList
+              items={items}
+              initialRaidScope={initialRaidScope}
+              statusConfigs={statusConfigs}
+              fieldOptions={fieldOptions}
+            />
           </CardContent>
         </Card>
       </main>

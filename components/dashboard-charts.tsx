@@ -131,6 +131,38 @@ const PRIORITE_ORDER_CHART = [
   "Pilotage Transformation",
 ];
 
+/** Bold black count labels outside the donut (avoids being buried under slices). */
+function PrioriteRingLabel(props: {
+  cx?: number;
+  cy?: number;
+  midAngle?: number;
+  innerRadius?: number;
+  outerRadius?: number;
+  value?: number;
+}) {
+  const { cx = 0, cy = 0, midAngle = 0, outerRadius = 0, value } = props;
+  if (value == null) return null;
+  const RADIAN = Math.PI / 180;
+  const radius = outerRadius + 18;
+  const x = cx + radius * Math.cos(-midAngle * RADIAN);
+  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+  return (
+    <text
+      x={x}
+      y={y}
+      fill="#0a0a0a"
+      stroke="none"
+      fontSize={14}
+      fontWeight={700}
+      textAnchor={x > cx ? "start" : "end"}
+      dominantBaseline="central"
+      style={{ pointerEvents: "none" }}
+    >
+      {value}
+    </text>
+  );
+}
+
 export function PrioritePieChart({ prioriteCounts }: PrioriteChartProps) {
   const data = PRIORITE_ORDER_CHART
     .filter((p) => (prioriteCounts[p] ?? 0) > 0)
@@ -143,16 +175,21 @@ export function PrioritePieChart({ prioriteCounts }: PrioriteChartProps) {
   if (data.length === 0) return <EmptyChart />;
 
   return (
-    <ResponsiveContainer width="100%" height={280}>
-      <PieChart>
+    <ResponsiveContainer width="100%" height={300}>
+      <PieChart margin={{ top: 12, right: 12, bottom: 8, left: 12 }}>
         <Pie
           data={data}
           cx="50%"
-          cy="50%"
-          innerRadius={50}
-          outerRadius={90}
+          cy="46%"
+          innerRadius={48}
+          outerRadius={84}
           dataKey="value"
-          label={({ name, value }) => `${value}`}
+          label={PrioriteRingLabel}
+          labelLine={{
+            stroke: "#0a0a0a",
+            strokeWidth: 1.25,
+            strokeOpacity: 0.55,
+          }}
         >
           {data.map((entry, i) => (
             <Cell key={i} fill={entry.color} />
@@ -287,7 +324,7 @@ export function RiskMatrixChart({ riskMatrix }: RiskMatrixProps) {
                       }}
                       onClick={() => {
                         if (count > 0) {
-                          router.push(`/raid/risques?prob=${probIdx + 1}&impact=${ci + 1}`);
+                          router.push(`/raid/risques?prob=${probIdx + 1}&impact=${ci + 1}&scope=all`);
                         }
                       }}
                       title={count > 0 ? `${count} risque(s) — ${PROB_LABELS[probIdx]} / ${IMPACT_SHORT[ci]}\nCliquez pour filtrer` : ""}

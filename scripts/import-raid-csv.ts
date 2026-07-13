@@ -9,6 +9,14 @@
 import { readFileSync } from "fs";
 import { createPrismaClient } from "../lib/create-prisma";
 import { resolveRaidEquipeId } from "../lib/equipe-chantier";
+import {
+  allocateNextRaidCode,
+  bumpRaidCodeSequenceIfNeeded,
+  isValidRaidCodeFormat,
+  normalizeRaidCode,
+  parseRaidCodeNumber,
+  raidCodeMatchesType,
+} from "../lib/raid-code";
 
 const prisma = createPrismaClient();
 const CSV_SEP = "|";
@@ -157,6 +165,7 @@ async function main() {
 
   type Prep = {
     id: string;
+    code: string;
     type: string;
     intitule: string;
     description: string;
@@ -212,6 +221,7 @@ async function main() {
 
     prepared.push({
       id: (row.id ?? "").trim() || crypto.randomUUID(),
+      code: (row.code ?? "").trim(),
       type: (row.type ?? "Action").trim() || "Action",
       intitule: (row.intitule ?? "").trim() || "(sans intitulé)",
       description: row.description ?? "",
@@ -252,13 +262,36 @@ async function main() {
   await prisma.raidAuditLog.deleteMany({});
   const deleted = await prisma.raid.deleteMany({});
   console.log(`  deleted raids: ${deleted.count}`);
+  // Reset sequences so re-import can reuse A_00001… or keep explicit codes
+  await prisma.raidCodeSequence.deleteMany({});
 
   console.log("Inserting…");
   let inserted = 0;
+  const usedCodes = new Set<string>();
   for (const p of prepared) {
+    let code: string;
+    if (p.code.trim()) {
+      const normalized = normalizeRaidCode(p.code);
+      if (
+        isValidRaidCodeFormat(normalized) &&
+        raidCodeMatchesType(normalized, p.type) &&
+        !usedCodes.has(normalized)
+      ) {
+        code = normalized;
+      } else {
+        code = await allocateNextRaidCode(p.type);
+      }
+    } else {
+      code = await allocateNextRaidCode(p.type);
+    }
+    usedCodes.add(code);
+    const num = parseRaidCodeNumber(code);
+    if (num != null) await bumpRaidCodeSequenceIfNeeded(p.type, num);
+
     await prisma.raid.create({
       data: {
         id: p.id,
+        code,
         type: p.type,
         intitule: p.intitule,
         description: p.description,

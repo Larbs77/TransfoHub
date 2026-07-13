@@ -17,8 +17,9 @@ import { CalendarView, type CalendarEvent } from "./calendar-view";
 import {
   RAID_TYPE_LABELS,
   RAID_TYPE_COLORS,
-  DOMAINE_LIST,
-  CATEGORIE_LIST,
+  getLabelsForKind,
+  mergeFieldLabelsWithData,
+  type RaidFieldOptionItem,
 } from "@/lib/raid-labels";
 import {
   STATUT_COMITE_LABELS,
@@ -60,6 +61,7 @@ interface Props {
   raidItems: RaidItem[];
   comites: ComiteItem[];
   instances?: ComiteParametreOption[];
+  fieldOptions?: RaidFieldOptionItem[];
 }
 
 type SourceFilter = "__all__" | "raid" | "comites";
@@ -68,6 +70,7 @@ export function CalendarPageClient({
   raidItems,
   comites,
   instances = [],
+  fieldOptions = [],
 }: Props) {
   const [search, setSearch] = useState("");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("__all__");
@@ -76,6 +79,23 @@ export function CalendarPageClient({
   const [categorieFilter, setCategorieFilter] = useState("__all__");
   const [instanceFilter, setInstanceFilter] = useState("__all__");
   const [responsableFilter, setResponsableFilter] = useState("__all__");
+
+  const domaineOptions = useMemo(
+    () =>
+      mergeFieldLabelsWithData(
+        getLabelsForKind("domaine", fieldOptions),
+        raidItems.map((r) => r.domaine)
+      ),
+    [fieldOptions, raidItems]
+  );
+  const categorieOptions = useMemo(
+    () =>
+      mergeFieldLabelsWithData(
+        getLabelsForKind("categorie", fieldOptions),
+        raidItems.map((r) => r.categorie)
+      ),
+    [fieldOptions, raidItems]
+  );
 
   // Unique responsables from RAID items
   const responsables = useMemo(() => {
@@ -222,7 +242,7 @@ export function CalendarPageClient({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__all__">Tous domaines</SelectItem>
-              {DOMAINE_LIST.map((d) => (
+              {domaineOptions.map((d) => (
                 <SelectItem key={d} value={d}>{d}</SelectItem>
               ))}
             </SelectContent>
@@ -237,7 +257,7 @@ export function CalendarPageClient({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__all__">Toutes catégories</SelectItem>
-              {CATEGORIE_LIST.map((c) => (
+              {categorieOptions.map((c) => (
                 <SelectItem key={c} value={c}>{c}</SelectItem>
               ))}
             </SelectContent>

@@ -47,6 +47,7 @@ import { Button } from "@/components/ui/button";
 
 interface ActionItem {
   id: string;
+  code?: string | null;
   type: string;
   intitule: string;
   responsable: string;
@@ -77,6 +78,7 @@ type MoveCtx = {
   isProgramme: boolean;
   leadershipChantierIds: string[];
   institutionalEquipeId: string | null;
+  specialCategories: string[];
 };
 
 interface Props {
@@ -130,6 +132,11 @@ function KanbanCard({
 
       <div className="pl-3.5 pr-3 py-2.5 space-y-1.5">
         <div className="flex items-center gap-1.5">
+          {item.code ? (
+            <span className="font-mono text-[10px] font-bold text-[#0A3C74] dark:text-foreground">
+              {item.code}
+            </span>
+          ) : null}
           <span
             className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold text-white leading-none"
             style={{ backgroundColor: typeColor }}
@@ -366,6 +373,7 @@ export function ActionKanban({ items: propItems, statusConfigs }: Props) {
             isProgramme: false,
             leadershipChantierIds: [],
             institutionalEquipeId: null,
+            specialCategories: [],
           });
         }
       });

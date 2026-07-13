@@ -243,7 +243,7 @@ export default async function ChantierDetailPage({ params }: Props) {
                 </CardAction>
               </CardHeader>
               <CardContent>
-                <RaidList items={chantier.raids} />
+                <RaidList items={chantier.raids} initialRaidScope="all" />
               </CardContent>
             </Card>
           }

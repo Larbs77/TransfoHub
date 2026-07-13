@@ -1,18 +1,25 @@
-import { getRaidItems, getStatusConfigs } from "@/app/(app)/actions";
+import { getRaidItems, getStatusConfigs, getRaidFieldOptions } from "@/app/(app)/actions";
 import { Card, CardContent } from "@/components/ui/card";
 import { RaidList } from "@/components/raid-list";
 import { AddRaidButton } from "@/components/add-raid-button";
 import { scoreCriticite } from "@/lib/utils-pmo";
 
 interface Props {
-  searchParams: Promise<{ prob?: string; impact?: string; statut?: string; critical?: string }>;
+  searchParams: Promise<{
+    prob?: string;
+    impact?: string;
+    statut?: string;
+    critical?: string;
+    scope?: string;
+  }>;
 }
 
 export default async function RaidRisquesPage({ searchParams }: Props) {
   const params = await searchParams;
-  const [items, statusConfigs] = await Promise.all([
+  const [items, statusConfigs, fieldOptions] = await Promise.all([
     getRaidItems("Risque"),
     getStatusConfigs(),
+    getRaidFieldOptions().catch(() => []),
   ]);
   const criticalCount = items.filter(
     (r) => r.probabilite && r.impact && scoreCriticite(r.impact, r.probabilite) >= 12
@@ -22,6 +29,7 @@ export default async function RaidRisquesPage({ searchParams }: Props) {
   const initialImpact = params.impact ? Number(params.impact) : undefined;
   const initialStatut = params.statut || undefined;
   const initialCritical = params.critical === "true" || undefined;
+  const initialRaidScope = params.scope === "all" ? "all" : "mine";
 
   return (
     <div className="min-h-screen bg-background">
@@ -44,7 +52,9 @@ export default async function RaidRisquesPage({ searchParams }: Props) {
               initialImpact={initialImpact}
               initialStatut={initialStatut}
               initialCritical={initialCritical}
+              initialRaidScope={initialRaidScope}
               statusConfigs={statusConfigs}
+              fieldOptions={fieldOptions}
             />
           </CardContent>
         </Card>

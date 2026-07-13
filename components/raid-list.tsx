@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -28,14 +28,12 @@ import { RaidFormDialog } from "./raid-form-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import { CalendarView, type CalendarEvent } from "./calendar-view";
 import { ActionKanban } from "./action-kanban";
-import { deleteRaid } from "@/app/(app)/actions";
+import { deleteRaid, fetchRaidFormEditContext } from "@/app/(app)/actions";
 import { scoreCriticite } from "@/lib/utils-pmo";
 import { useUser } from "@/components/user-provider";
 import {
   RAID_TYPE_COLORS,
   RAID_TYPE_LABELS,
-  CATEGORIE_LIST,
-  DOMAINE_LIST,
   getStatutColor,
   getCriticiteLabel,
   CRITICITE_COLORS,
@@ -46,14 +44,25 @@ import {
   getStatutsFromConfig,
   getStatutColorFromConfig,
   getStatutOrderFromConfig,
+  getLabelsForKind,
+  mergeFieldLabelsWithData,
+  canEditRaidFormClient,
   type StatusConfigItem,
+  type RaidFieldOptionItem,
 } from "@/lib/raid-labels";
+
+type RaidFormEditCtx = {
+  chantierScopeAll: boolean;
+  leadershipChantierIds: string[];
+  ressourceId: string | null;
+};
 
 /** Mon RAID = assigned to me; all = équipes & chantiers (full list scope). */
 type RaidScope = "mine" | "all";
 
 interface RaidRow {
   id: string;
+  code?: string | null;
   type: string;
   intitule: string;
   description: string;
@@ -86,7 +95,10 @@ interface Props {
   initialStatut?: string;
   initialOverdue?: boolean;
   initialCritical?: boolean;
+  /** Default "mine". Pass "all" for KPI / portfolio views (Équipes & Chantiers). */
+  initialRaidScope?: RaidScope;
   statusConfigs?: StatusConfigItem[];
+  fieldOptions?: RaidFieldOptionItem[];
 }
 
 type SortField = "intitule" | "statut" | "categorie" | "responsable" | "date_identification" | "date_echeance" | "criticite";
@@ -201,6 +213,8 @@ function RaidTable({
   initialOverdue,
   initialCritical,
   statusConfigs,
+  fieldOptions,
+  formEditCtx,
 }: {
   items: RaidRow[];
   showType: boolean;
@@ -212,6 +226,8 @@ function RaidTable({
   initialOverdue?: boolean;
   initialCritical?: boolean;
   statusConfigs?: StatusConfigItem[];
+  fieldOptions?: RaidFieldOptionItem[];
+  formEditCtx: RaidFormEditCtx | null;
 }) {
   const router = useRouter();
   const [sortField, setSortField] = useState<SortField | null>(null);
@@ -248,6 +264,23 @@ function RaidTable({
   const isRisqueView = items.length > 0 && items.every((i) => i.type === "Risque");
   const isActionView = items.length > 0 && items.every((i) => i.type === "Action");
 
+  const categorieFilterOptions = useMemo(
+    () =>
+      mergeFieldLabelsWithData(
+        getLabelsForKind("categorie", fieldOptions),
+        items.map((i) => i.categorie)
+      ),
+    [fieldOptions, items]
+  );
+  const domaineFilterOptions = useMemo(
+    () =>
+      mergeFieldLabelsWithData(
+        getLabelsForKind("domaine", fieldOptions),
+        items.map((i) => i.domaine)
+      ),
+    [fieldOptions, items]
+  );
+
   const filtered = useMemo(() => {
     let result = items;
     if (search) {
@@ -256,7 +289,10 @@ function RaidTable({
         (r) =>
           r.intitule.toLowerCase().includes(q) ||
           r.responsable.toLowerCase().includes(q) ||
-          r.description.toLowerCase().includes(q)
+          r.description.toLowerCase().includes(q) ||
+          (r.code ?? "").toLowerCase().includes(q) ||
+          (r.categorie ?? "").toLowerCase().includes(q) ||
+          (r.domaine ?? "").toLowerCase().includes(q)
       );
     }
     if (filterCategorie !== "__all__") {
@@ -360,7 +396,7 @@ function RaidTable({
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
           <Input
-            placeholder="Rechercher..."
+            placeholder="Rechercher (code, intitulé…)"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-8"
@@ -372,7 +408,7 @@ function RaidTable({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__all__">Toutes catégories</SelectItem>
-            {CATEGORIE_LIST.map((c) => (
+            {categorieFilterOptions.map((c) => (
               <SelectItem key={c} value={c}>{c}</SelectItem>
             ))}
           </SelectContent>
@@ -383,7 +419,7 @@ function RaidTable({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__all__">Tous domaines</SelectItem>
-            {DOMAINE_LIST.map((d) => (
+            {domaineFilterOptions.map((d) => (
               <SelectItem key={d} value={d}>{d}</SelectItem>
             ))}
           </SelectContent>
@@ -494,6 +530,7 @@ function RaidTable({
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-[88px]">Code</TableHead>
               {showType && <TableHead className="w-[90px]">Type</TableHead>}
               <TableHead>
                 <SortHeader label="Intitulé" field="intitule" current={sortField} dir={sortDir} onSort={handleSort} />
@@ -535,6 +572,9 @@ function RaidTable({
                   className="cursor-pointer hover:bg-muted/50 transition-colors"
                   onClick={() => router.push(`/raid/${r.id}`)}
                 >
+                  <TableCell className="text-xs font-mono font-semibold text-[#0A3C74] dark:text-foreground whitespace-nowrap">
+                    {r.code || "—"}
+                  </TableCell>
                   {showType && (
                     <TableCell>
                       <Badge
@@ -604,12 +644,27 @@ function RaidTable({
                       >
                         <ExternalLink className="size-3.5" />
                       </Button>
-                      <Button variant="ghost" size="icon-xs" title="Modifier (formulaire)" onClick={() => onEdit(r)}>
-                        <Pencil className="size-3.5" />
-                      </Button>
-                      <Button variant="ghost" size="icon-xs" title="Supprimer" onClick={() => onDelete(r.id)}>
-                        <Trash2 className="size-3.5 text-destructive" />
-                      </Button>
+                      {formEditCtx &&
+                        canEditRaidFormClient(r, formEditCtx) && (
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            title="Modifier (formulaire)"
+                            onClick={() => onEdit(r)}
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
+                        )}
+                      {formEditCtx?.chantierScopeAll && (
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          title="Supprimer"
+                          onClick={() => onDelete(r.id)}
+                        >
+                          <Trash2 className="size-3.5 text-destructive" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -705,12 +760,40 @@ function RaidScopeToggles({
   );
 }
 
-export function RaidList({ items, filterType, initialProbabilite, initialImpact, initialStatut, initialOverdue, initialCritical, statusConfigs }: Props) {
+export function RaidList({ items, filterType, initialProbabilite, initialImpact, initialStatut, initialOverdue, initialCritical, initialRaidScope = "mine", statusConfigs, fieldOptions }: Props) {
   const { ressourceId, displayName } = useUser();
-  const [raidScope, setRaidScope] = useState<RaidScope>("mine");
+  const [raidScope, setRaidScope] = useState<RaidScope>(
+    initialRaidScope === "all" ? "all" : "mine"
+  );
   const [editItem, setEditItem] = useState<RaidRow | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [formEditCtx, setFormEditCtx] = useState<RaidFormEditCtx | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchRaidFormEditContext()
+      .then((ctx) => {
+        if (!cancelled) {
+          setFormEditCtx({
+            ...ctx,
+            ressourceId: ressourceId ?? null,
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFormEditCtx({
+            chantierScopeAll: false,
+            leadershipChantierIds: [],
+            ressourceId: ressourceId ?? null,
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ressourceId]);
 
   const mineCount = useMemo(
     () =>
@@ -807,6 +890,8 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
               initialOverdue={initialOverdue}
               initialCritical={initialCritical}
               statusConfigs={statusConfigs}
+              fieldOptions={fieldOptions}
+              formEditCtx={formEditCtx}
             />
           </TabsContent>
           {filterType === "Action" && (
@@ -819,16 +904,19 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
           </TabsContent>
         </Tabs>
 
-        {editItem && (
+        {editItem &&
+          formEditCtx &&
+          canEditRaidFormClient(editItem, formEditCtx) && (
           <RaidFormDialog
             open={!!editItem}
             onOpenChange={(open) => !open && setEditItem(null)}
             raid={editItem}
             statusConfigs={statusConfigs}
+            fieldOptions={fieldOptions}
           />
         )}
         <DeleteConfirmDialog
-          open={!!deleteId}
+          open={!!deleteId && !!formEditCtx?.chantierScopeAll}
           onOpenChange={(open) => !open && setDeleteId(null)}
           onConfirm={async () => {
             try {
@@ -908,6 +996,8 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
                     onEdit={setEditItem}
                     onDelete={(id) => { setDeleteError(null); setDeleteId(id); }}
                     statusConfigs={statusConfigs}
+                    fieldOptions={fieldOptions}
+                    formEditCtx={formEditCtx}
                   />
                 </TabsContent>
                 {t === "Action" && (
@@ -928,16 +1018,19 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
         </TabsContent>
       </Tabs>
 
-      {editItem && (
+      {editItem &&
+        formEditCtx &&
+        canEditRaidFormClient(editItem, formEditCtx) && (
         <RaidFormDialog
           open={!!editItem}
           onOpenChange={(open) => !open && setEditItem(null)}
           raid={editItem}
           statusConfigs={statusConfigs}
+          fieldOptions={fieldOptions}
         />
       )}
       <DeleteConfirmDialog
-        open={!!deleteId}
+        open={!!deleteId && !!formEditCtx?.chantierScopeAll}
         onOpenChange={(open) => !open && setDeleteId(null)}
         onConfirm={async () => {
           try {

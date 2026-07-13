@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MultiSelect } from "@/components/ui/multi-select";
 import {
   createEquipe,
   updateEquipe,
@@ -60,8 +61,16 @@ export type EquipeRow = {
   hierarchieCount: number;
   fonctionnelCount: number;
   raidCount: number;
+  raidCategorieOptionIds: string[];
+  raidCategorieLabels: { id: string; label: string; color: string }[];
   createdAt: Date;
   updatedAt: Date;
+};
+
+export type CategorieOption = {
+  id: string;
+  label: string;
+  color: string;
 };
 
 const emptyForm = {
@@ -69,12 +78,15 @@ const emptyForm = {
   description: "",
   position: 0,
   is_active: true,
+  raidCategorieOptionIds: [] as string[],
 };
 
 export function EquipeManagement({
   initialRows,
+  categorieOptions = [],
 }: {
   initialRows: EquipeRow[];
+  categorieOptions?: CategorieOption[];
 }) {
   const [rows, setRows] = useState(initialRows);
   const [search, setSearch] = useState("");
@@ -87,6 +99,15 @@ export function EquipeManagement({
   const [editing, setEditing] = useState<EquipeRow | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [deleteTarget, setDeleteTarget] = useState<EquipeRow | null>(null);
+
+  const categorieSelectOptions = useMemo(
+    () =>
+      categorieOptions.map((c) => ({
+        value: c.id,
+        label: c.label,
+      })),
+    [categorieOptions]
+  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -120,6 +141,7 @@ export function EquipeManagement({
       ...emptyForm,
       position:
         inst.length > 0 ? Math.max(...inst.map((r) => r.position)) + 1 : 0,
+      raidCategorieOptionIds: [],
     });
     setDialogOpen(true);
   }
@@ -132,6 +154,7 @@ export function EquipeManagement({
       description: row.description,
       position: row.position,
       is_active: row.is_active,
+      raidCategorieOptionIds: row.raidCategorieOptionIds ?? [],
     });
     setDialogOpen(true);
   }
@@ -141,9 +164,23 @@ export function EquipeManagement({
     startTransition(async () => {
       try {
         if (editing) {
-          await updateEquipe(editing.id, form);
+          await updateEquipe(editing.id, {
+            name: form.name,
+            description: form.description,
+            position: form.position,
+            is_active: form.is_active,
+            ...(editing.type === EQUIPE_TYPES.institutionnelle
+              ? { raidCategorieOptionIds: form.raidCategorieOptionIds }
+              : {}),
+          });
         } else {
-          await createEquipe(form);
+          await createEquipe({
+            name: form.name,
+            description: form.description,
+            position: form.position,
+            is_active: form.is_active,
+            raidCategorieOptionIds: form.raidCategorieOptionIds,
+          });
         }
         setDialogOpen(false);
         window.location.reload();
@@ -383,6 +420,37 @@ export function EquipeManagement({
               />
               <span className="text-sm font-medium">Équipe active</span>
             </label>
+
+            {!isFunctionalEdit && (
+              <div className="grid gap-1.5 rounded-lg border border-[#0A3C74]/12 bg-muted/20 p-3">
+                <label className="text-sm font-medium">
+                  Accès spécial RAID par catégorie
+                </label>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Par défaut : aucun (accès normal uniquement). Si des
+                  catégories sont sélectionnées, les membres de cette équipe
+                  institutionnelle conservent leurs droits actuels{" "}
+                  <strong>et</strong> accèdent à toutes les entrées RAID de ces
+                  catégories (liste, collaboration, statut).
+                </p>
+                {categorieSelectOptions.length === 0 ? (
+                  <p className="text-xs text-amber-700 dark:text-amber-300">
+                    Aucune catégorie paramétrée. Ajoutez-en dans Paramètres →
+                    Catégories et Domaines RAID.
+                  </p>
+                ) : (
+                  <MultiSelect
+                    options={categorieSelectOptions}
+                    selected={form.raidCategorieOptionIds}
+                    onChange={(ids) =>
+                      setForm((f) => ({ ...f, raidCategorieOptionIds: ids }))
+                    }
+                    placeholder="Aucune (accès normal)"
+                  />
+                )}
+              </div>
+            )}
+
             {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
           <DialogFooter>
@@ -469,6 +537,7 @@ function EquipeTable({
               <>
                 <th className="px-3 py-2.5 font-medium">Ressources</th>
                 <th className="px-3 py-2.5 font-medium">Comités</th>
+                <th className="px-3 py-2.5 font-medium">Accès RAID</th>
               </>
             )}
             <th className="px-3 py-2.5 font-medium">Type</th>
@@ -480,7 +549,7 @@ function EquipeTable({
           {rows.length === 0 ? (
             <tr>
               <td
-                colSpan={isFunc ? 8 : 8}
+                colSpan={isFunc ? 8 : 9}
                 className="px-3 py-10 text-center text-muted-foreground"
               >
                 Aucune équipe {EQUIPE_TYPE_LABELS[kind].toLowerCase()}.
@@ -534,6 +603,29 @@ function EquipeTable({
                     </td>
                     <td className="px-3 py-2.5 tabular-nums">
                       {row.comiteCount}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {(row.raidCategorieLabels?.length ?? 0) === 0 ? (
+                        <span className="text-xs text-muted-foreground">
+                          Aucun
+                        </span>
+                      ) : (
+                        <div className="flex max-w-[200px] flex-wrap gap-1">
+                          {row.raidCategorieLabels.map((c) => (
+                            <Badge
+                              key={c.id}
+                              className="text-[10px] max-w-full truncate"
+                              style={{
+                                backgroundColor: c.color,
+                                color: "white",
+                              }}
+                              title={c.label}
+                            >
+                              {c.label}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                     </td>
                   </>
                 )}

@@ -144,6 +144,29 @@ model User {
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
   ressource       Ressource? @relation(fields: [ressourceId], references: [id])
+  notifications   Notification[]
+}
+
+/// Per-user in-app notifications (persistent, mark-as-read). Not email.
+model Notification {
+  id         String    @id @default(uuid())
+  userId     String
+  /// raid_assigned | raid_changed | …
+  type       String
+  title      String
+  message    String    @default("")
+  /// Deep link e.g. /raid/{id}
+  href       String    @default("")
+  /// Optional entity ref: "raid"
+  entityType String    @default("")
+  entityId   String    @default("")
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+  @@index([entityType, entityId])
 }
 
 /// Dynamic application role (permissions + data scope)
@@ -193,6 +216,8 @@ model MembreEquipe {
 
 model Raid {
   id                     String     @id @default(uuid())
+  /// Human-readable code e.g. A_00001, R_00042 (letter by type + 5-digit seq). Immutable after create.
+  code                   String     @unique
   type                   String
   intitule               String
   description            String     @default("")
@@ -226,9 +251,16 @@ model Raid {
   raidComments           RaidComment[]
   auditLogs              RaidAuditLog[]
 
+  @@index([code])
   @@index([responsableRessourceId])
   @@index([equipeId])
   @@index([chantierId])
+}
+
+/// Per-type autoincrement for Raid.code (Action→A_, Risque→R_, …).
+model RaidCodeSequence {
+  type String @id
+  last Int    @default(0)
 }
 
 /// Collaborative discussion thread on a RAID entry (Jira-style).
@@ -302,10 +334,28 @@ model Equipe {
   ressourcesHierarchie Ressource[] @relation("RessourceEquipeHierarchie")
   ressourcesFonctionnelles RessourceEquipeFonctionnelle[]
   raids       Raid[]
+  /// Special RAID category access (institutionnelle only). Default empty.
+  raidCategorieAccess EquipeRaidCategorieAccess[]
 
   @@index([position])
   @@index([is_active])
   @@index([type])
+}
+
+/// Institutional team → RAID categories they can access beyond normal rules.
+/// Empty = no special access (default). Members of the team see/collaborate on
+/// all RAID entries whose `categorie` matches a granted option label.
+model EquipeRaidCategorieAccess {
+  id                String          @id @default(uuid())
+  equipeId          String
+  raidFieldOptionId String
+  createdAt         DateTime        @default(now())
+  equipe            Equipe          @relation(fields: [equipeId], references: [id], onDelete: Cascade)
+  raidFieldOption   RaidFieldOption @relation(fields: [raidFieldOptionId], references: [id], onDelete: Cascade)
+
+  @@unique([equipeId, raidFieldOptionId])
+  @@index([equipeId])
+  @@index([raidFieldOptionId])
 }
 
 /// Parameter table for committee types (instances) — admin-managed catalog.
@@ -351,6 +401,21 @@ model StatusConfig {
 
   @@unique([type, label])
   @@index([type, position])
+}
+
+/// Parametrable RAID dropdown catalogs (Catégorie / Domaine) — admin-managed in /settings.
+model RaidFieldOption {
+  id        String   @id @default(uuid())
+  /// "categorie" | "domaine"
+  kind      String
+  label     String
+  color     String   @default("#6b7280")
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  equipeCategorieAccess EquipeRaidCategorieAccess[]
+
+  @@unique([kind, label])
+  @@index([kind, position])
 }
 
 model SaisieTemps {

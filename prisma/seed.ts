@@ -233,6 +233,37 @@ async function main() {
     await prisma.statusConfig.create({ data: sc });
   }
 
+  // RAID Catégorie / Domaine catalogs (parametrable in /settings)
+  const raidFieldOptions: { kind: string; label: string; color: string; position: number }[] = [
+    // Catégories (historical hardcoded list)
+    { kind: "categorie", label: "Budget", color: "#0A3C74", position: 0 },
+    { kind: "categorie", label: "Fournisseur", color: "#7c3aed", position: 1 },
+    { kind: "categorie", label: "Opérationnel", color: "#2563eb", position: 2 },
+    { kind: "categorie", label: "Planning", color: "#0891b2", position: 3 },
+    { kind: "categorie", label: "Ressources", color: "#059669", position: 4 },
+    { kind: "categorie", label: "Stratégique", color: "#dc2626", position: 5 },
+    { kind: "categorie", label: "Technique", color: "#00BDBB", position: 6 },
+    // Domaines (historical hardcoded list)
+    { kind: "domaine", label: "Agence", color: "#0A3C74", position: 0 },
+    { kind: "domaine", label: "Monétique", color: "#2563eb", position: 1 },
+    { kind: "domaine", label: "Chèques & LCN", color: "#7c3aed", position: 2 },
+    { kind: "domaine", label: "Virements domestiques & prélèvements", color: "#0891b2", position: 3 },
+    { kind: "domaine", label: "Référentiel & TDC", color: "#059669", position: 4 },
+    { kind: "domaine", label: "Produits et tarification", color: "#ca8a04", position: 5 },
+    { kind: "domaine", label: "Bancassurance", color: "#ea580c", position: 6 },
+    { kind: "domaine", label: "Transferts internationaux & dotations", color: "#dc2626", position: 7 },
+    { kind: "domaine", label: "Engagement", color: "#be185d", position: 8 },
+    { kind: "domaine", label: "Crédit", color: "#4f46e5", position: 9 },
+    { kind: "domaine", label: "Migration", color: "#0d9488", position: 10 },
+    { kind: "domaine", label: "Infrastructure", color: "#64748b", position: 11 },
+    { kind: "domaine", label: "BSS", color: "#00BDBB", position: 12 },
+    { kind: "domaine", label: "Architecture et sécurité", color: "#b45309", position: 13 },
+    { kind: "domaine", label: "Programme Office", color: "#334155", position: 14 },
+  ];
+  for (const fo of raidFieldOptions) {
+    await prisma.raidFieldOption.create({ data: fo });
+  }
+
   // RMDs
   const rmdsData = [
     { nom_complet: "Adil Lachhab", domaine: "Intégrations", suppleant: "Youssef Benali" },
@@ -780,12 +811,15 @@ async function main() {
     { type: "Information", intitule: "Résultats audit sécurité Q1", description: "L'audit sécurité Q1 révèle 3 vulnérabilités critiques corrigées et 12 mineures en cours", categorie: "Sécurité", chantierCode: "CH_038", domaine: "Capacités techniques", responsable: "Othmane Cherkaoui", statut: "Ouvert", date_identification: "2026-03-10" },
   ];
 
+  const { allocateNextRaidCode } = await import("../lib/raid-code");
   let totalRaid = 0;
   for (const r of raidEntries) {
     const chantierId = codeToId[r.chantierCode] ?? null;
     const ressourceId = createdRessources[r.responsable] ?? null;
+    const code = await allocateNextRaidCode(r.type);
     await prisma.raid.create({
       data: {
+        code,
         type: r.type,
         intitule: r.intitule,
         description: r.description,

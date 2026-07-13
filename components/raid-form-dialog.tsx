@@ -8,6 +8,7 @@ import {
   getChantiersForRaidCreate,
   getComitesForSelect,
   getRessourcesForSelect,
+  getRaidFieldOptions,
 } from "@/app/(app)/actions";
 import { useUser } from "@/components/user-provider";
 import {
@@ -29,8 +30,6 @@ import {
 import { Loader2 } from "lucide-react";
 import {
   RAID_TYPES,
-  CATEGORIE_LIST,
-  DOMAINE_LIST,
   STRATEGIE_LIST,
   PROBABILITE_LABELS,
   IMPACT_LABELS,
@@ -38,7 +37,9 @@ import {
   getStatutsFromConfig,
   getCriticiteLabel,
   CRITICITE_COLORS,
+  getLabelsForKind,
   type StatusConfigItem,
+  type RaidFieldOptionItem,
 } from "@/lib/raid-labels";
 import { scoreCriticite } from "@/lib/utils-pmo";
 import { format } from "date-fns";
@@ -46,6 +47,7 @@ import { INSTANCE_LABELS } from "@/lib/comite-labels";
 
 interface RaidData {
   id: string;
+  code?: string | null;
   type: string;
   intitule: string;
   description: string;
@@ -74,6 +76,7 @@ interface Props {
   defaultChantierId?: string;
   defaultComiteId?: string;
   statusConfigs?: StatusConfigItem[];
+  fieldOptions?: RaidFieldOptionItem[];
 }
 
 function toDateInput(d: Date | null) {
@@ -89,6 +92,7 @@ export function RaidFormDialog({
   defaultChantierId,
   defaultComiteId,
   statusConfigs,
+  fieldOptions: fieldOptionsProp,
 }: Props) {
   const isEdit = !!raid;
   const { raidCreateScope } = useUser();
@@ -96,6 +100,9 @@ export function RaidFormDialog({
   const [error, setError] = useState<string | null>(null);
   const [chantiers, setChantiers] = useState<{ id: string; code: string; nom: string }[]>([]);
   const [comites, setComites] = useState<{ id: string; instance: string; numero: number; date: Date }[]>([]);
+  const [fieldOptions, setFieldOptions] = useState<RaidFieldOptionItem[]>(
+    fieldOptionsProp ?? []
+  );
 
   const [type, setType] = useState(raid?.type ?? defaultType ?? "Action");
   const [intitule, setIntitule] = useState(raid?.intitule ?? "");
@@ -126,6 +133,17 @@ export function RaidFormDialog({
   const criticiteLabel = score ? getCriticiteLabel(score) : null;
   const chantierRequiredOnCreate = !isEdit && raidCreateScope === "chantier";
 
+  const categorieOptions = (() => {
+    const labels = getLabelsForKind("categorie", fieldOptions);
+    if (categorie && !labels.includes(categorie)) return [categorie, ...labels];
+    return labels;
+  })();
+  const domaineOptions = (() => {
+    const labels = getLabelsForKind("domaine", fieldOptions);
+    if (domaine && !labels.includes(domaine)) return [domaine, ...labels];
+    return labels;
+  })();
+
   useEffect(() => {
     if (open) {
       setError(null);
@@ -133,13 +151,17 @@ export function RaidFormDialog({
         isEdit ? getChantiersForSelect() : getChantiersForRaidCreate(),
         getComitesForSelect(),
         getRessourcesForSelect(),
-      ]).then(([c, co, res]) => {
+        fieldOptionsProp?.length
+          ? Promise.resolve(fieldOptionsProp)
+          : getRaidFieldOptions().catch(() => [] as RaidFieldOptionItem[]),
+      ]).then(([c, co, res, fo]) => {
         setChantiers(c);
         setComites(co);
         setRessources(res);
+        setFieldOptions(fo);
       });
     }
-  }, [open, isEdit]);
+  }, [open, isEdit, fieldOptionsProp]);
 
   function handleResponsableRessourceChange(newId: string) {
     setResponsableRessourceId(newId);
@@ -212,13 +234,34 @@ export function RaidFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-h-[90vh] w-[min(96vw,56rem)] max-w-4xl overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>
-            {isEdit ? "Modifier l'élément RAID" : "Nouvel élément RAID"}
+            {isEdit
+              ? `Modifier ${raid?.code ? raid.code + " — " : ""}élément RAID`
+              : "Nouvel élément RAID"}
           </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="grid gap-4">
+          {isEdit && raid?.code && (
+            <div className="rounded-lg border border-[#0A3C74]/12 bg-muted/30 px-3 py-2 text-sm">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Code
+              </span>
+              <p className="font-mono font-bold text-[#0A3C74] dark:text-foreground">
+                {raid.code}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Attribué automatiquement à la création — non modifiable.
+              </p>
+            </div>
+          )}
+          {!isEdit && (
+            <p className="text-xs text-muted-foreground rounded-md border border-dashed px-3 py-2">
+              Un code sera attribué automatiquement à l&apos;enregistrement
+              (A_##### action, R_ risque, I_ information, D_ décision).
+            </p>
+          )}
           {/* Type + Statut */}
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-1.5">
@@ -269,16 +312,19 @@ export function RaidFormDialog({
             />
           </div>
 
-          {/* Catégorie + Domaine */}
+          {/* Catégorie + Domaine (paramétrables dans /settings) */}
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-1.5">
               <label className="text-sm font-medium">Catégorie</label>
-              <Select value={categorie} onValueChange={setCategorie}>
+              <Select
+                value={categorie || undefined}
+                onValueChange={setCategorie}
+              >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Sélectionner" />
                 </SelectTrigger>
                 <SelectContent>
-                  {CATEGORIE_LIST.map((c) => (
+                  {categorieOptions.map((c) => (
                     <SelectItem key={c} value={c}>{c}</SelectItem>
                   ))}
                 </SelectContent>
@@ -286,12 +332,15 @@ export function RaidFormDialog({
             </div>
             <div className="grid gap-1.5">
               <label className="text-sm font-medium">Domaine</label>
-              <Select value={domaine} onValueChange={setDomaine}>
+              <Select
+                value={domaine || undefined}
+                onValueChange={setDomaine}
+              >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Sélectionner" />
                 </SelectTrigger>
                 <SelectContent>
-                  {DOMAINE_LIST.map((d) => (
+                  {domaineOptions.map((d) => (
                     <SelectItem key={d} value={d}>{d}</SelectItem>
                   ))}
                 </SelectContent>

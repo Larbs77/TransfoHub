@@ -80,6 +80,14 @@ export default async function AppLayout({
         ressourceId: session.ressourceId,
         dashboardType: session.dashboardType || "complete",
         raidCreateScope: canUseApp ? resolveRaidCreateScope(role) : "none",
+        chantierScope: canUseApp
+          ? session.role === "Admin"
+            ? "all"
+            : role?.chantier_scope === "all" ||
+                role?.chantier_scope === "assigned"
+              ? role.chantier_scope
+              : "none"
+          : "none",
       }}
     >
       <UserThemeSync preference={themePreference} />

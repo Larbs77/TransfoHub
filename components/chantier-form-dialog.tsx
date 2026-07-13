@@ -131,7 +131,7 @@ export function ChantierFormDialog({ open, onOpenChange, chantier }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-h-[90vh] w-[min(96vw,56rem)] max-w-4xl overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>
             {isEdit ? "Modifier le chantier" : "Nouveau chantier"}

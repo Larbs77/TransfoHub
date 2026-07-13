@@ -15,6 +15,11 @@ import {
   RESSOURCE_CSV_COLUMNS,
   RAID_CSV_COLUMNS,
 } from "@/lib/csv-data-admin";
+import {
+  allocateNextRaidCode,
+  bumpRaidCodeSequenceIfNeeded,
+  parseRaidCodeNumber,
+} from "@/lib/raid-code";
 
 async function requireDataAdmin() {
   await requireRole("Admin");
@@ -101,10 +106,11 @@ export async function exportTableCsv(
       chantier: { select: { code: true } },
       responsableRessource: { select: { email: true } },
     },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ code: "asc" }, { createdAt: "desc" }],
   });
   const headers = RAID_CSV_COLUMNS.map((c) => c.header);
   const data = rows.map((r) => [
+    r.code,
     r.type,
     r.intitule,
     r.description,
@@ -260,6 +266,12 @@ export async function confirmCsvImport(
   }
 
   // raid
+  const usedCodes = new Set<string>();
+  const existingCodes = await prisma.raid.findMany({
+    select: { code: true },
+  });
+  for (const r of existingCodes) usedCodes.add(r.code);
+
   for (const p of payloads) {
     const type = String(p.type ?? "").trim();
     const intitule = String(p.intitule ?? "").trim();
@@ -271,8 +283,29 @@ export async function confirmCsvImport(
       return Number.isNaN(d.getTime()) ? null : d;
     };
 
+    let code =
+      typeof p.code === "string" && p.code.trim() ? p.code.trim() : null;
+    if (code) {
+      if (usedCodes.has(code)) {
+        // Skip duplicate codes in file / DB
+        continue;
+      }
+    } else {
+      code = await allocateNextRaidCode(type);
+      // Avoid rare collision if sequence lags behind explicit codes
+      let guard = 0;
+      while (usedCodes.has(code) && guard < 20) {
+        code = await allocateNextRaidCode(type);
+        guard++;
+      }
+    }
+    usedCodes.add(code);
+    const num = parseRaidCodeNumber(code);
+    if (num != null) await bumpRaidCodeSequenceIfNeeded(type, num);
+
     await prisma.raid.create({
       data: {
+        code,
         type,
         intitule,
         description: String(p.description ?? ""),

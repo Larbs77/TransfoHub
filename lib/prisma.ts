@@ -10,7 +10,7 @@ const globalForPrisma = globalThis as unknown as {
  * Bump whenever the Prisma schema gains fields/models so HMR drops a stale
  * singleton (otherwise findUnique/update rejects unknown fields).
  */
-const PRISMA_MODEL_STAMP = "equipe-institutionnelle-fonctionnelle-v1";
+const PRISMA_MODEL_STAMP = "user-notifications-v1";
 
 function clientLooksCurrent(client: PrismaClient): boolean {
   try {
@@ -23,6 +23,10 @@ function clientLooksCurrent(client: PrismaClient): boolean {
       ressourceEquipeFonctionnelle?: { findMany?: unknown };
       raidComment?: { findMany?: unknown };
       raidAuditLog?: { findMany?: unknown };
+      raidFieldOption?: { findMany?: unknown };
+      equipeRaidCategorieAccess?: { findMany?: unknown };
+      raidCodeSequence?: { findFirst?: unknown };
+      notification?: { findMany?: unknown };
       _runtimeDataModel?: {
         models?: Record<
           string,
@@ -39,14 +43,18 @@ function clientLooksCurrent(client: PrismaClient): boolean {
     if (typeof c.ressourceEquipeFonctionnelle?.findMany !== "function") return false;
     if (typeof c.raidComment?.findMany !== "function") return false;
     if (typeof c.raidAuditLog?.findMany !== "function") return false;
+    if (typeof c.raidFieldOption?.findMany !== "function") return false;
+    if (typeof c.equipeRaidCategorieAccess?.findMany !== "function") return false;
+    if (typeof c.raidCodeSequence?.findFirst !== "function") return false;
+    if (typeof c.notification?.findMany !== "function") return false;
 
-    const equipeModel = c._runtimeDataModel?.models?.Equipe;
-    if (equipeModel?.fields) {
-      const fields = equipeModel.fields;
-      const hasType = Array.isArray(fields)
-        ? fields.some((f) => f.name === "type")
-        : "type" in fields;
-      if (!hasType) return false;
+    const raidModel = c._runtimeDataModel?.models?.Raid;
+    if (raidModel?.fields) {
+      const fields = raidModel.fields;
+      const hasCode = Array.isArray(fields)
+        ? fields.some((f) => f.name === "code")
+        : "code" in fields;
+      if (!hasCode) return false;
     }
 
     return true;

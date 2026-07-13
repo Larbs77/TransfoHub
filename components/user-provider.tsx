@@ -20,6 +20,8 @@ interface UserContextType {
   dashboardType: DashboardType;
   /** programme | chantier | none — create RAID permission from role */
   raidCreateScope: "none" | "chantier" | "programme";
+  /** Chantier data scope from AppRole: all | assigned | none */
+  chantierScope: "all" | "assigned" | "none";
 }
 
 const UserContext = createContext<UserContextType | null>(null);
@@ -58,4 +60,10 @@ export function useCanAccessPage(path: string) {
 export function useCanCreateRaid() {
   const { raidCreateScope } = useUser();
   return raidCreateScope === "programme" || raidCreateScope === "chantier";
+}
+
+/** Create chantier: only roles with périmètre données chantiers = tous les chantiers. */
+export function useCanCreateChantier() {
+  const { role, chantierScope } = useUser();
+  return role === "Admin" || chantierScope === "all";
 }
