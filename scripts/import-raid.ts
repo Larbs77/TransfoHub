@@ -66,7 +66,7 @@ async function main() {
     const dateRevKey = Object.keys(row).find(k => k.trim() === "Date_Rev.") ?? "Date_Rev.";
     const commKey = Object.keys(row).find(k => k.trim() === "Commentaires") ?? "Commentaires";
 
-    const { allocateNextRaidCode } = await import("../lib/raid-code");
+    const { allocateNextRaidCode } = await import("../lib/raid-code-server");
     await prisma.raid.create({
       data: {
         code: await allocateNextRaidCode(type),

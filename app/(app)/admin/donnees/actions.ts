@@ -15,11 +15,11 @@ import {
   RESSOURCE_CSV_COLUMNS,
   RAID_CSV_COLUMNS,
 } from "@/lib/csv-data-admin";
+import { parseRaidCodeNumber } from "@/lib/raid-code";
 import {
   allocateNextRaidCode,
   bumpRaidCodeSequenceIfNeeded,
-  parseRaidCodeNumber,
-} from "@/lib/raid-code";
+} from "@/lib/raid-code-server";
 
 async function requireDataAdmin() {
   await requireRole("Admin");

@@ -278,7 +278,7 @@ async function main() {
   // Insert all RAID items
   const allItems = [...risks, ...actions, ...informations, ...decisions];
 
-  const { allocateNextRaidCode } = await import("../lib/raid-code");
+  const { allocateNextRaidCode } = await import("../lib/raid-code-server");
   for (let i = 0; i < allItems.length; i++) {
     const item = allItems[i];
     const chantierId = chantiers.length > 0 ? pickChantier(i) : null;

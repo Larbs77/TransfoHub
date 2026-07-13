@@ -37,7 +37,7 @@ import {
 } from "@/lib/equipe-chantier";
 import { EQUIPE_TYPES } from "@/lib/equipe-types";
 import { identityFromRessource } from "@/lib/ressource-user";
-import { allocateNextRaidCode } from "@/lib/raid-code";
+import { allocateNextRaidCode } from "@/lib/raid-code-server";
 
 // ── Progress Calculation ─────────────────────────────
 

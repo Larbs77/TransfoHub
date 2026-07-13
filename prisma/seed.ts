@@ -811,7 +811,7 @@ async function main() {
     { type: "Information", intitule: "Résultats audit sécurité Q1", description: "L'audit sécurité Q1 révèle 3 vulnérabilités critiques corrigées et 12 mineures en cours", categorie: "Sécurité", chantierCode: "CH_038", domaine: "Capacités techniques", responsable: "Othmane Cherkaoui", statut: "Ouvert", date_identification: "2026-03-10" },
   ];
 
-  const { allocateNextRaidCode } = await import("../lib/raid-code");
+  const { allocateNextRaidCode } = await import("../lib/raid-code-server");
   let totalRaid = 0;
   for (const r of raidEntries) {
     const chantierId = codeToId[r.chantierCode] ?? null;

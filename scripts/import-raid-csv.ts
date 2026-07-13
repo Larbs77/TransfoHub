@@ -10,13 +10,15 @@ import { readFileSync } from "fs";
 import { createPrismaClient } from "../lib/create-prisma";
 import { resolveRaidEquipeId } from "../lib/equipe-chantier";
 import {
-  allocateNextRaidCode,
-  bumpRaidCodeSequenceIfNeeded,
   isValidRaidCodeFormat,
   normalizeRaidCode,
   parseRaidCodeNumber,
   raidCodeMatchesType,
 } from "../lib/raid-code";
+import {
+  allocateNextRaidCode,
+  bumpRaidCodeSequenceIfNeeded,
+} from "../lib/raid-code-server";
 
 const prisma = createPrismaClient();
 const CSV_SEP = "|";
