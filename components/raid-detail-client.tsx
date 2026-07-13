@@ -49,14 +49,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   RAID_TYPE_COLORS,
   RAID_TYPE_LABELS,
   getStatutColor,
@@ -130,7 +122,7 @@ type RaidDetail = {
     email: string;
     equipeHierarchie: { id: string; name: string } | null;
   } | null;
-  equipe: { id: string; name: string } | null;
+  equipe: { id: string; name: string; type?: string | null } | null;
   raidComments: Comment[];
   auditLogs: AuditLog[];
 };
@@ -198,11 +190,14 @@ function actionLabel(action: string): string {
 export function RaidDetailClient({
   raid: initial,
   canCollaborate,
+  canAssign = false,
   currentUser,
   ressources,
 }: {
   raid: RaidDetail;
   canCollaborate: boolean;
+  /** Admin / Bureau Programme / Directeur-Suppléant-PMO chantier */
+  canAssign?: boolean;
   currentUser: {
     userId: string;
     ressourceId: string | null;
@@ -342,6 +337,44 @@ export function RaidDetailClient({
           <h1 className="max-w-4xl text-2xl font-bold tracking-tight text-[#0A3C74] dark:text-foreground md:text-3xl">
             {raid.intitule}
           </h1>
+
+          {/* Linked team (info only) */}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-muted-foreground">
+              <Users className="size-3.5 text-[#00BDBB]" />
+              Équipe liée
+            </span>
+            {raid.equipe?.name ? (
+              <span
+                className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-lg border border-[#0A3C74]/12 bg-white/80 px-3 py-1.5 text-sm shadow-sm dark:bg-card"
+                title={raid.equipe.name}
+              >
+                <span className="font-medium text-[#0A3C74] dark:text-foreground break-words">
+                  {raid.equipe.name}
+                </span>
+                {raid.equipe.type === "fonctionnelle" ? (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] border-teal-500/40 text-teal-800 dark:text-teal-200"
+                  >
+                    Fonctionnelle
+                  </Badge>
+                ) : raid.equipe.type === "institutionnelle" ? (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] border-primary/30 text-primary"
+                  >
+                    Institutionnelle
+                  </Badge>
+                ) : null}
+              </span>
+            ) : (
+              <span className="rounded-lg border border-dashed border-slate-300 bg-white/50 px-3 py-1.5 text-sm text-muted-foreground dark:border-muted">
+                Aucune équipe liée
+              </span>
+            )}
+          </div>
+
           <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-600 dark:text-muted-foreground">
             {raid.chantier && (
               <span className="inline-flex items-center gap-1.5">
@@ -355,11 +388,13 @@ export function RaidDetailClient({
               </span>
             )}
             <span className="inline-flex items-center gap-1.5">
-              <Users className="size-3.5 text-[#00BDBB]" />
-              {raid.responsableRessource?.nom_complet ||
-                raid.responsable ||
-                "Non assigné"}
-              {raid.equipe?.name ? ` · ${raid.equipe.name}` : ""}
+              <UserCheck className="size-3.5 text-[#00BDBB]" />
+              <span>
+                <span className="text-xs text-muted-foreground">Assigné · </span>
+                {raid.responsableRessource?.nom_complet ||
+                  raid.responsable ||
+                  "Non assigné"}
+              </span>
             </span>
             <span className="inline-flex items-center gap-1.5">
               <Calendar className="size-3.5 text-[#00BDBB]" />
@@ -573,48 +608,58 @@ export function RaidDetailClient({
                   Voir la circulation
                 </Button>
                 {canCollaborate && (
-                  <>
-                    <Button
-                      className="justify-start gap-2"
-                      style={{ backgroundColor: "#0A3C74" }}
-                      disabled={isPending || closed}
-                      onClick={() => {
-                        setNewStatut(raid.statut);
-                        setStatusComment("");
-                        setStatusOpen(true);
-                      }}
-                    >
-                      <CircleDot className="size-4" />
-                      Changer le statut
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="justify-start gap-2"
-                      disabled={isPending || closed}
-                      onClick={() => {
-                        setAssignTo(
-                          raid.responsableRessourceId ?? "__none__"
-                        );
-                        setAssignOpen(true);
-                      }}
-                    >
-                      <UserPlus className="size-4" />
-                      Assigner
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="justify-start gap-2 border-teal-600/40 text-teal-800 dark:text-teal-300"
-                      disabled={isPending || !!isMine || closed}
-                      onClick={() =>
-                        run(async () => {
-                          await autoAssignRaidToMe(raid.id);
-                        })
-                      }
-                    >
-                      <Sparkles className="size-4" />
-                      M&apos;auto-assigner
-                    </Button>
-                  </>
+                  <Button
+                    className="justify-start gap-2"
+                    style={{ backgroundColor: "#0A3C74" }}
+                    disabled={isPending || closed}
+                    onClick={() => {
+                      setNewStatut(raid.statut);
+                      setStatusComment("");
+                      setStatusOpen(true);
+                    }}
+                  >
+                    <CircleDot className="size-4" />
+                    Changer le statut
+                  </Button>
+                )}
+                {canAssign && (
+                  <Button
+                    variant="secondary"
+                    className="justify-start gap-2"
+                    disabled={isPending || closed}
+                    onClick={() => {
+                      setAssignTo(raid.responsableRessourceId ?? "__none__");
+                      setAssignOpen(true);
+                    }}
+                  >
+                    <UserPlus className="size-4" />
+                    Assigner / Réassigner
+                  </Button>
+                )}
+                {canCollaborate && (
+                  <Button
+                    variant="outline"
+                    className="justify-start gap-2 border-teal-600/40 text-teal-800 dark:text-teal-300"
+                    disabled={
+                      isPending ||
+                      closed ||
+                      (!!raid.responsableRessourceId && !canAssign) ||
+                      !!isMine
+                    }
+                    onClick={() =>
+                      run(async () => {
+                        await autoAssignRaidToMe(raid.id);
+                      })
+                    }
+                    title={
+                      raid.responsableRessourceId && !isMine && !canAssign
+                        ? "Déjà assigné — réaffectation réservée Admin / Bureau Programme / DC-PMO"
+                        : undefined
+                    }
+                  >
+                    <Sparkles className="size-4" />
+                    M&apos;auto-assigner
+                  </Button>
                 )}
               </CardContent>
             </Card>
@@ -662,27 +707,28 @@ export function RaidDetailClient({
                   Non assigné
                 </p>
                 <p className="mt-1 text-xs opacity-90">
-                  Toute action (statut, assignation) vous auto-assignera cette
-                  entrée, sauf l&apos;ajout d&apos;un simple commentaire.
+                  Un changement de statut vous auto-assignera cette entrée.
+                  Les commentaires ne le font pas. La réaffectation manuelle
+                  est réservée à l&apos;Admin, au Bureau Programme, ou au
+                  Directeur / Suppléant / PMO du chantier.
                 </p>
               </div>
             )}
           </div>
         </div>
 
-        {/* Audit trail table */}
+        {/* Audit trail — card list (no horizontal scroll, text wraps) */}
         <Card className="border-0 shadow-md ring-1 ring-black/5 dark:ring-white/10">
           <CardHeader className="border-b bg-muted/30">
-            <div className="flex items-center gap-2">
-              <History className="size-4 text-primary" />
+            <div className="flex flex-wrap items-center gap-2">
+              <History className="size-4 shrink-0 text-primary" />
               <CardTitle className="text-base">Journal d&apos;audit</CardTitle>
               <Badge variant="secondary" className="text-[10px]">
                 {auditNewestFirst.length} événement(s)
               </Badge>
             </div>
             <CardDescription>
-              Historique immuable de toutes les modifications (style traçabilité
-              entreprise)
+              Historique immuable de toutes les modifications
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-4">
@@ -691,56 +737,71 @@ export function RaidDetailClient({
                 Aucun événement enregistré.
               </p>
             ) : (
-              <div className="overflow-x-auto rounded-lg border">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/40">
-                      <TableHead className="w-[150px]">Date</TableHead>
-                      <TableHead className="w-[130px]">Action</TableHead>
-                      <TableHead>Résumé</TableHead>
-                      <TableHead className="w-[140px]">Acteur</TableHead>
-                      <TableHead className="w-[100px]">Champ</TableHead>
-                      <TableHead>Avant</TableHead>
-                      <TableHead>Après</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {auditNewestFirst.map((log) => (
-                      <TableRow key={log.id}>
-                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+              <ul className="space-y-3">
+                {auditNewestFirst.map((log) => {
+                  const hasDiff =
+                    (log.oldValue && log.oldValue !== "—") ||
+                    (log.newValue && log.newValue !== "—");
+                  return (
+                    <li
+                      key={log.id}
+                      className="rounded-xl border bg-card px-3 py-3 shadow-sm sm:px-4"
+                    >
+                      <div className="flex flex-wrap items-center gap-2 gap-y-1.5">
+                        <Badge
+                          className="shrink-0 text-[10px] font-medium"
+                          style={{
+                            backgroundColor: actionColor(log.action),
+                            color: "white",
+                          }}
+                        >
+                          {actionLabel(log.action)}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground tabular-nums">
                           {fmt(log.createdAt)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            className="text-[10px] font-medium"
-                            style={{
-                              backgroundColor: actionColor(log.action),
-                              color: "white",
-                            }}
-                          >
-                            {actionLabel(log.action)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-sm max-w-[280px]">
-                          {log.summary}
-                        </TableCell>
-                        <TableCell className="text-sm font-medium">
+                        </span>
+                        <span className="text-xs text-muted-foreground">·</span>
+                        <span className="text-xs font-semibold text-foreground break-words">
                           {log.actorName || "—"}
-                        </TableCell>
-                        <TableCell className="text-xs font-mono text-muted-foreground">
-                          {log.field || "—"}
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground max-w-[120px] truncate">
-                          {log.oldValue || "—"}
-                        </TableCell>
-                        <TableCell className="text-xs max-w-[120px] truncate">
-                          {log.newValue || "—"}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                        </span>
+                        {log.field ? (
+                          <Badge
+                            variant="outline"
+                            className="max-w-full break-all font-mono text-[10px] font-normal"
+                          >
+                            {log.field}
+                          </Badge>
+                        ) : null}
+                      </div>
+
+                      <p className="mt-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-foreground/90">
+                        {log.summary}
+                      </p>
+
+                      {hasDiff ? (
+                        <div className="mt-2.5 grid gap-2 sm:grid-cols-2">
+                          <div className="min-w-0 rounded-lg border border-dashed bg-muted/30 px-2.5 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              Avant
+                            </p>
+                            <p className="mt-0.5 text-xs leading-snug break-words whitespace-pre-wrap text-muted-foreground">
+                              {log.oldValue?.trim() || "—"}
+                            </p>
+                          </div>
+                          <div className="min-w-0 rounded-lg border border-primary/15 bg-primary/5 px-2.5 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-primary/80">
+                              Après
+                            </p>
+                            <p className="mt-0.5 text-xs leading-snug break-words whitespace-pre-wrap text-foreground">
+                              {log.newValue?.trim() || "—"}
+                            </p>
+                          </div>
+                        </div>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </CardContent>
         </Card>
@@ -808,7 +869,7 @@ export function RaidDetailClient({
       <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Assigner l&apos;entrée</DialogTitle>
+            <DialogTitle>Assigner / réassigner l&apos;entrée</DialogTitle>
           </DialogHeader>
           <div className="grid gap-1.5">
             <label className="text-sm font-medium">Ressource</label>
@@ -827,8 +888,9 @@ export function RaidDetailClient({
               </SelectContent>
             </Select>
             <p className="text-[11px] text-muted-foreground">
-              L&apos;équipe RAID est recalculée à partir de l&apos;équipe
-              hiérarchique de la ressource.
+              L&apos;équipe liée au RAID est recalculée : équipe chantier si la
+              personne est membre du chantier, sinon son équipe
+              institutionnelle.
             </p>
           </div>
           <DialogFooter>

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, type SessionData } from "@/lib/auth";
 import {
+  canAssignRaid,
   canCollaborateOnRaid,
   canMoveRaidOnKanban,
   getActorDisplay,
@@ -128,9 +129,10 @@ export async function getRaidDetail(id: string) {
   if (!raid) return null;
 
   const canCollaborate = await canCollaborateOnRaid(session, raid);
+  const canAssign = await canAssignRaid(session, raid);
 
   // Allow view if page/role grants access OR user can manage (assignee / institutional peers / chantier)
-  let canView = canCollaborate;
+  let canView = canCollaborate || canAssign;
   if (!canView) {
     try {
       await requireRaidViewAccess(session);
@@ -148,6 +150,7 @@ export async function getRaidDetail(id: string) {
   return {
     raid,
     canCollaborate,
+    canAssign,
     currentUser: {
       userId: session.userId,
       ressourceId: session.ressourceId,
@@ -328,11 +331,13 @@ export async function assignRaidToRessource(
   const raid = await loadRaidForCollab(raidId);
   if (!raid) throw new Error("Entrée RAID introuvable.");
 
-  const allowed = await canCollaborateOnRaid(session, raid);
-  if (!allowed) throw new Error("Réaffectation non autorisée.");
-
-  // Auto-assign self first if unassigned (then reassign if needed)
-  await ensureAssignedIfNeeded(session, raid, { skipIfCommentOnly: false });
+  // Strict assign/reassign rights (Admin / Bureau Programme / DC-Suppléant-PMO chantier)
+  const allowed = await canAssignRaid(session, raid);
+  if (!allowed) {
+    throw new Error(
+      "Réaffectation non autorisée : réservée à l'Admin, au Bureau Programme, ou au Directeur / Suppléant / PMO du chantier lié."
+    );
+  }
 
   const actor = await getActorDisplay(session);
   const prevName = raid.responsable || "—";
@@ -370,6 +375,7 @@ export async function assignRaidToRessource(
   });
   if (!target) throw new Error("Ressource introuvable.");
 
+  // Team linked to RAID: same resolveRaidEquipeId rule (unchanged)
   const team = await resolveRaidEquipeId({
     responsableRessourceId: target.id,
     chantierId: raid.chantierId,
@@ -412,11 +418,22 @@ export async function autoAssignRaidToMe(raidId: string) {
   const raid = await loadRaidForCollab(raidId);
   if (!raid) throw new Error("Entrée RAID introuvable.");
 
+  // Auto-assign: collaboration access (unchanged) — claim for self
   const allowed = await canCollaborateOnRaid(session, raid);
   if (!allowed) throw new Error("Vous n'avez pas accès à cette entrée.");
 
   if (raid.responsableRessourceId === session.ressourceId) {
     return; // already mine
+  }
+
+  // If already assigned to someone else, only reassign actors may take over
+  if (raid.responsableRessourceId) {
+    const mayReassign = await canAssignRaid(session, raid);
+    if (!mayReassign) {
+      throw new Error(
+        "Cette entrée est déjà assignée. Seuls l'Admin, le Bureau Programme ou le Directeur / Suppléant / PMO du chantier peuvent la réaffecter."
+      );
+    }
   }
 
   const actor = await getActorDisplay(session);

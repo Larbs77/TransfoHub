@@ -107,20 +107,50 @@ export type RaidAccessShape = {
   equipeId: string | null;
 };
 
+/** Institutional Program Office team names (case-insensitive match). */
+const PROGRAMME_OFFICE_EQUIPE_NAMES = [
+  "bureau programme",
+  "programme office",
+  "bureau du programme",
+];
+
 /**
- * Collaboration access (comment, status, assign, manage):
+ * Admin role, Programme_Office role, or member of institutional "Bureau Programme".
+ */
+export async function isProgrammeLevelActor(
+  session: SessionData
+): Promise<boolean> {
+  if (session.role === "Admin" || session.role === "Programme_Office") {
+    return true;
+  }
+  if (!session.ressourceId) return false;
+  const me = await prisma.ressource.findUnique({
+    where: { id: session.ressourceId },
+    select: {
+      equipeHierarchie: { select: { name: true, type: true } },
+    },
+  });
+  const name = me?.equipeHierarchie?.name?.trim().toLowerCase() ?? "";
+  const type = me?.equipeHierarchie?.type ?? "institutionnelle";
+  if (type !== "institutionnelle" && type !== "") return false;
+  return PROGRAMME_OFFICE_EQUIPE_NAMES.some(
+    (n) => name === n || name.includes(n)
+  );
+}
+
+/**
+ * Collaboration access (comment, status, auto-assign when unassigned):
  * - Admin / Bureau Programme
  * - Assignee (responsable ressource)
  * - Member of the linked chantier team (MembreEquipe)
  * - Same institutional team as the assignee
- *   (covers RAID assigned to someone outside the chantier team)
  * - Same derived RAID equipe (functional chantier team or institutional)
  */
 export async function canCollaborateOnRaid(
   session: SessionData,
   raid: RaidAccessShape
 ): Promise<boolean> {
-  if (session.role === "Admin" || session.role === "Programme_Office") {
+  if (await isProgrammeLevelActor(session)) {
     return true;
   }
 
@@ -177,6 +207,37 @@ export async function canCollaborateOnRaid(
 }
 
 /**
+ * Assign / reassign permission (stricter than general collaboration):
+ * - Admin and Programme Office (role or institutional team "Bureau Programme"): any RAID
+ * - On a chantier: only Directeur de chantier, Suppléant, PMO for RAIDs linked to that chantier
+ * Auto-assign (claim unassigned) stays on canCollaborateOnRaid.
+ */
+export async function canAssignRaid(
+  session: SessionData,
+  raid: RaidAccessShape
+): Promise<boolean> {
+  if (await isProgrammeLevelActor(session)) {
+    return true;
+  }
+
+  if (!session.ressourceId) return false;
+  if (!raid.chantierId) {
+    // No chantier: only programme-level actors may reassign
+    return false;
+  }
+
+  const membres = await prisma.membreEquipe.findMany({
+    where: {
+      chantierId: raid.chantierId,
+      ressourceId: session.ressourceId,
+    },
+    select: { role: true, is_directeur: true },
+  });
+
+  return membres.some((m) => isKanbanLeadershipRole(m.role, m.is_directeur));
+}
+
+/**
  * Kanban / status-move permission:
  * - Assignee
  * - Admin / Bureau Programme
@@ -191,7 +252,7 @@ export async function canMoveRaidOnKanban(
     equipeId?: string | null;
   }
 ): Promise<boolean> {
-  if (session.role === "Admin" || session.role === "Programme_Office") {
+  if (await isProgrammeLevelActor(session)) {
     return true;
   }
   if (!session.ressourceId) return false;

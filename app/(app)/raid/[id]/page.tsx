@@ -43,6 +43,7 @@ export default async function RaidDetailPage({ params }: Props) {
     <RaidDetailClient
       raid={raid}
       canCollaborate={payload.canCollaborate}
+      canAssign={payload.canAssign}
       currentUser={payload.currentUser}
       ressources={ressources}
     />
