@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import {
@@ -125,6 +126,7 @@ export function MonTableauDeBordClient({
   capacite?: PersonalCapaciteData | null;
   capaciteYear: number;
 }) {
+  const router = useRouter();
   const [chantierFilter, setChantierFilter] = useState<string>("__all__");
   const [teamFilter, setTeamFilter] = useState<string>("__all__");
   /** Mon RAID = assigned to me; all = équipes & chantiers scope. */
@@ -699,10 +701,13 @@ export function MonTableauDeBordClient({
                                     {items.map((r) => (
                                       <tr
                                         key={r.id}
-                                        className="border-t hover:bg-muted/30"
+                                        className="border-t hover:bg-muted/30 cursor-pointer"
+                                        onClick={() =>
+                                          router.push(`/raid/${r.id}`)
+                                        }
                                       >
                                         <td className="px-3 py-2 max-w-[280px]">
-                                          <span className="line-clamp-2 font-medium">
+                                          <span className="line-clamp-2 font-medium text-primary hover:underline">
                                             {r.intitule}
                                           </span>
                                           {r.domaine ? (

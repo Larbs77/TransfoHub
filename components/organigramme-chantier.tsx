@@ -10,8 +10,14 @@ interface Membre {
   id: string;
   equipe: string;
   role: string;
-  nom_complet: string;
+  commentaires?: string;
   is_directeur?: boolean;
+  ressourceId?: string;
+  ressource?: { id: string; nom_complet: string } | null;
+}
+
+function membreName(m: Membre): string {
+  return m.ressource?.nom_complet?.trim() || "—";
 }
 
 interface RmdInfo {
@@ -74,7 +80,7 @@ export function OrganigrammeChantier({ directeur, membres, rmds }: Props) {
                     </div>
                     {suppleants.map((s) => (
                       <p key={s.id} className="text-sm font-semibold text-muted-foreground">
-                        {s.nom_complet}
+                        {membreName(s)}
                       </p>
                     ))}
                   </div>
@@ -146,7 +152,7 @@ export function OrganigrammeChantier({ directeur, membres, rmds }: Props) {
                               <User className="size-3.5 text-muted-foreground mt-0.5 shrink-0" />
                               <div className="min-w-0">
                                 <p className="text-xs font-medium truncate">
-                                  {m.nom_complet}
+                                  {membreName(m)}
                                 </p>
                                 <p
                                   className="text-[10px] truncate"

@@ -35,6 +35,7 @@ import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import { RaidFormDialog } from "./raid-form-dialog";
 import { CalendarView, type CalendarEvent } from "./calendar-view";
 import { deleteComite, deleteRaid } from "@/app/(app)/actions";
+import { useCanCreateRaid } from "@/components/user-provider";
 import {
   STATUT_COMITE_LABELS,
   STATUT_COMITE_COLORS,
@@ -167,7 +168,7 @@ function ComiteRaidSection({
   comite: ComiteRow;
   onEditRaid: (r: RaidItem) => void;
   onDeleteRaid: (id: string) => void;
-  onAddRaid: (comiteId: string) => void;
+  onAddRaid?: (comiteId: string) => void;
 }) {
   const raids = comite.raids;
   const raidsByType = useMemo(() => {
@@ -189,10 +190,12 @@ function ComiteRaidSection({
             {raids.length} élément{raids.length !== 1 ? "s" : ""}
           </Badge>
         </div>
-        <Button size="xs" onClick={() => onAddRaid(comite.id)}>
-          <Plus className="size-3" />
-          Ajouter RAID
-        </Button>
+        {onAddRaid && (
+          <Button size="xs" onClick={() => onAddRaid(comite.id)}>
+            <Plus className="size-3" />
+            Ajouter RAID
+          </Button>
+        )}
       </div>
 
       {raids.length === 0 ? (
@@ -284,7 +287,7 @@ function InstanceTable({
   onDelete: (id: string) => void;
   onEditRaid: (r: RaidItem) => void;
   onDeleteRaid: (id: string) => void;
-  onAddRaid: (comiteId: string) => void;
+  onAddRaid?: (comiteId: string) => void;
 }) {
   const [sortField, setSortField] = useState<SortField | null>("date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -427,6 +430,7 @@ function InstanceTable({
 }
 
 export function ComitesList({ comites, instances = [] }: Props) {
+  const canCreateRaid = useCanCreateRaid();
   const [viewFilter, setViewFilter] = useState<ViewFilter>("week");
   const [editComite, setEditComite] = useState<ComiteRow | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -589,7 +593,7 @@ export function ComitesList({ comites, instances = [] }: Props) {
                     onDelete={(id) => { setDeleteError(null); setDeleteId(id); }}
                     onEditRaid={setEditRaid}
                     onDeleteRaid={(id) => { setDeleteError(null); setDeleteRaidId(id); }}
-                    onAddRaid={setAddRaidComiteId}
+                    onAddRaid={canCreateRaid ? setAddRaidComiteId : undefined}
                   />
                 </div>
               </TabsContent>

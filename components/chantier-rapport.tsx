@@ -50,10 +50,12 @@ interface Jalon {
 
 interface Membre {
   id: string;
-  nom_complet: string;
   role: string;
   equipe: string;
   is_directeur: boolean;
+  commentaires?: string;
+  nom_complet?: string;
+  ressource?: { nom_complet: string } | null;
 }
 
 interface AdherenceRef {

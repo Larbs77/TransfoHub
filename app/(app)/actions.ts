@@ -8,10 +8,22 @@ import {
   requireAuth,
   requireRole,
   requireChantierAccess,
+  requireRaidCreateAccess,
   getUserChantierIds,
   hashPassword,
   validatePasswordComplexity,
 } from "@/lib/auth";
+import { getRoleByCode, resolveRaidCreateScope } from "@/lib/roles";
+import {
+  getActorDisplay,
+  writeRaidAudit,
+} from "@/lib/raid-collaboration";
+import {
+  ensureChantierFunctionalTeam,
+  resolveRaidEquipeId,
+  syncChantierFunctionalMembership,
+} from "@/lib/equipe-chantier";
+import { EQUIPE_TYPES } from "@/lib/equipe-types";
 import { identityFromRessource } from "@/lib/ressource-user";
 
 // ── Progress Calculation ─────────────────────────────
@@ -81,7 +93,33 @@ export async function getRaidItems(type?: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const where: any = {};
   if (type) where.type = type;
-  if (chantierIds !== "all") where.chantierId = { in: chantierIds };
+
+  if (chantierIds !== "all") {
+    // Visible if: on my chantiers OR assigned to me OR same institutional team
+    // (RAID.equipeId = institutional team when assignee is outside chantier)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const or: any[] = [];
+    if (chantierIds.length > 0) {
+      or.push({ chantierId: { in: chantierIds } });
+    }
+    if (session.ressourceId) {
+      or.push({ responsableRessourceId: session.ressourceId });
+      const me = await prisma.ressource.findUnique({
+        where: { id: session.ressourceId },
+        select: { equipeHierarchieId: true },
+      });
+      if (me?.equipeHierarchieId) {
+        or.push({ equipeId: me.equipeHierarchieId });
+      }
+    }
+    if (or.length === 0) {
+      // No chantier, no resource → empty
+      where.id = { in: [] };
+    } else {
+      where.OR = or;
+    }
+  }
+
   return prisma.raid.findMany({
     where,
     orderBy: { createdAt: "desc" },
@@ -106,7 +144,9 @@ export async function getChantiers() {
       rmds: { include: { rmd: true } },
       membres: {
         where: { is_directeur: true },
-        select: { nom_complet: true },
+        select: {
+          ressource: { select: { nom_complet: true } },
+        },
         take: 1,
       },
       jalons: {
@@ -116,6 +156,18 @@ export async function getChantiers() {
     },
   });
 }
+
+const membreEquipeInclude = {
+  ressource: {
+    select: {
+      id: true,
+      nom_complet: true,
+      organisation: true,
+      type: true,
+      email: true,
+    },
+  },
+} as const;
 
 export async function getChantierById(id: string) {
   await requireAuth();
@@ -127,7 +179,10 @@ export async function getChantierById(id: string) {
         include: { comite: true },
       },
       rmds: { include: { rmd: true } },
-      membres: { orderBy: [{ equipe: "asc" }, { role: "asc" }] },
+      membres: {
+        orderBy: [{ equipe: "asc" }, { role: "asc" }],
+        include: membreEquipeInclude,
+      },
       jalons: { orderBy: [{ phase: "asc" }, { ordre: "asc" }] },
       adherencesSource: {
         orderBy: { code: "asc" },
@@ -155,7 +210,10 @@ export async function getChantiersByIds(ids: string[]) {
     orderBy: { code: "asc" },
     include: {
       raids: { orderBy: { createdAt: "desc" } },
-      membres: { orderBy: [{ equipe: "asc" }, { role: "asc" }] },
+      membres: {
+        orderBy: [{ equipe: "asc" }, { role: "asc" }],
+        include: membreEquipeInclude,
+      },
       jalons: { orderBy: [{ phase: "asc" }, { ordre: "asc" }] },
       adherencesSource: {
         orderBy: { code: "asc" },
@@ -180,6 +238,39 @@ export async function getChantiersForSelect() {
   const chantierIds = await getUserChantierIds(session);
   return prisma.chantier.findMany({
     where: chantierIds === "all" ? undefined : { id: { in: chantierIds } },
+    orderBy: { code: "asc" },
+    select: { id: true, code: true, nom: true },
+  });
+}
+
+/**
+ * Chantiers available when creating a RAID entry (respects raid_create_scope).
+ * programme → all; chantier → only teams where user is MembreEquipe; none → [].
+ */
+export async function getChantiersForRaidCreate() {
+  const session = await requireAuth();
+  const role = await getRoleByCode(session.role);
+  const scope = resolveRaidCreateScope(role);
+
+  if (scope === "none") return [];
+
+  if (scope === "programme") {
+    return prisma.chantier.findMany({
+      orderBy: { code: "asc" },
+      select: { id: true, code: true, nom: true },
+    });
+  }
+
+  // Niveau Chantier
+  if (!session.ressourceId) return [];
+  const membres = await prisma.membreEquipe.findMany({
+    where: { ressourceId: session.ressourceId },
+    select: { chantierId: true },
+  });
+  const ids = [...new Set(membres.map((m) => m.chantierId))];
+  if (ids.length === 0) return [];
+  return prisma.chantier.findMany({
+    where: { id: { in: ids } },
     orderBy: { code: "asc" },
     select: { id: true, code: true, nom: true },
   });
@@ -730,6 +821,7 @@ export type PersonalRaidRow = {
   impact: number | null;
   probabilite: number | null;
   responsableRessourceId: string | null;
+  equipeId?: string | null;
   comiteId: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -877,13 +969,17 @@ export async function getPersonalDashboard() {
     charge_pourcentage: m.charge_pourcentage,
   }));
 
-  // RAID: assigned to me as responsable resource, OR on my chantiers
+  // RAID: assigned to me, on my chantiers, OR same institutional team
+  // (when assignee is outside chantier → equipeId = hierarchy team)
   const raidsRaw = await prisma.raid.findMany({
     where: {
       OR: [
         { responsableRessourceId: session.ressourceId },
         ...(chantierIds.length > 0
           ? [{ chantierId: { in: chantierIds } }]
+          : []),
+        ...(ressource.equipeHierarchieId
+          ? [{ equipeId: ressource.equipeHierarchieId }]
           : []),
       ],
     },
@@ -917,6 +1013,7 @@ export async function getPersonalDashboard() {
     impact: r.impact,
     probabilite: r.probabilite,
     responsableRessourceId: r.responsableRessourceId,
+    equipeId: r.equipeId,
     comiteId: r.comiteId,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
@@ -1168,7 +1265,7 @@ export async function createChantier(data: {
   rmdIds?: string[];
 }) {
   await requireRole("Admin", "Programme_Office");
-  await prisma.chantier.create({
+  const created = await prisma.chantier.create({
     data: {
       code: data.code,
       nom: data.nom,
@@ -1196,8 +1293,11 @@ export async function createChantier(data: {
         : undefined,
     },
   });
+  // Auto-create functional (programme) team for the chantier
+  await ensureChantierFunctionalTeam(created.id);
   revalidatePath("/");
   revalidatePath("/chantiers");
+  revalidatePath("/admin/equipes");
 }
 
 export async function updateChantier(
@@ -1264,9 +1364,12 @@ export async function updateChantier(
       }
     }
   });
+  // Keep functional team label in sync with code/nom
+  await ensureChantierFunctionalTeam(id);
   revalidatePath("/");
   revalidatePath("/chantiers");
   revalidatePath(`/chantiers/${id}`);
+  revalidatePath("/admin/equipes");
 }
 
 export async function deleteChantier(id: string) {
@@ -1327,7 +1430,9 @@ export async function getChantiersFavoris() {
       rmds: { include: { rmd: true } },
       membres: {
         where: { is_directeur: true },
-        select: { nom_complet: true },
+        select: {
+          ressource: { select: { nom_complet: true } },
+        },
         take: 1,
       },
       jalons: {
@@ -1360,8 +1465,14 @@ export async function createRaid(data: {
   commentaires: string;
   comiteId: string | null;
 }) {
-  await requireRole("Admin", "Programme_Office", "PMO_Chantier");
-  await prisma.raid.create({
+  // Permission driven by AppRole.raid_create_scope (not legacy role list)
+  const session = await requireRaidCreateAccess(data.chantierId);
+  const actor = await getActorDisplay(session);
+  const teamAssign = await resolveRaidEquipeId({
+    responsableRessourceId: data.responsableRessourceId || null,
+    chantierId: data.chantierId || null,
+  });
+  const created = await prisma.raid.create({
     data: {
       type: data.type,
       intitule: data.intitule,
@@ -1375,16 +1486,44 @@ export async function createRaid(data: {
       mitigation: data.mitigation,
       responsable: data.responsable,
       responsableRessourceId: data.responsableRessourceId || null,
+      equipeId: teamAssign.equipeId,
       statut: data.statut,
       date_identification: data.date_identification ? new Date(data.date_identification) : null,
       date_revision: data.date_revision ? new Date(data.date_revision) : null,
       date_echeance: data.date_echeance ? new Date(data.date_echeance) : null,
       commentaires: data.commentaires,
       comiteId: data.comiteId || null,
+      createdByUserId: actor.actorUserId,
+      createdByName: actor.actorName,
     },
   });
+  await writeRaidAudit({
+    raidId: created.id,
+    action: "created",
+    summary: `Entrée créée par ${actor.actorName} — statut « ${data.statut || "—"} »`,
+    newValue: data.statut,
+    actorUserId: actor.actorUserId,
+    actorName: actor.actorName,
+    actorRessourceId: actor.actorRessourceId,
+  });
+  if (data.responsableRessourceId) {
+    const teamHint = teamAssign.equipeName
+      ? ` · équipe ${teamAssign.kind === "fonctionnelle" ? "chantier" : "institutionnelle"} « ${teamAssign.equipeName} »`
+      : "";
+    await writeRaidAudit({
+      raidId: created.id,
+      action: "assigned",
+      field: "responsableRessourceId",
+      newValue: data.responsable,
+      summary: `Assigné à ${data.responsable || "ressource"} à la création${teamHint}`,
+      actorUserId: actor.actorUserId,
+      actorName: actor.actorName,
+      actorRessourceId: actor.actorRessourceId,
+    });
+  }
   revalidatePath("/");
   revalidatePath("/raid");
+  revalidatePath(`/raid/${created.id}`);
   revalidatePath("/chantiers");
   revalidatePath("/comites");
   revalidatePath("/ressources");
@@ -1414,6 +1553,10 @@ export async function updateRaid(
   }
 ) {
   await requireRole("Admin", "Programme_Office", "PMO_Chantier");
+  const teamAssign = await resolveRaidEquipeId({
+    responsableRessourceId: data.responsableRessourceId || null,
+    chantierId: data.chantierId || null,
+  });
   await prisma.raid.update({
     where: { id },
     data: {
@@ -1429,6 +1572,7 @@ export async function updateRaid(
       mitigation: data.mitigation,
       responsable: data.responsable,
       responsableRessourceId: data.responsableRessourceId || null,
+      equipeId: teamAssign.equipeId,
       statut: data.statut,
       date_identification: data.date_identification ? new Date(data.date_identification) : null,
       date_revision: data.date_revision ? new Date(data.date_revision) : null,
@@ -1439,6 +1583,7 @@ export async function updateRaid(
   });
   revalidatePath("/");
   revalidatePath("/raid");
+  revalidatePath(`/raid/${id}`);
   revalidatePath("/chantiers");
   revalidatePath("/comites");
   revalidatePath("/ressources");
@@ -1544,12 +1689,22 @@ export async function createMembreEquipe(data: {
   chantierId: string;
   equipe: string;
   role: string;
-  nom_complet: string;
+  ressourceId: string;
+  commentaires?: string;
   is_directeur?: boolean;
   charge_pourcentage?: number;
-  ressourceId?: string | null;
 }) {
   await requireChantierAccess(data.chantierId);
+  if (!data.ressourceId?.trim()) {
+    throw new Error("Une ressource est obligatoire pour chaque membre d'équipe.");
+  }
+  const ressource = await prisma.ressource.findUnique({
+    where: { id: data.ressourceId },
+    select: { id: true },
+  });
+  if (!ressource) {
+    throw new Error("Ressource introuvable.");
+  }
   if (data.is_directeur) {
     await prisma.membreEquipe.updateMany({
       where: { chantierId: data.chantierId, is_directeur: true },
@@ -1561,15 +1716,19 @@ export async function createMembreEquipe(data: {
       chantierId: data.chantierId,
       equipe: data.equipe,
       role: data.role,
-      nom_complet: data.nom_complet,
+      commentaires: data.commentaires?.trim() ?? "",
       is_directeur: data.is_directeur ?? false,
       charge_pourcentage: data.charge_pourcentage ?? 100,
-      ressourceId: data.ressourceId || null,
+      ressourceId: data.ressourceId,
     },
   });
+  // Functional chantier team membership
+  await ensureChantierFunctionalTeam(data.chantierId);
+  await syncChantierFunctionalMembership(data.chantierId);
   revalidatePath(`/chantiers/${data.chantierId}`);
   revalidatePath("/ressources");
   revalidatePath("/capacite");
+  revalidatePath("/admin/equipes");
 }
 
 export async function updateMembreEquipe(
@@ -1577,13 +1736,23 @@ export async function updateMembreEquipe(
   data: {
     equipe: string;
     role: string;
-    nom_complet: string;
+    ressourceId: string;
+    commentaires?: string;
     is_directeur?: boolean;
     charge_pourcentage?: number;
-    ressourceId?: string | null;
   }
 ) {
   await requireRole("Admin", "Programme_Office", "PMO_Chantier");
+  if (!data.ressourceId?.trim()) {
+    throw new Error("Une ressource est obligatoire pour chaque membre d'équipe.");
+  }
+  const ressource = await prisma.ressource.findUnique({
+    where: { id: data.ressourceId },
+    select: { id: true },
+  });
+  if (!ressource) {
+    throw new Error("Ressource introuvable.");
+  }
   if (data.is_directeur) {
     const existing = await prisma.membreEquipe.findUnique({ where: { id } });
     if (existing) {
@@ -1598,21 +1767,25 @@ export async function updateMembreEquipe(
     data: {
       equipe: data.equipe,
       role: data.role,
-      nom_complet: data.nom_complet,
+      commentaires: data.commentaires?.trim() ?? "",
       is_directeur: data.is_directeur ?? false,
       charge_pourcentage: data.charge_pourcentage,
-      ressourceId: data.ressourceId !== undefined ? (data.ressourceId || null) : undefined,
+      ressourceId: data.ressourceId,
     },
   });
+  await syncChantierFunctionalMembership(membre.chantierId);
   revalidatePath(`/chantiers/${membre.chantierId}`);
   revalidatePath("/ressources");
   revalidatePath("/capacite");
+  revalidatePath("/admin/equipes");
 }
 
 export async function deleteMembreEquipe(id: string) {
   await requireRole("Admin", "Programme_Office");
   const membre = await prisma.membreEquipe.delete({ where: { id } });
+  await syncChantierFunctionalMembership(membre.chantierId);
   revalidatePath(`/chantiers/${membre.chantierId}`);
+  revalidatePath("/admin/equipes");
 }
 
 // ── Comités ──────────────────────────────────────────
@@ -1975,13 +2148,13 @@ export async function getRessourcesForSelect() {
 
     // Get all ressourceIds linked to members of those chantiers
     const membres = await prisma.membreEquipe.findMany({
-      where: { chantierId: { in: chantierIds }, ressourceId: { not: null } },
+      where: { chantierId: { in: chantierIds } },
       select: { ressourceId: true },
     });
     const ressourceIds = [
       ...new Set([
         ...(session.ressourceId ? [session.ressourceId] : []),
-        ...membres.map((m) => m.ressourceId!),
+        ...membres.map((m) => m.ressourceId),
       ]),
     ];
 
@@ -2009,6 +2182,11 @@ async function assertEquipeHierarchie(equipeHierarchieId: string | null | undefi
   if (!equipe) throw new Error("Équipe hiérarchique introuvable.");
   if (!equipe.is_active) {
     throw new Error("L'équipe hiérarchique sélectionnée est inactive.");
+  }
+  if (equipe.type !== EQUIPE_TYPES.institutionnelle) {
+    throw new Error(
+      "Le rattachement hiérarchique doit être une équipe institutionnelle (organisation banque), pas une équipe chantier."
+    );
   }
   return id;
 }
@@ -2733,7 +2911,7 @@ export async function getBurnRateChantier(chantierId: string) {
       const tjm = m.ressource!.tarif_journalier;
       return {
         id: m.id,
-        nom_complet: m.nom_complet,
+        nom_complet: m.ressource!.nom_complet,
         equipe: m.equipe,
         role: m.role,
         charge_pourcentage: m.charge_pourcentage,
@@ -3246,7 +3424,14 @@ export async function getDashboardCTP(month: number, year: number) {
   const [chantiers, raids, adherences, saisiesTemps, jalons, ressources] = await Promise.all([
     prisma.chantier.findMany({
       include: {
-        membres: { select: { nom_complet: true, is_directeur: true, charge_pourcentage: true } },
+        membres: {
+          select: {
+            is_directeur: true,
+            charge_pourcentage: true,
+            ressourceId: true,
+            ressource: { select: { nom_complet: true } },
+          },
+        },
         jalons: { select: { phase: true, statut: true, date_cible: true } },
       },
     }),
@@ -3357,7 +3542,14 @@ export async function getDashboardCTR(startDate: string, endDate: string) {
   const [chantiers, raids, adherences, saisiesTemps, jalons, ressources, membres] = await Promise.all([
     prisma.chantier.findMany({
       include: {
-        membres: { select: { nom_complet: true, is_directeur: true, ressourceId: true, charge_pourcentage: true } },
+        membres: {
+          select: {
+            is_directeur: true,
+            ressourceId: true,
+            charge_pourcentage: true,
+            ressource: { select: { nom_complet: true } },
+          },
+        },
         jalons: { select: { phase: true, statut: true, date_cible: true } },
       },
     }),
@@ -3368,7 +3560,7 @@ export async function getDashboardCTR(startDate: string, endDate: string) {
     }),
     prisma.jalon.findMany(),
     prisma.ressource.findMany({ where: { actif: true } }),
-    prisma.membreEquipe.findMany({ where: { ressourceId: { not: null } } }),
+    prisma.membreEquipe.findMany(),
   ]);
 
   const totalChantiers = chantiers.length;
@@ -3411,10 +3603,10 @@ export async function getDashboardCTR(startDate: string, endDate: string) {
     ? Math.round((jalonsOnTime.length / jalonsDueByPeriod.length) * 100)
     : 100;
 
-  // Staffing rate: membres with ressourceId / total slots
+  // Staffing rate: all team members must be linked to a Ressource
   const totalSlots = membres.length;
-  const staffedSlots = membres.filter((m) => m.ressourceId).length;
-  const staffingRate = totalSlots > 0 ? Math.round((staffedSlots / totalSlots) * 100) : 0;
+  const staffedSlots = totalSlots;
+  const staffingRate = totalSlots > 0 ? 100 : 0;
 
   // Top 5 chantiers to watch (lowest SPI, active)
   const chantierMetrics = chantiers

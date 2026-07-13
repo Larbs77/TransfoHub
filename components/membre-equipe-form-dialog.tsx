@@ -29,10 +29,11 @@ interface MembreData {
   id: string;
   equipe: string;
   role: string;
-  nom_complet: string;
+  commentaires?: string;
   is_directeur?: boolean;
   charge_pourcentage?: number;
-  ressourceId?: string | null;
+  ressourceId: string;
+  ressource?: { id: string; nom_complet: string } | null;
 }
 
 interface Props {
@@ -52,16 +53,19 @@ export function MembreEquipeFormDialog({
 }: Props) {
   const isEdit = !!membre;
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const initialEquipe = membre?.equipe ?? defaultEquipe ?? "AMOA";
   const [equipe, setEquipe] = useState(initialEquipe);
   const [role, setRole] = useState(
     membre?.role ?? ROLE_PAR_EQUIPE[initialEquipe]?.[0] ?? ROLE_PAR_EQUIPE["AMOA"][0]
   );
-  const [nomComplet, setNomComplet] = useState(membre?.nom_complet ?? "");
+  const [commentaires, setCommentaires] = useState(membre?.commentaires ?? "");
   const [isDirecteur, setIsDirecteur] = useState(membre?.is_directeur ?? false);
-  const [chargePourcentage, setChargePourcentage] = useState(membre?.charge_pourcentage ?? 100);
-  const [ressourceId, setRessourceId] = useState(membre?.ressourceId ?? "__none__");
+  const [chargePourcentage, setChargePourcentage] = useState(
+    membre?.charge_pourcentage ?? 100
+  );
+  const [ressourceId, setRessourceId] = useState(membre?.ressourceId ?? "");
 
   const [ressources, setRessources] = useState<
     { id: string; nom_complet: string; type: string; organisation: string }[]
@@ -70,8 +74,26 @@ export function MembreEquipeFormDialog({
   useEffect(() => {
     if (open) {
       getRessourcesForSelect().then(setRessources);
+      setError(null);
+      if (membre) {
+        setEquipe(membre.equipe);
+        setRole(membre.role);
+        setCommentaires(membre.commentaires ?? "");
+        setIsDirecteur(membre.is_directeur ?? false);
+        setChargePourcentage(membre.charge_pourcentage ?? 100);
+        setRessourceId(membre.ressourceId);
+      } else {
+        setEquipe(defaultEquipe ?? "AMOA");
+        setRole(
+          ROLE_PAR_EQUIPE[defaultEquipe ?? "AMOA"]?.[0] ?? ROLE_PAR_EQUIPE["AMOA"][0]
+        );
+        setCommentaires("");
+        setIsDirecteur(false);
+        setChargePourcentage(100);
+        setRessourceId("");
+      }
     }
-  }, [open]);
+  }, [open, membre, defaultEquipe]);
 
   const roles = ROLE_PAR_EQUIPE[equipe] ?? [];
 
@@ -83,42 +105,41 @@ export function MembreEquipeFormDialog({
     }
   }
 
-  function handleRessourceChange(newRessourceId: string) {
-    setRessourceId(newRessourceId);
-    if (newRessourceId !== "__none__") {
-      const selected = ressources.find((r) => r.id === newRessourceId);
-      if (selected) {
-        setNomComplet(selected.nom_complet);
-      }
-    }
-  }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
-    const ressId = ressourceId !== "__none__" ? ressourceId : null;
-    if (isEdit) {
-      await updateMembreEquipe(membre.id, {
-        equipe,
-        role,
-        nom_complet: nomComplet,
-        is_directeur: isDirecteur,
-        charge_pourcentage: chargePourcentage,
-        ressourceId: ressId,
-      });
-    } else {
-      await createMembreEquipe({
-        chantierId,
-        equipe,
-        role,
-        nom_complet: nomComplet,
-        is_directeur: isDirecteur,
-        charge_pourcentage: chargePourcentage,
-        ressourceId: ressId,
-      });
+    setError(null);
+    if (!ressourceId) {
+      setError("Veuillez sélectionner une ressource.");
+      return;
     }
-    setLoading(false);
-    onOpenChange(false);
+    setLoading(true);
+    try {
+      if (isEdit) {
+        await updateMembreEquipe(membre.id, {
+          equipe,
+          role,
+          commentaires,
+          is_directeur: isDirecteur,
+          charge_pourcentage: chargePourcentage,
+          ressourceId,
+        });
+      } else {
+        await createMembreEquipe({
+          chantierId,
+          equipe,
+          role,
+          commentaires,
+          is_directeur: isDirecteur,
+          charge_pourcentage: chargePourcentage,
+          ressourceId,
+        });
+      }
+      onOpenChange(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors de l'enregistrement.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -162,18 +183,16 @@ export function MembreEquipeFormDialog({
               </Select>
             </div>
           </div>
-          {/* Ressource select */}
+
           <div className="grid gap-1.5">
             <label className="text-sm font-medium">
-              Ressource{" "}
-              <span className="text-muted-foreground font-normal">(optionnel)</span>
+              Ressource <span className="text-destructive">*</span>
             </label>
-            <Select value={ressourceId} onValueChange={handleRessourceChange}>
+            <Select value={ressourceId || undefined} onValueChange={setRessourceId}>
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="Aucune" />
+                <SelectValue placeholder="Sélectionner une ressource" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__none__">Aucune</SelectItem>
                 {ressources.map((r) => (
                   <SelectItem key={r.id} value={r.id}>
                     {r.nom_complet}
@@ -182,15 +201,21 @@ export function MembreEquipeFormDialog({
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">
+              Le membre doit exister dans le catalogue Ressources.
+            </p>
           </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-1.5">
-              <label className="text-sm font-medium">Nom complet</label>
+              <label className="text-sm font-medium">
+                Commentaires{" "}
+                <span className="text-muted-foreground font-normal">(optionnel)</span>
+              </label>
               <Input
-                value={nomComplet}
-                onChange={(e) => setNomComplet(e.target.value)}
-                placeholder="Nom et prénom"
-                required
+                value={commentaires}
+                onChange={(e) => setCommentaires(e.target.value)}
+                placeholder="Notes sur l'affectation…"
               />
             </div>
             <div className="grid gap-1.5">
@@ -205,6 +230,7 @@ export function MembreEquipeFormDialog({
               />
             </div>
           </div>
+
           <label className="flex items-center gap-2 cursor-pointer select-none rounded-md border px-3 py-2 hover:bg-accent/50 transition-colors">
             <input
               type="checkbox"
@@ -215,6 +241,13 @@ export function MembreEquipeFormDialog({
             <Crown className="size-4 text-primary" />
             <span className="text-sm font-medium">Directeur de chantier</span>
           </label>
+
+          {error && (
+            <p className="text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+
           <DialogFooter>
             <Button
               type="button"
@@ -223,7 +256,7 @@ export function MembreEquipeFormDialog({
             >
               Annuler
             </Button>
-            <Button type="submit" disabled={loading}>
+            <Button type="submit" disabled={loading || !ressourceId}>
               {loading && <Loader2 className="size-4 animate-spin" />}
               {isEdit ? "Enregistrer" : "Ajouter"}
             </Button>

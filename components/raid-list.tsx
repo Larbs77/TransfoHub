@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Calendar, Search, Clock, ShieldAlert, Columns3, ChevronLeft, ChevronRight } from "lucide-react";
+import { Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Calendar, Search, Clock, ShieldAlert, Columns3, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -212,6 +213,7 @@ function RaidTable({
   initialCritical?: boolean;
   statusConfigs?: StatusConfigItem[];
 }) {
+  const router = useRouter();
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [search, setSearch] = useState("");
@@ -528,7 +530,11 @@ function RaidTable({
               const critLabel = score ? getCriticiteLabel(score) : null;
 
               return (
-                <TableRow key={r.id}>
+                <TableRow
+                  key={r.id}
+                  className="cursor-pointer hover:bg-muted/50 transition-colors"
+                  onClick={() => router.push(`/raid/${r.id}`)}
+                >
                   {showType && (
                     <TableCell>
                       <Badge
@@ -540,7 +546,9 @@ function RaidTable({
                     </TableCell>
                   )}
                   <TableCell className="text-sm max-w-[250px]">
-                    <div className="truncate font-medium">{r.intitule}</div>
+                    <div className="truncate font-medium text-primary hover:underline">
+                      {r.intitule}
+                    </div>
                     {r.domaine && (
                       <div className="text-[10px] text-muted-foreground truncate">{r.domaine}</div>
                     )}
@@ -586,12 +594,20 @@ function RaidTable({
                       ) : "—"}
                     </TableCell>
                   )}
-                  <TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     <div className="flex gap-1">
-                      <Button variant="ghost" size="icon-xs" onClick={() => onEdit(r)}>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        title="Ouvrir"
+                        onClick={() => router.push(`/raid/${r.id}`)}
+                      >
+                        <ExternalLink className="size-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="icon-xs" title="Modifier (formulaire)" onClick={() => onEdit(r)}>
                         <Pencil className="size-3.5" />
                       </Button>
-                      <Button variant="ghost" size="icon-xs" onClick={() => onDelete(r.id)}>
+                      <Button variant="ghost" size="icon-xs" title="Supprimer" onClick={() => onDelete(r.id)}>
                         <Trash2 className="size-3.5 text-destructive" />
                       </Button>
                     </div>

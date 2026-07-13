@@ -2,6 +2,8 @@ import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { ALL_PAGE_PATHS } from "@/lib/app-pages";
 
+export type RaidCreateScope = "none" | "chantier" | "programme";
+
 export type RoleRecord = {
   id: string;
   code: string;
@@ -11,10 +13,31 @@ export type RoleRecord = {
   is_active: boolean;
   is_system: boolean;
   chantier_scope: string;
+  /** programme | chantier | none — who may create RAID entries */
+  raid_create_scope: RaidCreateScope;
   pages: string[];
   createdAt: Date;
   updatedAt: Date;
 };
+
+export function normalizeRaidCreateScope(value: unknown): RaidCreateScope {
+  if (value === "programme" || value === "chantier" || value === "none") {
+    return value;
+  }
+  return "none";
+}
+
+/**
+ * Effective RAID create permission for a role.
+ * Admin always has programme-level create (full rights).
+ */
+export function resolveRaidCreateScope(
+  role: RoleRecord | null | undefined
+): RaidCreateScope {
+  if (!role || !role.is_active) return "none";
+  if (role.code === "Admin") return "programme";
+  return normalizeRaidCreateScope(role.raid_create_scope);
+}
 
 export function parsePages(pages: unknown): string[] {
   if (Array.isArray(pages)) {
@@ -42,6 +65,7 @@ function mapRole(row: {
   is_active: boolean;
   is_system: boolean;
   chantier_scope: string;
+  raid_create_scope?: string | null;
   pages: unknown;
   createdAt: Date;
   updatedAt: Date;
@@ -55,6 +79,7 @@ function mapRole(row: {
     is_active: row.is_active,
     is_system: row.is_system,
     chantier_scope: row.chantier_scope,
+    raid_create_scope: normalizeRaidCreateScope(row.raid_create_scope),
     pages: parsePages(row.pages),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

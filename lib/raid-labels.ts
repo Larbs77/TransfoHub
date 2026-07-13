@@ -1,6 +1,91 @@
 // ── Types RAID ─────────────────────────────────────────
 export const RAID_TYPES = ["Action", "Risque", "Information", "Décision"] as const;
 
+/** Terminal / closed statuses across RAID types (no further collaboration expected). */
+export const RAID_CLOSED_STATUTS = new Set([
+  "Clôturé",
+  "Clos",
+  "Abandonné",
+  "NA",
+  "Doublon",
+  "Validée",
+  "Refusée",
+  "Matérialisé",
+]);
+
+export function isRaidClosed(statut: string): boolean {
+  return RAID_CLOSED_STATUTS.has(statut);
+}
+
+/**
+ * Leadership roles on a chantier team that may move RAID cards on Kanban
+ * even when not the personal assignee (RAID linked to that chantier).
+ */
+export const KANBAN_LEADERSHIP_ROLES = [
+  "Directeur de chantier",
+  "Directeur de chantier - suppléant",
+  "PMO",
+] as const;
+
+export function isKanbanLeadershipRole(
+  role: string,
+  is_directeur?: boolean
+): boolean {
+  if (is_directeur) return true;
+  const r = (role || "").trim();
+  if (!r) return false;
+  if (
+    (KANBAN_LEADERSHIP_ROLES as readonly string[]).some(
+      (x) => x.toLowerCase() === r.toLowerCase()
+    )
+  ) {
+    return true;
+  }
+  if (/directeur\s+de\s+chantier/i.test(r)) return true;
+  if (/suppl[eé]ant/i.test(r) && /directeur|chantier/i.test(r)) return true;
+  if (/^pmo(\s|$|[-_])/i.test(r) || r.toLowerCase() === "pmo") return true;
+  return false;
+}
+
+/** Pure client-side check for Kanban drag (no Prisma). */
+export function canMoveRaidKanbanClient(
+  item: {
+    responsableRessourceId: string | null;
+    chantierId: string | null;
+    equipeId?: string | null;
+  },
+  ctx: {
+    ressourceId: string | null;
+    isProgramme: boolean;
+    leadershipChantierIds: string[];
+    institutionalEquipeId?: string | null;
+  }
+): boolean {
+  if (ctx.isProgramme) return true;
+  if (
+    ctx.ressourceId &&
+    item.responsableRessourceId &&
+    item.responsableRessourceId === ctx.ressourceId
+  ) {
+    return true;
+  }
+  // Same institutional team as the RAID assignment (off-chantier assignees)
+  if (
+    ctx.institutionalEquipeId &&
+    item.equipeId &&
+    item.equipeId === ctx.institutionalEquipeId
+  ) {
+    return true;
+  }
+  if (
+    item.chantierId &&
+    ctx.leadershipChantierIds.includes(item.chantierId)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export const RAID_TYPE_LABELS: Record<string, string> = {
   Action: "Action",
   Risque: "Risque",

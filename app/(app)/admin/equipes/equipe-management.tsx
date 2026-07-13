@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import {
   Plus,
   Pencil,
@@ -9,6 +10,9 @@ import {
   UsersRound,
   ToggleLeft,
   ToggleRight,
+  Building2,
+  FolderKanban,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,12 +33,19 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   createEquipe,
   updateEquipe,
   deleteEquipe,
   setEquipeActive,
 } from "./actions";
+import {
+  EQUIPE_TYPE_DESCRIPTIONS,
+  EQUIPE_TYPE_LABELS,
+  EQUIPE_TYPES,
+  type EquipeType,
+} from "@/lib/equipe-types";
 
 export type EquipeRow = {
   id: string;
@@ -42,7 +53,13 @@ export type EquipeRow = {
   description: string;
   position: number;
   is_active: boolean;
+  type: EquipeType;
+  chantierId: string | null;
+  chantier: { id: string; code: string; nom: string } | null;
   comiteCount: number;
+  hierarchieCount: number;
+  fonctionnelCount: number;
+  raidCount: number;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -61,6 +78,9 @@ export function EquipeManagement({
 }) {
   const [rows, setRows] = useState(initialRows);
   const [search, setSearch] = useState("");
+  const [tab, setTab] = useState<"institutionnelle" | "fonctionnelle">(
+    "institutionnelle"
+  );
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -70,19 +90,36 @@ export function EquipeManagement({
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
-      [r.name, r.description].join(" ").toLowerCase().includes(q)
-    );
-  }, [rows, search]);
+    return rows.filter((r) => {
+      if (r.type !== tab) return false;
+      if (!q) return true;
+      return [r.name, r.description, r.chantier?.code, r.chantier?.nom]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [rows, search, tab]);
+
+  const counts = useMemo(
+    () => ({
+      institutionnelle: rows.filter(
+        (r) => r.type === EQUIPE_TYPES.institutionnelle
+      ).length,
+      fonctionnelle: rows.filter((r) => r.type === EQUIPE_TYPES.fonctionnelle)
+        .length,
+    }),
+    [rows]
+  );
 
   function openCreate() {
     setEditing(null);
     setError("");
+    const inst = rows.filter((r) => r.type === EQUIPE_TYPES.institutionnelle);
     setForm({
       ...emptyForm,
       position:
-        rows.length > 0 ? Math.max(...rows.map((r) => r.position)) + 1 : 0,
+        inst.length > 0 ? Math.max(...inst.map((r) => r.position)) + 1 : 0,
     });
     setDialogOpen(true);
   }
@@ -146,6 +183,9 @@ export function EquipeManagement({
     });
   }
 
+  const isFunctionalEdit =
+    editing?.type === EQUIPE_TYPES.fonctionnelle;
+
   return (
     <div className="space-y-4">
       <Card>
@@ -161,131 +201,96 @@ export function EquipeManagement({
               <CardTitle className="text-2xl text-primary">
                 Gestion des équipes
               </CardTitle>
-              <CardDescription className="mt-1">
-                Catalogue des équipes / unités organisationnelles de la banque.
-                Utilisé comme propriétaire des types de comités (Paramètres
-                comités).
+              <CardDescription className="mt-1 max-w-2xl">
+                Deux natures d&apos;équipes :{" "}
+                <strong>Institutionnelle</strong> (organisation banque) et{" "}
+                <strong>Fonctionnelle</strong> (équipe programme d&apos;un
+                chantier, créée automatiquement).
               </CardDescription>
             </div>
             <CardAction>
-              <Button onClick={openCreate}>
-                <Plus className="size-4" />
-                Nouvelle équipe
-              </Button>
+              {tab === "institutionnelle" && (
+                <Button onClick={openCreate}>
+                  <Plus className="size-4" />
+                  Nouvelle équipe institutionnelle
+                </Button>
+              )}
             </CardAction>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="relative max-w-md">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="pl-9"
-              placeholder="Rechercher une équipe…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
+          <Tabs
+            value={tab}
+            onValueChange={(v) =>
+              setTab(v as "institutionnelle" | "fonctionnelle")
+            }
+          >
+            <TabsList className="h-auto flex-wrap gap-1 p-1">
+              <TabsTrigger value="institutionnelle" className="gap-2">
+                <Building2 className="size-3.5" />
+                Institutionnelles
+                <Badge variant="secondary" className="text-[10px]">
+                  {counts.institutionnelle}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger value="fonctionnelle" className="gap-2">
+                <FolderKanban className="size-3.5" />
+                Fonctionnelles (chantiers)
+                <Badge variant="secondary" className="text-[10px]">
+                  {counts.fonctionnelle}
+                </Badge>
+              </TabsTrigger>
+            </TabsList>
 
-          {error && !dialogOpen && !deleteTarget && (
-            <p className="text-sm text-destructive">{error}</p>
-          )}
+            <p className="mt-3 text-sm text-muted-foreground">
+              {EQUIPE_TYPE_DESCRIPTIONS[tab]}
+            </p>
 
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2.5 font-medium">Ordre</th>
-                  <th className="px-3 py-2.5 font-medium">Nom</th>
-                  <th className="px-3 py-2.5 font-medium">Description</th>
-                  <th className="px-3 py-2.5 font-medium">Comités</th>
-                  <th className="px-3 py-2.5 font-medium">Statut</th>
-                  <th className="px-3 py-2.5 font-medium text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={6}
-                      className="px-3 py-10 text-center text-muted-foreground"
-                    >
-                      Aucune équipe{search ? " pour cette recherche" : ""}.
-                    </td>
-                  </tr>
-                ) : (
-                  filtered.map((row) => (
-                    <tr
-                      key={row.id}
-                      className="border-t transition-colors hover:bg-muted/30"
-                    >
-                      <td className="px-3 py-2.5 tabular-nums text-muted-foreground">
-                        {row.position}
-                      </td>
-                      <td className="px-3 py-2.5 font-medium">{row.name}</td>
-                      <td className="px-3 py-2.5 text-muted-foreground">
-                        {row.description || "—"}
-                      </td>
-                      <td className="px-3 py-2.5 tabular-nums">
-                        {row.comiteCount}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <Badge
-                          variant={row.is_active ? "default" : "secondary"}
-                          className={
-                            row.is_active
-                              ? "bg-emerald-600/90 hover:bg-emerald-600/90"
-                              : ""
-                          }
-                        >
-                          {row.is_active ? "Active" : "Inactive"}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button
-                            type="button"
-                            size="icon-sm"
-                            variant="ghost"
-                            title={row.is_active ? "Désactiver" : "Activer"}
-                            disabled={isPending}
-                            onClick={() => handleToggle(row)}
-                          >
-                            {row.is_active ? (
-                              <ToggleRight className="size-4 text-emerald-600" />
-                            ) : (
-                              <ToggleLeft className="size-4 text-muted-foreground" />
-                            )}
-                          </Button>
-                          <Button
-                            type="button"
-                            size="icon-sm"
-                            variant="ghost"
-                            title="Modifier"
-                            onClick={() => openEdit(row)}
-                          >
-                            <Pencil className="size-4" />
-                          </Button>
-                          <Button
-                            type="button"
-                            size="icon-sm"
-                            variant="ghost"
-                            title="Supprimer"
-                            className="text-destructive hover:text-destructive"
-                            onClick={() => {
-                              setError("");
-                              setDeleteTarget(row);
-                            }}
-                          >
-                            <Trash2 className="size-4" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+            <div className="relative mt-4 max-w-md">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className="pl-9"
+                placeholder={
+                  tab === "institutionnelle"
+                    ? "Rechercher une équipe institutionnelle…"
+                    : "Rechercher une équipe chantier…"
+                }
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+
+            {error && !dialogOpen && !deleteTarget && (
+              <p className="text-sm text-destructive">{error}</p>
+            )}
+
+            <TabsContent value="institutionnelle" className="mt-4">
+              <EquipeTable
+                rows={filtered}
+                kind="institutionnelle"
+                isPending={isPending}
+                onToggle={handleToggle}
+                onEdit={openEdit}
+                onDelete={(row) => {
+                  setError("");
+                  setDeleteTarget(row);
+                }}
+              />
+            </TabsContent>
+            <TabsContent value="fonctionnelle" className="mt-4">
+              <EquipeTable
+                rows={filtered}
+                kind="fonctionnelle"
+                isPending={isPending}
+                onToggle={handleToggle}
+                onEdit={openEdit}
+                onDelete={(row) => {
+                  setError("");
+                  setDeleteTarget(row);
+                }}
+              />
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
 
@@ -293,13 +298,30 @@ export function EquipeManagement({
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {editing ? "Modifier l'équipe" : "Nouvelle équipe"}
+              {editing
+                ? isFunctionalEdit
+                  ? "Équipe fonctionnelle"
+                  : "Modifier l'équipe institutionnelle"
+                : "Nouvelle équipe institutionnelle"}
             </DialogTitle>
           </DialogHeader>
           <div className="grid gap-4">
+            {isFunctionalEdit && editing?.chantier && (
+              <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Chantier lié
+                </p>
+                <Link
+                  href={`/chantiers/${editing.chantier.id}`}
+                  className="font-medium text-primary hover:underline"
+                >
+                  {editing.chantier.code} — {editing.chantier.nom}
+                </Link>
+              </div>
+            )}
             <div className="grid gap-1.5">
               <label className="text-sm font-medium">
-                Nom <span className="text-destructive">*</span>
+                Nom {!isFunctionalEdit && <span className="text-destructive">*</span>}
               </label>
               <Input
                 value={form.name}
@@ -307,8 +329,15 @@ export function EquipeManagement({
                   setForm((f) => ({ ...f, name: e.target.value }))
                 }
                 placeholder="ex. Bureau Programme"
-                required
+                required={!isFunctionalEdit}
+                disabled={!!isFunctionalEdit}
               />
+              {isFunctionalEdit && (
+                <p className="text-[11px] text-muted-foreground">
+                  Le nom suit le code / intitulé du chantier (mis à jour
+                  automatiquement).
+                </p>
+              )}
             </div>
             <div className="grid gap-1.5">
               <label className="text-sm font-medium">Description</label>
@@ -318,39 +347,43 @@ export function EquipeManagement({
                 onChange={(e) =>
                   setForm((f) => ({ ...f, description: e.target.value }))
                 }
-                placeholder="Rôle de l'équipe dans la banque…"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <label className="text-sm font-medium">Ordre d&apos;affichage</label>
-              <Input
-                type="number"
-                min={0}
-                value={form.position}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    position: Number(e.target.value) || 0,
-                  }))
+                placeholder={
+                  isFunctionalEdit
+                    ? "Notes sur l'équipe programme…"
+                    : "Rôle de l'équipe dans la banque…"
                 }
               />
             </div>
+            {!isFunctionalEdit && (
+              <div className="grid gap-1.5">
+                <label className="text-sm font-medium">
+                  Ordre d&apos;affichage
+                </label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={form.position}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      position: Number(e.target.value) || 0,
+                    }))
+                  }
+                />
+              </div>
+            )}
             <label className="flex items-center gap-2 cursor-pointer select-none rounded-md border px-3 py-2 hover:bg-accent/50 transition-colors">
               <input
                 type="checkbox"
+                className="size-4 rounded border"
                 checked={form.is_active}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, is_active: e.target.checked }))
                 }
-                className="size-4 rounded border-input accent-primary"
               />
-              <span className="text-sm font-medium">
-                Active (proposée comme propriétaire de comité)
-              </span>
+              <span className="text-sm font-medium">Équipe active</span>
             </label>
-            {error && dialogOpen && (
-              <p className="text-sm text-destructive">{error}</p>
-            )}
+            {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
           <DialogFooter>
             <DialogClose asChild>
@@ -358,12 +391,8 @@ export function EquipeManagement({
                 Annuler
               </Button>
             </DialogClose>
-            <Button
-              type="button"
-              disabled={isPending || !form.name.trim()}
-              onClick={handleSave}
-            >
-              {editing ? "Enregistrer" : "Créer"}
+            <Button type="button" disabled={isPending} onClick={handleSave}>
+              Enregistrer
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -371,42 +400,211 @@ export function EquipeManagement({
 
       <Dialog
         open={!!deleteTarget}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Supprimer l&apos;équipe</DialogTitle>
+            <DialogTitle>Supprimer l&apos;équipe ?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Confirmez la suppression de{" "}
-            <span className="font-medium text-foreground">
-              {deleteTarget?.name}
-            </span>
-            . Impossible s&apos;il reste des types de comités liés.
+            Supprimer « {deleteTarget?.name} » ? Cette action est irréversible.
           </p>
-          {error && deleteTarget && (
-            <p className="text-sm text-destructive">{error}</p>
-          )}
+          {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>
             <Button
-              type="button"
               variant="outline"
-              disabled={isPending}
               onClick={() => setDeleteTarget(null)}
+              disabled={isPending}
             >
               Annuler
             </Button>
             <Button
-              type="button"
               variant="destructive"
-              disabled={isPending}
               onClick={handleDelete}
+              disabled={isPending}
             >
               Supprimer
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function EquipeTable({
+  rows,
+  kind,
+  isPending,
+  onToggle,
+  onEdit,
+  onDelete,
+}: {
+  rows: EquipeRow[];
+  kind: EquipeType;
+  isPending: boolean;
+  onToggle: (row: EquipeRow) => void;
+  onEdit: (row: EquipeRow) => void;
+  onDelete: (row: EquipeRow) => void;
+}) {
+  const isFunc = kind === EQUIPE_TYPES.fonctionnelle;
+
+  return (
+    <div className="overflow-x-auto rounded-lg border">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+          <tr>
+            {!isFunc && <th className="px-3 py-2.5 font-medium">Ordre</th>}
+            <th className="px-3 py-2.5 font-medium">Nom</th>
+            {isFunc && (
+              <th className="px-3 py-2.5 font-medium">Chantier</th>
+            )}
+            <th className="px-3 py-2.5 font-medium">Description</th>
+            {isFunc ? (
+              <>
+                <th className="px-3 py-2.5 font-medium">Membres</th>
+                <th className="px-3 py-2.5 font-medium">RAID</th>
+              </>
+            ) : (
+              <>
+                <th className="px-3 py-2.5 font-medium">Ressources</th>
+                <th className="px-3 py-2.5 font-medium">Comités</th>
+              </>
+            )}
+            <th className="px-3 py-2.5 font-medium">Type</th>
+            <th className="px-3 py-2.5 font-medium">Statut</th>
+            <th className="px-3 py-2.5 font-medium text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td
+                colSpan={isFunc ? 8 : 8}
+                className="px-3 py-10 text-center text-muted-foreground"
+              >
+                Aucune équipe {EQUIPE_TYPE_LABELS[kind].toLowerCase()}.
+                {isFunc &&
+                  " Les équipes fonctionnelles sont créées automatiquement avec chaque chantier."}
+              </td>
+            </tr>
+          ) : (
+            rows.map((row) => (
+              <tr
+                key={row.id}
+                className="border-t transition-colors hover:bg-muted/30"
+              >
+                {!isFunc && (
+                  <td className="px-3 py-2.5 tabular-nums text-muted-foreground">
+                    {row.position}
+                  </td>
+                )}
+                <td className="px-3 py-2.5 font-medium">{row.name}</td>
+                {isFunc && (
+                  <td className="px-3 py-2.5">
+                    {row.chantier ? (
+                      <Link
+                        href={`/chantiers/${row.chantier.id}`}
+                        className="inline-flex items-center gap-1 text-primary hover:underline"
+                      >
+                        <span className="font-mono text-xs">
+                          {row.chantier.code}
+                        </span>
+                        <ExternalLink className="size-3 opacity-60" />
+                      </Link>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                )}
+                <td className="px-3 py-2.5 text-muted-foreground max-w-[240px] truncate">
+                  {row.description || "—"}
+                </td>
+                {isFunc ? (
+                  <>
+                    <td className="px-3 py-2.5 tabular-nums">
+                      {row.fonctionnelCount}
+                    </td>
+                    <td className="px-3 py-2.5 tabular-nums">{row.raidCount}</td>
+                  </>
+                ) : (
+                  <>
+                    <td className="px-3 py-2.5 tabular-nums">
+                      {row.hierarchieCount}
+                    </td>
+                    <td className="px-3 py-2.5 tabular-nums">
+                      {row.comiteCount}
+                    </td>
+                  </>
+                )}
+                <td className="px-3 py-2.5">
+                  <Badge
+                    variant="outline"
+                    className={
+                      isFunc
+                        ? "border-teal-500/40 text-teal-800 dark:text-teal-200"
+                        : "border-primary/30 text-primary"
+                    }
+                  >
+                    {EQUIPE_TYPE_LABELS[row.type]}
+                  </Badge>
+                </td>
+                <td className="px-3 py-2.5">
+                  <Badge
+                    variant={row.is_active ? "default" : "secondary"}
+                    className={
+                      row.is_active
+                        ? "bg-emerald-600/90 hover:bg-emerald-600/90"
+                        : ""
+                    }
+                  >
+                    {row.is_active ? "Active" : "Inactive"}
+                  </Badge>
+                </td>
+                <td className="px-3 py-2.5">
+                  <div className="flex items-center justify-end gap-1">
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      title={row.is_active ? "Désactiver" : "Activer"}
+                      disabled={isPending}
+                      onClick={() => onToggle(row)}
+                    >
+                      {row.is_active ? (
+                        <ToggleRight className="size-4 text-emerald-600" />
+                      ) : (
+                        <ToggleLeft className="size-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      title="Modifier"
+                      onClick={() => onEdit(row)}
+                    >
+                      <Pencil className="size-4" />
+                    </Button>
+                    {!isFunc && (
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="ghost"
+                        title="Supprimer"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => onDelete(row)}
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }

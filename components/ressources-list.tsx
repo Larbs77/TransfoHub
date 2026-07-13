@@ -74,9 +74,21 @@ interface RessourceWithStats {
 
 interface Props {
   ressources: RessourceWithStats[];
-  equipes?: { id: string; name: string; is_active: boolean }[];
+  equipes?: { id: string; name: string; is_active: boolean; type?: string }[];
   activeRoles?: { code: string; label: string }[];
   canCreateAccount?: boolean;
+}
+
+function resolveEquipeHierarchieName(
+  r: RessourceWithStats,
+  equipes: { id: string; name: string }[]
+): string {
+  if (r.equipeHierarchie?.name?.trim()) return r.equipeHierarchie.name.trim();
+  if (r.equipeHierarchieId) {
+    const fromCatalog = equipes.find((e) => e.id === r.equipeHierarchieId);
+    if (fromCatalog?.name?.trim()) return fromCatalog.name.trim();
+  }
+  return "—";
 }
 
 type ViewMode = "grid" | "table";
@@ -256,7 +268,7 @@ export function RessourcesList({
           r.nom_complet.toLowerCase().includes(q) ||
           r.email.toLowerCase().includes(q) ||
           r.organisation.toLowerCase().includes(q) ||
-          (r.equipeHierarchie?.name ?? "").toLowerCase().includes(q) ||
+          resolveEquipeHierarchieName(r, equipes).toLowerCase().includes(q) ||
           (r.user?.username ?? "").toLowerCase().includes(q)
       );
     }
@@ -298,7 +310,16 @@ export function RessourcesList({
     }
 
     return result;
-  }, [ressources, search, filterType, filterOrg, filterActif, sortField, sortDir]);
+  }, [
+    ressources,
+    search,
+    filterType,
+    filterOrg,
+    filterActif,
+    sortField,
+    sortDir,
+    equipes,
+  ]);
 
   const totalPages =
     pageSize === 0 ? 1 : Math.ceil(filtered.length / pageSize);
@@ -505,10 +526,25 @@ export function RessourcesList({
                       {r.profil?.nom || "—"}
                     </TableCell>
                     <TableCell className="text-sm">
-                      <div>{r.equipeHierarchie?.name || "—"}</div>
+                      <div>{resolveEquipeHierarchieName(r, equipes)}</div>
                       {(r.equipesFonctionnelles?.length ?? 0) > 0 && (
-                        <div className="text-[11px] text-muted-foreground">
-                          +{r.equipesFonctionnelles!.length} fonct.
+                        <div
+                          className="text-[11px] text-muted-foreground truncate max-w-[200px]"
+                          title={r.equipesFonctionnelles!
+                            .map((l) => l.equipe?.name)
+                            .filter(Boolean)
+                            .join(", ")}
+                        >
+                          {(() => {
+                            const names = r.equipesFonctionnelles!
+                              .map((l) => l.equipe?.name?.trim())
+                              .filter(Boolean) as string[];
+                            if (names.length === 0) {
+                              return `+${r.equipesFonctionnelles!.length} fonct.`;
+                            }
+                            if (names.length <= 2) return names.join(", ");
+                            return `${names.slice(0, 2).join(", ")} (+${names.length - 2})`;
+                          })()}
                         </div>
                       )}
                     </TableCell>

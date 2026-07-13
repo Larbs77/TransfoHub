@@ -31,6 +31,8 @@ async function main() {
   await prisma.appRole.deleteMany();
 
   // Rôles applicatifs par défaut
+  // raid_create_scope: none by default (grant explicitly in admin UI).
+  // Admin always resolves to programme at runtime; seed stores programme for clarity.
   const defaultRoles = [
     {
       code: "Admin",
@@ -39,6 +41,7 @@ async function main() {
       color: "#dc2626",
       is_system: true,
       chantier_scope: "all",
+      raid_create_scope: "programme",
       pages: DEFAULT_ROLE_PAGES.Admin ?? ALL_PAGE_PATHS,
     },
     {
@@ -48,6 +51,7 @@ async function main() {
       color: "#2563eb",
       is_system: true,
       chantier_scope: "all",
+      raid_create_scope: "none",
       pages: DEFAULT_ROLE_PAGES.Programme_Office,
     },
     {
@@ -57,6 +61,7 @@ async function main() {
       color: "#059669",
       is_system: true,
       chantier_scope: "assigned",
+      raid_create_scope: "none",
       pages: DEFAULT_ROLE_PAGES.PMO_Chantier,
     },
     {
@@ -66,6 +71,7 @@ async function main() {
       color: "#7c3aed",
       is_system: true,
       chantier_scope: "none",
+      raid_create_scope: "none",
       pages: DEFAULT_ROLE_PAGES.Workforce_Manager,
     },
   ];
@@ -114,7 +120,7 @@ async function main() {
   const equipeByName: Record<string, string> = {};
   for (const eq of equipesData) {
     const created = await prisma.equipe.create({
-      data: { ...eq, is_active: true },
+      data: { ...eq, is_active: true, type: "institutionnelle" },
     });
     equipeByName[eq.name] = created.id;
   }
@@ -541,19 +547,20 @@ async function main() {
   }
   console.log(`Budget data imported for ${budgetRows.length} chantiers from Excel.`);
 
-  const createdMembres: { id: string; nom: string; chantierId: string; ressourceId: string | null }[] = [];
+  // Only seed team members that exist as Ressources (identity always from Ressource).
+  const createdMembres: { id: string; nom: string; chantierId: string; ressourceId: string }[] = [];
   for (const m of equipeMembres) {
     const chantierId = codeToId[m.code];
-    if (chantierId) {
-      const ressourceId = createdRessources[m.nom] ?? null;
+    const ressourceId = createdRessources[m.nom];
+    if (chantierId && ressourceId) {
       const membre = await prisma.membreEquipe.create({
         data: {
           chantierId,
           equipe: m.equipe,
           role: m.role,
-          nom_complet: m.nom,
           charge_pourcentage: m.charge,
           ressourceId,
+          commentaires: "",
         },
       });
       createdMembres.push({ id: membre.id, nom: m.nom, chantierId, ressourceId });
@@ -561,8 +568,7 @@ async function main() {
   }
 
   // Sample weekly time entries (SaisieTemps) for linked resources — Jan to Mar 2026
-  const membresWithRessource = createdMembres.filter((m) => m.ressourceId);
-  for (const m of membresWithRessource) {
+  for (const m of createdMembres) {
     // Generate 10 weeks of data (Jan 5 to Mar 9, 2026 — all Mondays)
     const mondays = [
       "2026-01-05", "2026-01-12", "2026-01-19", "2026-01-26",
@@ -576,7 +582,7 @@ async function main() {
       const jours = Math.min(5, Math.max(0.5, base * 0.9));
       await prisma.saisieTemps.create({
         data: {
-          ressourceId: m.ressourceId!,
+          ressourceId: m.ressourceId,
           chantierId: m.chantierId,
           date_lundi: new Date(monday),
           jours_travailles: Math.round(jours * 2) / 2, // round to 0.5
@@ -961,7 +967,7 @@ async function main() {
   });
 
   console.log(
-    `Seed terminé : ${profilsData.length} profils, 46 chantiers, 8 RMDs, ${createdMembres.length} membres équipe, ${ressourcesData.length} ressources, ${membresWithRessource.length * 10} saisies temps, ${totalJalons} jalons, ${totalRaid} RAID, ${totalAdherences} adhérences, ${totalQuestions} questions consultation, admin user ready.`
+    `Seed terminé : ${profilsData.length} profils, 46 chantiers, 8 RMDs, ${createdMembres.length} membres équipe, ${ressourcesData.length} ressources, ${createdMembres.length * 10} saisies temps, ${totalJalons} jalons, ${totalRaid} RAID, ${totalAdherences} adhérences, ${totalQuestions} questions consultation, admin user ready.`
   );
 }
 

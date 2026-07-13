@@ -125,8 +125,12 @@ export function RessourceCard({
             <div>
               <div className="text-sm font-medium flex items-center justify-center gap-1 min-h-[1.75rem]">
                 <Building2 className="size-4 text-muted-foreground shrink-0" />
-                <span className="truncate">
-                  {ressource.equipeHierarchie?.name ||
+                <span className="truncate" title={
+                  ressource.equipeHierarchie?.name ||
+                  ressource.organisation ||
+                  undefined
+                }>
+                  {ressource.equipeHierarchie?.name?.trim() ||
                     ressource.organisation ||
                     "—"}
                 </span>

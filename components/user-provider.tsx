@@ -18,6 +18,8 @@ interface UserContextType {
   allowedPages: string[];
   ressourceId: string | null;
   dashboardType: DashboardType;
+  /** programme | chantier | none — create RAID permission from role */
+  raidCreateScope: "none" | "chantier" | "programme";
 }
 
 const UserContext = createContext<UserContextType | null>(null);
@@ -50,4 +52,10 @@ export function useCanAccessPage(path: string) {
   return allowedPages.some(
     (p) => p !== "/" && (path === p || path.startsWith(p + "/"))
   );
+}
+
+/** Whether the current role may create new RAID entries. */
+export function useCanCreateRaid() {
+  const { raidCreateScope } = useUser();
+  return raidCreateScope === "programme" || raidCreateScope === "chantier";
 }

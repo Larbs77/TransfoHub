@@ -22,8 +22,11 @@ interface Membre {
   id: string;
   equipe: string;
   role: string;
-  nom_complet: string;
+  commentaires?: string;
   is_directeur?: boolean;
+  charge_pourcentage?: number;
+  ressourceId: string;
+  ressource?: { id: string; nom_complet: string } | null;
 }
 
 interface RmdInfo {
@@ -38,6 +41,10 @@ interface Props {
 }
 
 const EQUIPE_ORDER = ["PMO", "AMOA", "MOE", "Métiers", "Sécurité", "EI"];
+
+function membreDisplayName(m: Membre): string {
+  return m.ressource?.nom_complet?.trim() || "—";
+}
 
 export function EquipeTable({ membres, chantierId, directeur, rmds }: Props) {
   const [addOpen, setAddOpen] = useState(false);
@@ -54,12 +61,15 @@ export function EquipeTable({ membres, chantierId, directeur, rmds }: Props) {
 
   // All equipes (show all tabs, even empty ones)
   const allEquipes = EQUIPE_ORDER;
-  const firstWithMembers = allEquipes.find((e) => (grouped.get(e)?.length ?? 0) > 0) ?? allEquipes[0];
+  const firstWithMembers =
+    allEquipes.find((e) => (grouped.get(e)?.length ?? 0) > 0) ?? allEquipes[0];
   const [activeTab, setActiveTab] = useState(firstWithMembers);
 
   // Find directeur from membres
   const directeurMembre = membres.find((m) => m.is_directeur);
-  const directeurName = directeurMembre?.nom_complet ?? directeur;
+  const directeurName = directeurMembre
+    ? membreDisplayName(directeurMembre)
+    : directeur;
 
   return (
     <div className="space-y-4">
@@ -67,7 +77,8 @@ export function EquipeTable({ membres, chantierId, directeur, rmds }: Props) {
         <div className="flex items-center gap-2">
           <Users className="size-4 text-muted-foreground" />
           <span className="text-sm text-muted-foreground">
-            {membres.length} membre(s) dans {allEquipes.filter((e) => grouped.has(e)).length} équipe(s)
+            {membres.length} membre(s) dans{" "}
+            {allEquipes.filter((e) => grouped.has(e)).length} équipe(s)
           </span>
         </div>
         <Button size="sm" onClick={() => setAddOpen(true)}>
@@ -76,7 +87,11 @@ export function EquipeTable({ membres, chantierId, directeur, rmds }: Props) {
         </Button>
       </div>
 
-      <Tabs defaultValue={firstWithMembers} onValueChange={setActiveTab} className="space-y-3">
+      <Tabs
+        defaultValue={firstWithMembers}
+        onValueChange={setActiveTab}
+        className="space-y-3"
+      >
         <TabsList className="h-auto p-1 gap-1">
           {allEquipes.map((equipe) => {
             const count = grouped.get(equipe)?.length ?? 0;
@@ -122,7 +137,8 @@ export function EquipeTable({ membres, chantierId, directeur, rmds }: Props) {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Rôle</TableHead>
-                        <TableHead>Nom complet</TableHead>
+                        <TableHead>Ressource</TableHead>
+                        <TableHead>Commentaires</TableHead>
                         <TableHead className="w-[80px]">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -139,13 +155,16 @@ export function EquipeTable({ membres, chantierId, directeur, rmds }: Props) {
                           </TableCell>
                           <TableCell className="font-medium">
                             <div className="flex items-center gap-1.5">
-                              {m.nom_complet}
+                              {membreDisplayName(m)}
                               {m.is_directeur && (
                                 <span className="text-[10px] font-semibold text-primary bg-primary/10 rounded-full px-1.5 py-0.5">
                                   Directeur
                                 </span>
                               )}
                             </div>
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground max-w-[220px] truncate">
+                            {m.commentaires?.trim() || "—"}
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-1">
@@ -189,7 +208,7 @@ export function EquipeTable({ membres, chantierId, directeur, rmds }: Props) {
           open={addOpen}
           onOpenChange={(o) => !o && setAddOpen(false)}
           chantierId={chantierId}
-          defaultEquipe={activeTab}
+          defaultEquipe={activeTab !== "organigramme" ? activeTab : undefined}
         />
       )}
 

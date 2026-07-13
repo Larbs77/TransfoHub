@@ -184,10 +184,8 @@ async function purgeTableData(table: DataTableKey): Promise<number> {
       where: { ressourceId: { not: null } },
       data: { ressourceId: null },
     });
-    await tx.membreEquipe.updateMany({
-      where: { ressourceId: { not: null } },
-      data: { ressourceId: null },
-    });
+    // Team membership requires a Ressource — drop assignments when purging resources
+    await tx.membreEquipe.deleteMany({});
     await tx.raid.updateMany({
       where: { responsableRessourceId: { not: null } },
       data: { responsableRessourceId: null },

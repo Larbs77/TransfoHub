@@ -146,6 +146,52 @@ Prior tags: `v0.3.1` (BOA brand/KPI), `v0.3.0` (roles/profiles/dark), `v0.2.0` (
 
 ---
 
+## Equipe institutionnelle vs fonctionnelle (2026-07-13)
+
+- **Institutionnelle** (`type=institutionnelle`): org bank; `Ressource.equipeHierarchieId`; comité owners; admin CRUD.
+- **Fonctionnelle** (`type=fonctionnelle`): 1:1 with Chantier (`Equipe.chantierId`); auto-created on chantier create; members = `MembreEquipe` (synced to `RessourceEquipeFonctionnelle`).
+- **RAID.equipeId**: if assignee is on RAID chantier team → functional equipe; else hierarchy institutional.
+- Admin UI `/admin/equipes`: tabs Institutionnelles | Fonctionnelles.
+- Helpers: `lib/equipe-types.ts`, `lib/equipe-chantier.ts`. Stamp: `equipe-institutionnelle-fonctionnelle-v1`.
+- Migration: `20260713180000_equipe_institutionnelle_fonctionnelle`.
+
+---
+
+## RAID collaborative detail (2026-07-13 · Optimisation-Fonctionnelle-V1.0)
+
+- Route: `/raid/[id]` — click row in RAID list / Mon Tableau de bord.
+- Models: `RaidComment`, `RaidAuditLog`; Raid has `equipeId`, `createdByUserId/Name`.
+- Collaboration if: assignee · chantier MembreEquipe · same Equipe as RAID.equipeId · Admin/Programme.
+- Actions: comment (no auto-assign), status change (**comment mandatory**), assign, auto-assign me.
+- Unassigned + non-comment action → auto-assign actor.
+- UI: circulation timeline dialog + audit table; BOA navy/teal hero.
+- Stamp: `raid-collaboration-v1`. Migration: `20260713160000_raid_collaboration`.
+
+---
+
+## RAID create permission (2026-07-13 · Optimisation-Fonctionnelle-V1.0)
+
+- `AppRole.raid_create_scope`: `none` | `chantier` | `programme` (default **`none`** = Non autorisé).
+- Labels UI: Non autorisé · Niveau Chantier · Niveau Programme.
+- Admin always effective **programme** at runtime.
+- Enforced in `createRaid` via `requireRaidCreateAccess`; Add buttons hidden when none.
+- Niveau Chantier: must pick a chantier where user is `MembreEquipe` via their Ressource.
+- Migration: `20260713140000_app_role_raid_create_scope`. Stamp: `raid-create-scope-v1`.
+
+---
+
+## MembreEquipe ↔ Ressource (2026-07-13 · Optimisation-Fonctionnelle-V1.0)
+
+- Every chantier team member **must** reference a `Ressource` (`ressourceId` required).
+- Free-text `nom_complet` removed from `MembreEquipe`; display name = `ressource.nom_complet`.
+- Optional `commentaires` field replaces identity free-text on the form.
+- Orphans without ressource deleted in migration `20260713120000_membre_equipe_require_ressource`.
+- UI: Chantier → Équipe form selects a ressource (mandatory) + optional comments.
+- Stamp: `membre-equipe-ressource-required-v1`.
+- Purge Ressources also deletes all `MembreEquipe` rows (no longer nullifies FK).
+
+---
+
 ## Suggested next work (open)
 
 - Wire product emails (alerts, comité invites) through `sendMail()`.  

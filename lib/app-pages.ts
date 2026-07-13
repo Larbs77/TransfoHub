@@ -76,6 +76,28 @@ export const CHANTIER_SCOPES = [
 
 export type ChantierScope = (typeof CHANTIER_SCOPES)[number]["value"];
 
+/** Permission to create RAID entries (role management). */
+export const RAID_CREATE_SCOPES = [
+  {
+    value: "none",
+    label: "Non autorisé",
+    description: "L'utilisateur ne peut pas créer d'entrées RAID",
+  },
+  {
+    value: "chantier",
+    label: "Niveau Chantier",
+    description:
+      "Peut créer des entrées RAID uniquement pour les chantiers où il est rattaché en tant que ressource",
+  },
+  {
+    value: "programme",
+    label: "Niveau Programme",
+    description: "Peut créer des entrées RAID pour tous les chantiers",
+  },
+] as const;
+
+export type RaidCreateScope = (typeof RAID_CREATE_SCOPES)[number]["value"];
+
 /** Default page sets for the four built-in roles (migration seed). */
 export const DEFAULT_ROLE_PAGES: Record<string, string[]> = {
   Admin: [...ALL_PAGE_PATHS],

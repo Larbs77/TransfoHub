@@ -41,6 +41,8 @@ model Chantier {
   membres                MembreEquipe[]
   raids                  Raid[]
   saisiesTemps           SaisieTemps[]
+  /// Functional (programme) team for this chantier — auto-created 1:1.
+  equipeFonctionnelle    Equipe?
 }
 
 model Rmd {
@@ -156,6 +158,11 @@ model AppRole {
   is_system      Boolean  @default(false)
   /// Chantier data scope: all | assigned | none
   chantier_scope String   @default("none")
+  /// Who may create RAID entries: programme | chantier | none
+  /// - programme: any chantier (programme-wide)
+  /// - chantier: only chantiers where the user is attached as a Ressource
+  /// - none: cannot create RAID (default)
+  raid_create_scope String @default("none")
   /// Allowed app page paths (JSON string array)
   pages          Json
   createdAt      DateTime @default(now())
@@ -165,18 +172,23 @@ model AppRole {
 }
 
 model MembreEquipe {
-  id                 String     @id @default(uuid())
+  id                 String    @id @default(uuid())
   chantierId         String
   equipe             String
   role               String
-  nom_complet        String
-  is_directeur       Boolean    @default(false)
-  charge_pourcentage Int        @default(100)
-  ressourceId        String?
-  createdAt          DateTime   @default(now())
-  updatedAt          DateTime   @updatedAt
-  ressource          Ressource? @relation(fields: [ressourceId], references: [id])
-  chantier           Chantier   @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+  /// Optional free-text notes for this assignment (not identity — name comes from Ressource).
+  commentaires       String    @default("")
+  is_directeur       Boolean   @default(false)
+  charge_pourcentage Int       @default(100)
+  /// Required: every chantier team member must be a known Ressource.
+  ressourceId        String
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  ressource          Ressource @relation(fields: [ressourceId], references: [id], onDelete: Restrict)
+  chantier           Chantier  @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+
+  @@index([ressourceId])
+  @@index([chantierId, ressourceId])
 }
 
 model Raid {
@@ -193,17 +205,66 @@ model Raid {
   mitigation             String     @default("")
   responsable            String     @default("")
   responsableRessourceId String?
+  /// Team assignment: chantier functional team if assignee is on that chantier,
+  /// otherwise the assignee's institutional (hierarchy) team.
+  equipeId               String?
   statut                 String     @default("")
   date_identification    DateTime?
   date_revision          DateTime?
   date_echeance          DateTime?
   commentaires           String     @default("")
   comiteId               String?
+  /// Creator (app user) for audit / circulation.
+  createdByUserId        String?
+  createdByName          String     @default("")
   createdAt              DateTime   @default(now())
   updatedAt              DateTime   @updatedAt
   comite                 Comite?    @relation(fields: [comiteId], references: [id])
   responsableRessource   Ressource? @relation(fields: [responsableRessourceId], references: [id])
   chantier               Chantier?  @relation(fields: [chantierId], references: [id])
+  equipe                 Equipe?    @relation(fields: [equipeId], references: [id], onDelete: SetNull)
+  raidComments           RaidComment[]
+  auditLogs              RaidAuditLog[]
+
+  @@index([responsableRessourceId])
+  @@index([equipeId])
+  @@index([chantierId])
+}
+
+/// Collaborative discussion thread on a RAID entry (Jira-style).
+model RaidComment {
+  id                 String   @id @default(uuid())
+  raidId             String
+  body               String
+  /// System notes (e.g. mandatory status-change comment flagged).
+  is_system          Boolean  @default(false)
+  authorUserId       String?
+  authorName         String   @default("")
+  authorRessourceId  String?
+  createdAt          DateTime @default(now())
+  raid               Raid     @relation(fields: [raidId], references: [id], onDelete: Cascade)
+
+  @@index([raidId, createdAt])
+}
+
+/// Immutable audit trail for RAID collaboration (status, assignment, fields, comments).
+model RaidAuditLog {
+  id                String   @id @default(uuid())
+  raidId            String
+  /// created | status_changed | assigned | auto_assigned | unassigned | commented | field_updated
+  action            String
+  field             String   @default("")
+  oldValue          String   @default("")
+  newValue          String   @default("")
+  /// French human-readable summary for timeline & table.
+  summary           String
+  actorUserId       String?
+  actorName         String   @default("")
+  actorRessourceId  String?
+  createdAt         DateTime @default(now())
+  raid              Raid     @relation(fields: [raidId], references: [id], onDelete: Cascade)
+
+  @@index([raidId, createdAt])
 }
 
 model Comite {
@@ -221,21 +282,30 @@ model Comite {
   raids              Raid[]
 }
 
-/// Bank teams / owning org units (admin-managed catalog).
+/// Teams catalog — two kinds:
+/// - institutionnelle: bank org units (hierarchy / comité owners)
+/// - fonctionnelle: chantier programme team (1:1 with Chantier, auto-created)
 model Equipe {
   id          String            @id @default(uuid())
   name        String            @unique
   description String            @default("")
   position    Int               @default(0)
   is_active   Boolean           @default(true)
+  /// institutionnelle | fonctionnelle
+  type        String            @default("institutionnelle")
+  /// Only for fonctionnelle teams — one functional team per chantier.
+  chantierId  String?           @unique
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
+  chantier    Chantier?         @relation(fields: [chantierId], references: [id], onDelete: Cascade)
   comiteParametres ComiteParametre[]
   ressourcesHierarchie Ressource[] @relation("RessourceEquipeHierarchie")
   ressourcesFonctionnelles RessourceEquipeFonctionnelle[]
+  raids       Raid[]
 
   @@index([position])
   @@index([is_active])
+  @@index([type])
 }
 
 /// Parameter table for committee types (instances) — admin-managed catalog.

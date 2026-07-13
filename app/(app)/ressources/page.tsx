@@ -9,13 +9,24 @@ export default async function RessourcesPage() {
   const session = await getSession();
   const canCreateAccount = session.role === "Admin";
 
-  const [ressources, equipes, activeRoles] = await Promise.all([
-    getRessources(),
-    getEquipesForSelect({ activeOnly: false }).catch(() => []),
-    canCreateAccount
-      ? getActiveRolesForSelect().catch(() => [])
-      : Promise.resolve([]),
-  ]);
+  const [ressources, equipesInstitutionnelles, equipesFonctionnelles, activeRoles] =
+    await Promise.all([
+      getRessources(),
+      getEquipesForSelect({
+        activeOnly: false,
+        type: "institutionnelle",
+      }).catch(() => []),
+      getEquipesForSelect({
+        activeOnly: false,
+        type: "fonctionnelle",
+      }).catch(() => []),
+      canCreateAccount
+        ? getActiveRolesForSelect().catch(() => [])
+        : Promise.resolve([]),
+    ]);
+
+  // Hierarchy select = institutionnelle; functional multi-select = chantier teams
+  const equipes = [...equipesInstitutionnelles, ...equipesFonctionnelles];
 
   return (
     <div className="min-h-screen bg-background">

@@ -8,25 +8,47 @@ const globalForPrisma = globalThis as unknown as {
 
 /**
  * Bump whenever the Prisma schema gains fields/models so HMR drops a stale
- * singleton (otherwise findUnique rejects unknown select fields).
+ * singleton (otherwise findUnique/update rejects unknown fields).
  */
-const PRISMA_MODEL_STAMP = "ressource-equipes-user-v1";
+const PRISMA_MODEL_STAMP = "equipe-institutionnelle-fonctionnelle-v1";
 
 function clientLooksCurrent(client: PrismaClient): boolean {
   try {
     const c = client as unknown as {
       user?: unknown;
+      appRole?: { findFirst?: unknown };
       mailServerConfig?: { findFirst?: unknown };
       comiteParametre?: { findMany?: unknown };
       equipe?: { findMany?: unknown };
       ressourceEquipeFonctionnelle?: { findMany?: unknown };
+      raidComment?: { findMany?: unknown };
+      raidAuditLog?: { findMany?: unknown };
+      _runtimeDataModel?: {
+        models?: Record<
+          string,
+          { fields?: Record<string, unknown> | Array<{ name: string }> }
+        >;
+      };
     };
     // Force recreate when new models are missing (stale HMR singleton).
     if (!c.user) return false;
+    if (typeof c.appRole?.findFirst !== "function") return false;
     if (typeof c.mailServerConfig?.findFirst !== "function") return false;
     if (typeof c.comiteParametre?.findMany !== "function") return false;
     if (typeof c.equipe?.findMany !== "function") return false;
     if (typeof c.ressourceEquipeFonctionnelle?.findMany !== "function") return false;
+    if (typeof c.raidComment?.findMany !== "function") return false;
+    if (typeof c.raidAuditLog?.findMany !== "function") return false;
+
+    const equipeModel = c._runtimeDataModel?.models?.Equipe;
+    if (equipeModel?.fields) {
+      const fields = equipeModel.fields;
+      const hasType = Array.isArray(fields)
+        ? fields.some((f) => f.name === "type")
+        : "type" in fields;
+      if (!hasType) return false;
+    }
+
     return true;
   } catch {
     return false;

@@ -5,9 +5,11 @@ import {
   createRaid,
   updateRaid,
   getChantiersForSelect,
+  getChantiersForRaidCreate,
   getComitesForSelect,
   getRessourcesForSelect,
 } from "@/app/(app)/actions";
+import { useUser } from "@/components/user-provider";
 import {
   Dialog,
   DialogContent,
@@ -89,7 +91,9 @@ export function RaidFormDialog({
   statusConfigs,
 }: Props) {
   const isEdit = !!raid;
+  const { raidCreateScope } = useUser();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [chantiers, setChantiers] = useState<{ id: string; code: string; nom: string }[]>([]);
   const [comites, setComites] = useState<{ id: string; instance: string; numero: number; date: Date }[]>([]);
 
@@ -120,11 +124,13 @@ export function RaidFormDialog({
   const isRisque = type === "Risque";
   const score = isRisque && probabilite && impact ? scoreCriticite(Number(impact), Number(probabilite)) : null;
   const criticiteLabel = score ? getCriticiteLabel(score) : null;
+  const chantierRequiredOnCreate = !isEdit && raidCreateScope === "chantier";
 
   useEffect(() => {
     if (open) {
+      setError(null);
       Promise.all([
-        getChantiersForSelect(),
+        isEdit ? getChantiersForSelect() : getChantiersForRaidCreate(),
         getComitesForSelect(),
         getRessourcesForSelect(),
       ]).then(([c, co, res]) => {
@@ -133,7 +139,7 @@ export function RaidFormDialog({
         setRessources(res);
       });
     }
-  }, [open]);
+  }, [open, isEdit]);
 
   function handleResponsableRessourceChange(newId: string) {
     setResponsableRessourceId(newId);
@@ -155,13 +161,22 @@ export function RaidFormDialog({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
+    const resolvedChantierId =
+      chantierId && chantierId !== "__none__" ? chantierId : null;
+    if (chantierRequiredOnCreate && !resolvedChantierId) {
+      setError(
+        "Un chantier est obligatoire : votre rôle ne permet la création qu'au niveau des chantiers auxquels vous êtes rattaché."
+      );
+      return;
+    }
     setLoading(true);
     const data = {
       type,
       intitule,
       description,
       categorie,
-      chantierId: chantierId && chantierId !== "__none__" ? chantierId : null,
+      chantierId: resolvedChantierId,
       domaine,
       probabilite: isRisque && probabilite ? Number(probabilite) : null,
       impact: isRisque && impact ? Number(impact) : null,
@@ -177,13 +192,20 @@ export function RaidFormDialog({
       commentaires,
       comiteId: comiteId && comiteId !== "__none__" ? comiteId : null,
     };
-    if (isEdit) {
-      await updateRaid(raid.id, data);
-    } else {
-      await createRaid(data);
+    try {
+      if (isEdit) {
+        await updateRaid(raid.id, data);
+      } else {
+        await createRaid(data);
+      }
+      onOpenChange(false);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Erreur lors de l'enregistrement."
+      );
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-    onOpenChange(false);
   }
 
   const statuts = statusConfigs?.length ? getStatutsFromConfig(type, statusConfigs) : getStatutsForType(type);
@@ -280,15 +302,28 @@ export function RaidFormDialog({
           {/* Chantier + Comité */}
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-1.5 min-w-0">
-              <label className="text-sm font-medium">Chantier</label>
+              <label className="text-sm font-medium">
+                Chantier
+                {chantierRequiredOnCreate && (
+                  <span className="text-destructive"> *</span>
+                )}
+              </label>
               <Select value={chantierId} onValueChange={setChantierId}>
                 <SelectTrigger className="w-full overflow-hidden">
                   <span className="truncate">
-                    <SelectValue placeholder="Aucun" />
+                    <SelectValue
+                      placeholder={
+                        chantierRequiredOnCreate
+                          ? "Sélectionner un chantier"
+                          : "Aucun"
+                      }
+                    />
                   </span>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__">Aucun</SelectItem>
+                  {!chantierRequiredOnCreate && (
+                    <SelectItem value="__none__">Aucun</SelectItem>
+                  )}
                   {chantiers.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
                       {c.code} - {c.nom}
@@ -296,6 +331,12 @@ export function RaidFormDialog({
                   ))}
                 </SelectContent>
               </Select>
+              {chantierRequiredOnCreate && (
+                <p className="text-[11px] text-muted-foreground">
+                  Niveau Chantier : uniquement les chantiers auxquels vous êtes
+                  rattaché.
+                </p>
+              )}
             </div>
             <div className="grid gap-1.5 min-w-0">
               <label className="text-sm font-medium">Comité</label>
@@ -473,6 +514,12 @@ export function RaidFormDialog({
               onChange={(e) => setCommentaires(e.target.value)}
             />
           </div>
+
+          {error && (
+            <p className="text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          )}
 
           <DialogFooter>
             <Button

@@ -3,7 +3,12 @@ import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
-import { getRoleByCode, roleCanAccessPage } from "@/lib/roles";
+import {
+  getRoleByCode,
+  resolveRaidCreateScope,
+  roleCanAccessPage,
+  type RaidCreateScope,
+} from "@/lib/roles";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -257,6 +262,60 @@ export async function requireChantierAccess(
   }
 
   throw new Error("Accès au chantier non autorisé");
+}
+
+/**
+ * Guard for creating RAID entries based on AppRole.raid_create_scope.
+ * - programme: any chantier (including none)
+ * - chantier: only if chantierId is set and user is MembreEquipe via their Ressource
+ * - none: denied
+ */
+export async function requireRaidCreateAccess(
+  chantierId: string | null | undefined
+): Promise<SessionData> {
+  const session = await requireAuth();
+  const role = await getRoleByCode(session.role);
+  const scope = resolveRaidCreateScope(role);
+
+  if (scope === "none") {
+    throw new Error(
+      "Création RAID non autorisée pour votre rôle. Contactez un administrateur."
+    );
+  }
+
+  if (scope === "programme") {
+    return session;
+  }
+
+  // Niveau Chantier
+  if (!chantierId) {
+    throw new Error(
+      "Sélectionnez un chantier : votre rôle ne permet la création RAID qu'au niveau des chantiers auxquels vous êtes rattaché."
+    );
+  }
+  if (!session.ressourceId) {
+    throw new Error(
+      "Votre compte n'est lié à aucune ressource : impossible de créer une entrée RAID au niveau chantier."
+    );
+  }
+
+  const membre = await prisma.membreEquipe.findFirst({
+    where: { chantierId, ressourceId: session.ressourceId },
+    select: { id: true },
+  });
+  if (!membre) {
+    throw new Error(
+      "Vous n'êtes pas rattaché à ce chantier en tant que ressource : création RAID refusée."
+    );
+  }
+
+  return session;
+}
+
+export async function getRaidCreateScopeForSession(): Promise<RaidCreateScope> {
+  const session = await requireAuth();
+  const role = await getRoleByCode(session.role);
+  return resolveRaidCreateScope(role);
 }
 
 // ── Helper: get user's accessible chantier IDs ─────────

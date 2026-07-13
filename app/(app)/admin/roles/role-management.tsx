@@ -39,7 +39,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import type { AppPage } from "@/lib/app-pages";
-import { CHANTIER_SCOPES } from "@/lib/app-pages";
+import { CHANTIER_SCOPES, RAID_CREATE_SCOPES } from "@/lib/app-pages";
 import { createRole, updateRole, setRoleActive } from "./actions";
 
 type RoleRow = {
@@ -51,6 +51,7 @@ type RoleRow = {
   is_active: boolean;
   is_system: boolean;
   chantier_scope: string;
+  raid_create_scope: string;
   pages: string[];
   userCount: number;
   createdAt: Date;
@@ -73,6 +74,8 @@ const emptyForm = {
   description: "",
   color: "#2563eb",
   chantier_scope: "assigned",
+  /** Default: Non autorisé */
+  raid_create_scope: "none",
   pages: [] as string[],
 };
 
@@ -139,6 +142,8 @@ export function RoleManagement({
       description: role.description,
       color: role.color,
       chantier_scope: role.chantier_scope,
+      raid_create_scope:
+        role.code === "Admin" ? "programme" : role.raid_create_scope || "none",
       pages: [...role.pages],
     });
     setError("");
@@ -295,6 +300,9 @@ export function RoleManagement({
                   <th className="px-3 py-2 text-left font-medium">Rôle</th>
                   <th className="px-3 py-2 text-left font-medium">Code</th>
                   <th className="px-3 py-2 text-left font-medium">Périmètre</th>
+                  <th className="px-3 py-2 text-left font-medium">
+                    Création RAID
+                  </th>
                   <th className="px-3 py-2 text-center font-medium">Pages</th>
                   <th className="px-3 py-2 text-center font-medium">
                     Utilisateurs
@@ -308,6 +316,13 @@ export function RoleManagement({
                   const scopeLabel =
                     CHANTIER_SCOPES.find((s) => s.value === role.chantier_scope)
                       ?.label ?? role.chantier_scope;
+                  const raidScope =
+                    role.code === "Admin"
+                      ? "programme"
+                      : role.raid_create_scope || "none";
+                  const raidScopeLabel =
+                    RAID_CREATE_SCOPES.find((s) => s.value === raidScope)
+                      ?.label ?? raidScope;
                   return (
                     <tr
                       key={role.id}
@@ -338,6 +353,7 @@ export function RoleManagement({
                         {role.code}
                       </td>
                       <td className="px-3 py-2 text-xs">{scopeLabel}</td>
+                      <td className="px-3 py-2 text-xs">{raidScopeLabel}</td>
                       <td className="px-3 py-2 text-center">
                         <Badge variant="secondary" className="text-[10px]">
                           {role.pages.length}
@@ -395,7 +411,7 @@ export function RoleManagement({
                 {filtered.length === 0 && (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       className="px-3 py-8 text-center text-muted-foreground"
                     >
                       Aucun rôle trouvé.
@@ -496,6 +512,42 @@ export function RoleManagement({
                     ?.description
                 }
               </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Création d&apos;entrées RAID
+              </label>
+              <Select
+                value={form.raid_create_scope}
+                onValueChange={(v) =>
+                  setForm((f) => ({ ...f, raid_create_scope: v }))
+                }
+                disabled={editing?.code === "Admin"}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {RAID_CREATE_SCOPES.map((s) => (
+                    <SelectItem key={s.value} value={s.value}>
+                      {s.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                {
+                  RAID_CREATE_SCOPES.find(
+                    (s) => s.value === form.raid_create_scope
+                  )?.description
+                }
+              </p>
+              {editing?.code === "Admin" && (
+                <p className="text-[11px] text-muted-foreground">
+                  L&apos;administrateur dispose toujours du niveau Programme.
+                </p>
+              )}
             </div>
 
             <div className="space-y-3">

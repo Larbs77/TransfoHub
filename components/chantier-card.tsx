@@ -53,7 +53,7 @@ interface ChantierWithStats {
   _count: { raids: number };
   raids: { type: string; statut: string }[];
   rmds?: { rmd: { id: string; nom_complet: string } }[];
-  membres?: { nom_complet: string }[];
+  membres?: { ressource?: { nom_complet: string } | null }[];
 }
 
 export function ChantierCard({
@@ -68,7 +68,8 @@ export function ChantierCard({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [favori, setFavori] = useState(isFavori);
 
-  const directeurName = chantier.membres?.[0]?.nom_complet || chantier.directeur;
+  const directeurName =
+    chantier.membres?.[0]?.ressource?.nom_complet || chantier.directeur;
   const actionsCount = chantier.raids.filter((r) => r.type === "Action").length;
   const risksCount = chantier.raids.filter((r) => r.type === "Risque").length;
 

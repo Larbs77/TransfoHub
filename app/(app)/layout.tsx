@@ -4,7 +4,11 @@ import { NavBar } from "@/components/nav-bar";
 import { ChatWidget } from "@/components/chat-widget";
 import { UserProvider } from "@/components/user-provider";
 import { UserThemeSync } from "@/components/user-theme-sync";
-import { getRoleByCode, resolveAllowedPages } from "@/lib/roles";
+import {
+  getRoleByCode,
+  resolveAllowedPages,
+  resolveRaidCreateScope,
+} from "@/lib/roles";
 import {
   LEGACY_ROLE_COLORS,
   LEGACY_ROLE_LABELS,
@@ -75,6 +79,7 @@ export default async function AppLayout({
         allowedPages: canUseApp ? allowedPages : [],
         ressourceId: session.ressourceId,
         dashboardType: session.dashboardType || "complete",
+        raidCreateScope: canUseApp ? resolveRaidCreateScope(role) : "none",
       }}
     >
       <UserThemeSync preference={themePreference} />

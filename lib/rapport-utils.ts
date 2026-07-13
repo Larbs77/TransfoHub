@@ -105,24 +105,35 @@ export function getImpactColor(i: number | null): string {
 
 // ─── Team helpers ─────────────────────────────────────────────────────────────
 
+type MembreNameSource = {
+  is_directeur?: boolean;
+  role: string;
+  nom_complet?: string;
+  ressource?: { nom_complet: string } | null;
+};
+
+function membreDisplayName(m: MembreNameSource): string {
+  return m.ressource?.nom_complet?.trim() || m.nom_complet?.trim() || "—";
+}
+
 export function getDirecteur(
   chantier: { directeur: string },
-  membres: { is_directeur: boolean; nom_complet: string; role: string }[]
+  membres: MembreNameSource[]
 ): string {
   if (chantier.directeur) return chantier.directeur;
   const dc = membres.find((m) => m.is_directeur);
-  return dc?.nom_complet ?? "—";
+  return dc ? membreDisplayName(dc) : "—";
 }
 
 export function getSuppleant(
   chantier: { pmo: string },
-  membres: { nom_complet: string; role: string }[]
+  membres: MembreNameSource[]
 ): string {
   if (chantier.pmo) return chantier.pmo;
   const supp = membres.find(
     (m) => m.role.toLowerCase().includes("supp") || m.role.toLowerCase().includes("pmo")
   );
-  return supp?.nom_complet ?? "—";
+  return supp ? membreDisplayName(supp) : "—";
 }
 
 // ─── Jalon phase stats ────────────────────────────────────────────────────────

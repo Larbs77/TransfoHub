@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useTransition } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -16,15 +16,34 @@ import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { CalendarDays, User, ExternalLink, AlertTriangle } from "lucide-react";
+import {
+  CalendarDays,
+  User,
+  ExternalLink,
+  AlertTriangle,
+  Lock,
+  Loader2,
+} from "lucide-react";
 import Link from "next/link";
-import { updateRaid } from "@/app/(app)/actions";
 import {
   type StatusConfigItem,
   getStatutsForType,
   getStatutColor,
   RAID_TYPE_COLORS,
 } from "@/lib/raid-labels";
+import { canMoveRaidKanbanClient } from "@/lib/raid-labels";
+import {
+  changeRaidKanbanStatus,
+  fetchKanbanMoveContext,
+} from "@/app/(app)/raid/[id]/actions";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 interface ActionItem {
   id: string;
@@ -46,11 +65,19 @@ interface ActionItem {
   date_revision: Date | null;
   commentaires: string;
   responsableRessourceId: string | null;
+  equipeId?: string | null;
   comiteId: string | null;
   comite?: { id: string; instance: string; numero: number } | null;
   createdAt: Date;
   updatedAt: Date;
 }
+
+type MoveCtx = {
+  ressourceId: string | null;
+  isProgramme: boolean;
+  leadershipChantierIds: string[];
+  institutionalEquipeId: string | null;
+};
 
 interface Props {
   items: ActionItem[];
@@ -63,10 +90,12 @@ function KanbanCard({
   item,
   isDragging,
   now,
+  locked,
 }: {
   item: ActionItem;
   isDragging?: boolean;
   now: Date;
+  locked?: boolean;
 }) {
   const isOverdue =
     item.date_echeance &&
@@ -75,7 +104,6 @@ function KanbanCard({
 
   const typeColor = RAID_TYPE_COLORS[item.type] ?? "#6b7280";
 
-  // Generate initials for avatar
   const initials = item.responsable
     ? item.responsable
         .split(" ")
@@ -90,17 +118,17 @@ function KanbanCard({
       className={`group relative overflow-hidden rounded-md border bg-card shadow-sm transition-all ${
         isDragging
           ? "opacity-60 rotate-[2deg] scale-105 shadow-lg ring-2 ring-primary/40"
-          : "hover:shadow-md hover:border-primary/30"
+          : locked
+            ? "opacity-90 border-dashed"
+            : "hover:shadow-md hover:border-primary/30"
       }`}
     >
-      {/* Left color border — OpenProject type indicator */}
       <div
         className="absolute left-0 top-0 bottom-0 w-1 rounded-l-md"
         style={{ backgroundColor: typeColor }}
       />
 
       <div className="pl-3.5 pr-3 py-2.5 space-y-1.5">
-        {/* Line 1: Type badge + Chantier code */}
         <div className="flex items-center gap-1.5">
           <span
             className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold text-white leading-none"
@@ -113,30 +141,34 @@ function KanbanCard({
               {item.chantier.code}
             </span>
           )}
+          {locked && (
+            <span
+              className="inline-flex items-center gap-0.5 rounded bg-muted px-1 py-0.5 text-[9px] font-medium text-muted-foreground"
+              title="Lecture seule — non assignée à vous"
+            >
+              <Lock className="size-2.5" />
+              Lecture seule
+            </span>
+          )}
           {isOverdue && (
             <AlertTriangle className="size-3 text-destructive ml-auto shrink-0" />
           )}
-          {/* Hover action — detail link */}
-          {item.chantier && (
-            <Link
-              href={`/chantiers/${item.chantier.id}`}
-              className="ml-auto hidden group-hover:flex items-center justify-center size-5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-              title="Ouvrir le chantier"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <ExternalLink className="size-3" />
-            </Link>
-          )}
+          <Link
+            href={`/raid/${item.id}`}
+            className="ml-auto hidden group-hover:flex items-center justify-center size-5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+            title="Ouvrir l'entrée RAID"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <ExternalLink className="size-3" />
+          </Link>
         </div>
 
-        {/* Line 2: Title */}
         <p className="text-[13px] font-medium leading-snug line-clamp-2 text-foreground">
           {item.intitule}
         </p>
 
-        {/* Line 3: Assignee + Date */}
         <div className="flex items-center justify-between gap-2 pt-0.5">
-          {/* Assignee with avatar */}
           <div className="flex items-center gap-1.5 min-w-0">
             {item.responsable ? (
               <>
@@ -159,7 +191,6 @@ function KanbanCard({
             )}
           </div>
 
-          {/* Date */}
           {item.date_echeance && (
             <div
               className={`flex items-center gap-1 shrink-0 text-[11px] ${
@@ -178,7 +209,6 @@ function KanbanCard({
           )}
         </div>
 
-        {/* Optional: Domain tag */}
         {item.domaine && (
           <div className="pt-0.5">
             <span className="inline-flex items-center rounded-sm bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
@@ -191,19 +221,22 @@ function KanbanCard({
   );
 }
 
-// ── Draggable wrapper ──────────────────────────────────
+// ── Draggable / static card ────────────────────────────
 
 function DraggableCard({
   item,
   now,
+  canMove,
 }: {
   item: ActionItem;
   now: Date;
+  canMove: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
       id: item.id,
       data: { item },
+      disabled: !canMove,
     });
 
   const style = transform
@@ -212,6 +245,14 @@ function DraggableCard({
         zIndex: isDragging ? 50 : undefined,
       }
     : undefined;
+
+  if (!canMove) {
+    return (
+      <div className="cursor-default">
+        <KanbanCard item={item} now={now} locked />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -226,18 +267,20 @@ function DraggableCard({
   );
 }
 
-// ── OpenProject-style Column ───────────────────────────
+// ── Column ─────────────────────────────────────────────
 
 function KanbanColumn({
   status,
   color,
   items,
   now,
+  canMoveItem,
 }: {
   status: string;
   color: string;
   items: ActionItem[];
   now: Date;
+  canMoveItem: (item: ActionItem) => boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
@@ -248,7 +291,6 @@ function KanbanColumn({
         isOver ? "bg-primary/5 border-primary/40 shadow-inner" : ""
       }`}
     >
-      {/* Column header — colored top bar like OpenProject */}
       <div className="rounded-t-lg overflow-hidden">
         <div className="h-1" style={{ backgroundColor: color }} />
         <div className="flex items-center gap-2 px-3 py-2.5 border-b bg-card">
@@ -264,10 +306,14 @@ function KanbanColumn({
         </div>
       </div>
 
-      {/* Cards area */}
       <div className="flex-1 p-2 space-y-2 overflow-y-auto max-h-[65vh]">
         {items.map((item) => (
-          <DraggableCard key={item.id} item={item} now={now} />
+          <DraggableCard
+            key={item.id}
+            item={item}
+            now={now}
+            canMove={canMoveItem(item)}
+          />
         ))}
         {items.length === 0 && (
           <div className="flex flex-col items-center justify-center py-8 text-muted-foreground/50">
@@ -279,7 +325,6 @@ function KanbanColumn({
         )}
       </div>
 
-      {/* Column footer — count summary */}
       <div className="border-t px-3 py-1.5 bg-card rounded-b-lg">
         <span className="text-[10px] text-muted-foreground">
           {items.length} élément{items.length !== 1 ? "s" : ""}
@@ -291,16 +336,48 @@ function KanbanColumn({
 
 // ── Main Kanban Board ──────────────────────────────────
 
-export function ActionKanban({ items, statusConfigs }: Props) {
+export function ActionKanban({ items: propItems, statusConfigs }: Props) {
+  const [items, setItems] = useState(propItems);
+  const [moveCtx, setMoveCtx] = useState<MoveCtx | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [updating, setUpdating] = useState(false);
+  const [pendingMove, setPendingMove] = useState<{
+    item: ActionItem;
+    newStatus: string;
+  } | null>(null);
+  const [moveComment, setMoveComment] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
   const [now] = useState(() => new Date());
+
+  useEffect(() => {
+    setItems(propItems);
+  }, [propItems]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchKanbanMoveContext()
+      .then((ctx) => {
+        if (!cancelled) setMoveCtx(ctx);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMoveCtx({
+            ressourceId: null,
+            isProgramme: false,
+            leadershipChantierIds: [],
+            institutionalEquipeId: null,
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
 
-  // Get ordered statuses from config or fallback
   const statuses = useMemo(() => {
     if (statusConfigs?.length) {
       const actionConfigs = statusConfigs
@@ -317,7 +394,11 @@ export function ActionKanban({ items, statusConfigs }: Props) {
     }));
   }, [statusConfigs, items]);
 
-  // Group items by status
+  const canMoveItem = (item: ActionItem) => {
+    if (!moveCtx) return false;
+    return canMoveRaidKanbanClient(item, moveCtx);
+  };
+
   const grouped = useMemo(() => {
     const map = new Map<string, ActionItem[]>();
     for (const s of statuses) {
@@ -335,18 +416,23 @@ export function ActionKanban({ items, statusConfigs }: Props) {
     return map;
   }, [items, statuses]);
 
-  const activeItem = activeId
-    ? items.find((i) => i.id === activeId)
-    : null;
+  const activeItem = activeId ? items.find((i) => i.id === activeId) : null;
 
   function handleDragStart(event: DragStartEvent) {
-    setActiveId(event.active.id as string);
+    const id = event.active.id as string;
+    const item = items.find((i) => i.id === id);
+    if (!item || !canMoveItem(item)) {
+      setActiveId(null);
+      return;
+    }
+    setActiveId(id);
+    setError(null);
   }
 
-  async function handleDragEnd(event: DragEndEvent) {
+  function handleDragEnd(event: DragEndEvent) {
     setActiveId(null);
     const { active, over } = event;
-    if (!over || updating) return;
+    if (!over || isPending) return;
 
     const itemId = active.id as string;
     const newStatus = over.id as string;
@@ -354,52 +440,84 @@ export function ActionKanban({ items, statusConfigs }: Props) {
     const item = items.find((i) => i.id === itemId);
     if (!item || item.statut === newStatus) return;
     if (!statuses.some((s) => s.label === newStatus)) return;
-
-    setUpdating(true);
-    try {
-      await updateRaid(itemId, {
-        type: item.type,
-        intitule: item.intitule,
-        description: item.description,
-        categorie: item.categorie,
-        chantierId: item.chantierId,
-        domaine: item.domaine,
-        probabilite: item.probabilite,
-        impact: item.impact,
-        strategie: item.strategie,
-        mitigation: item.mitigation,
-        responsable: item.responsable,
-        responsableRessourceId: item.responsableRessourceId ?? null,
-        statut: newStatus,
-        date_identification: item.date_identification
-          ? new Date(item.date_identification).toISOString()
-          : null,
-        date_revision: item.date_revision
-          ? new Date(item.date_revision).toISOString()
-          : null,
-        date_echeance: item.date_echeance
-          ? new Date(item.date_echeance).toISOString()
-          : null,
-        commentaires: item.commentaires,
-        comiteId: item.comiteId,
-      });
-    } catch {
-      // Silently fail — page will revalidate
-    } finally {
-      setUpdating(false);
+    if (!canMoveItem(item)) {
+      setError(
+        "Vous ne pouvez déplacer que les actions qui vous sont assignées (ou en tant que Directeur / suppléant / PMO du chantier)."
+      );
+      return;
     }
+
+    // Open comment dialog before applying
+    setPendingMove({ item, newStatus });
+    setMoveComment("");
+    setError(null);
   }
 
+  function confirmMove() {
+    if (!pendingMove) return;
+    const note = moveComment.trim();
+    if (!note) {
+      setError("Un commentaire est obligatoire pour changer le statut.");
+      return;
+    }
+    const { item, newStatus } = pendingMove;
+    setError(null);
+    startTransition(async () => {
+      try {
+        await changeRaidKanbanStatus(item.id, newStatus, note);
+        setItems((prev) =>
+          prev.map((i) =>
+            i.id === item.id ? { ...i, statut: newStatus } : i
+          )
+        );
+        setPendingMove(null);
+        setMoveComment("");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Erreur lors du déplacement");
+      }
+    });
+  }
+
+  const movableCount = moveCtx
+    ? items.filter((i) => canMoveItem(i)).length
+    : 0;
+
   return (
-    <div className="relative">
-      {updating && (
+    <div className="relative space-y-3">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <Lock className="size-3.5 shrink-0" />
+        <span>
+          Déplacement : <strong>assigné</strong>, collègues de la même{" "}
+          <strong>équipe institutionnelle</strong>, ou{" "}
+          <strong>Directeur / suppléant / PMO</strong> du chantier. Commentaire
+          obligatoire.
+        </span>
+        {moveCtx && (
+          <span className="ml-auto rounded-full bg-muted px-2 py-0.5 font-medium text-foreground">
+            {movableCount}/{items.length} déplaçable
+            {movableCount !== 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+
+      {error && !pendingMove && (
+        <div
+          className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          role="alert"
+        >
+          {error}
+        </div>
+      )}
+
+      {isPending && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 backdrop-blur-[1px] rounded-lg">
           <div className="flex items-center gap-2 rounded-lg bg-card px-4 py-2 shadow-lg border text-sm text-muted-foreground">
-            <div className="size-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            <Loader2 className="size-4 animate-spin text-primary" />
             Mise à jour...
           </div>
         </div>
       )}
+
       <DndContext
         sensors={sensors}
         collisionDetection={closestCorners}
@@ -414,6 +532,7 @@ export function ActionKanban({ items, statusConfigs }: Props) {
               color={s.color}
               items={grouped.get(s.label) ?? []}
               now={now}
+              canMoveItem={canMoveItem}
             />
           ))}
         </div>
@@ -425,6 +544,75 @@ export function ActionKanban({ items, statusConfigs }: Props) {
           ) : null}
         </DragOverlay>
       </DndContext>
+
+      {/* Mandatory comment on status move */}
+      <Dialog
+        open={!!pendingMove}
+        onOpenChange={(open) => {
+          if (!open && !isPending) {
+            setPendingMove(null);
+            setMoveComment("");
+            setError(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Changer le statut</DialogTitle>
+          </DialogHeader>
+          {pendingMove && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {pendingMove.item.intitule}
+                </span>
+                <br />
+                <span className="text-xs">
+                  « {pendingMove.item.statut} » → « {pendingMove.newStatus} »
+                </span>
+              </p>
+              <div className="grid gap-1.5">
+                <label className="text-sm font-medium">
+                  Commentaire <span className="text-destructive">*</span>
+                </label>
+                <textarea
+                  className="flex min-h-[90px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none"
+                  placeholder="Motif du changement de statut (obligatoire)…"
+                  value={moveComment}
+                  onChange={(e) => setMoveComment(e.target.value)}
+                  disabled={isPending}
+                  autoFocus
+                />
+              </div>
+              {error && (
+                <p className="text-sm text-destructive" role="alert">
+                  {error}
+                </p>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={isPending}
+              onClick={() => {
+                setPendingMove(null);
+                setMoveComment("");
+                setError(null);
+              }}
+            >
+              Annuler
+            </Button>
+            <Button
+              disabled={isPending || !moveComment.trim()}
+              onClick={confirmMove}
+            >
+              {isPending && <Loader2 className="size-4 animate-spin" />}
+              Confirmer le déplacement
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

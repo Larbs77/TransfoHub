@@ -4,7 +4,12 @@ import { prisma } from "@/lib/prisma";
 import { requirePageAccess } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { ALL_PAGE_PATHS } from "@/lib/app-pages";
-import { parsePages, slugifyRoleCode } from "@/lib/roles";
+import {
+  normalizeRaidCreateScope,
+  parsePages,
+  slugifyRoleCode,
+  type RaidCreateScope,
+} from "@/lib/roles";
 
 async function requireRolesAdmin() {
   return requirePageAccess("/admin/roles", "/admin/users");
@@ -33,6 +38,7 @@ export async function getRolesForAdmin() {
     is_active: r.is_active,
     is_system: r.is_system,
     chantier_scope: r.chantier_scope,
+    raid_create_scope: normalizeRaidCreateScope(r.raid_create_scope),
     pages: parsePages(r.pages),
     userCount: usageMap[r.code] ?? 0,
     createdAt: r.createdAt,
@@ -67,11 +73,19 @@ function validateScope(scope: string): string {
   throw new Error("Périmètre chantier invalide.");
 }
 
+function validateRaidCreateScope(scope: string): RaidCreateScope {
+  if (scope === "none" || scope === "chantier" || scope === "programme") {
+    return scope;
+  }
+  throw new Error("Niveau de création RAID invalide.");
+}
+
 export async function createRole(data: {
   label: string;
   description?: string;
   color?: string;
   chantier_scope: string;
+  raid_create_scope?: string;
   pages: string[];
   code?: string;
 }) {
@@ -105,6 +119,10 @@ export async function createRole(data: {
       is_active: true,
       is_system: false,
       chantier_scope: validateScope(data.chantier_scope),
+      // Default: Non autorisé when not provided
+      raid_create_scope: validateRaidCreateScope(
+        data.raid_create_scope ?? "none"
+      ),
       pages,
     },
   });
@@ -120,6 +138,7 @@ export async function updateRole(
     description?: string;
     color?: string;
     chantier_scope: string;
+    raid_create_scope?: string;
     pages: string[];
   }
 ) {
@@ -148,6 +167,11 @@ export async function updateRole(
       color: data.color?.trim() || role.color,
       chantier_scope:
         role.code === "Admin" ? "all" : validateScope(data.chantier_scope),
+      // Admin always programme-level RAID create
+      raid_create_scope:
+        role.code === "Admin"
+          ? "programme"
+          : validateRaidCreateScope(data.raid_create_scope ?? "none"),
       pages,
     },
   });
