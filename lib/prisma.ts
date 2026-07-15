@@ -10,7 +10,7 @@ const globalForPrisma = globalThis as unknown as {
  * Bump whenever the Prisma schema gains fields/models so HMR drops a stale
  * singleton (otherwise findUnique/update rejects unknown fields).
  */
-const PRISMA_MODEL_STAMP = "user-notifications-v1";
+const PRISMA_MODEL_STAMP = "workflow-jalon-v1";
 
 function clientLooksCurrent(client: PrismaClient): boolean {
   try {
@@ -27,6 +27,7 @@ function clientLooksCurrent(client: PrismaClient): boolean {
       equipeRaidCategorieAccess?: { findMany?: unknown };
       raidCodeSequence?: { findFirst?: unknown };
       notification?: { findMany?: unknown };
+      workflowRequest?: { findMany?: unknown };
       _runtimeDataModel?: {
         models?: Record<
           string,
@@ -47,6 +48,7 @@ function clientLooksCurrent(client: PrismaClient): boolean {
     if (typeof c.equipeRaidCategorieAccess?.findMany !== "function") return false;
     if (typeof c.raidCodeSequence?.findFirst !== "function") return false;
     if (typeof c.notification?.findMany !== "function") return false;
+    if (typeof c.workflowRequest?.findMany !== "function") return false;
 
     const raidModel = c._runtimeDataModel?.models?.Raid;
     if (raidModel?.fields) {

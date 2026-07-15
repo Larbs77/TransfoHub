@@ -1,7 +1,8 @@
 "use client";
 
 import { useLayoutEffect, useRef } from "react";
-import { useTheme, type Theme } from "@/components/theme-provider";
+import { useTheme } from "@/components/theme-provider";
+import type { Theme } from "@/lib/theme-script";
 
 /**
  * Applies the account's saved theme preference when the authenticated shell loads

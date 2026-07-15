@@ -8,9 +8,9 @@ import {
   useMemo,
   useState,
 } from "react";
-import { THEME_STORAGE_KEY } from "@/lib/theme-script";
+import { THEME_STORAGE_KEY, type Theme } from "@/lib/theme-script";
 
-export type Theme = "light" | "dark";
+export type { Theme };
 
 const STORAGE_KEY = THEME_STORAGE_KEY;
 
@@ -21,7 +21,20 @@ type ThemeContextValue = {
   ready: boolean;
 };
 
-const ThemeContext = createContext<ThemeContextValue | null>(null);
+// Survive Turbopack/HMR double-evaluation (duplicate module = null context)
+const globalForTheme = globalThis as unknown as {
+  __transfohubThemeContext?: ReturnType<
+    typeof createContext<ThemeContextValue | null>
+  >;
+};
+
+const ThemeContext =
+  globalForTheme.__transfohubThemeContext ??
+  createContext<ThemeContextValue | null>(null);
+
+if (!globalForTheme.__transfohubThemeContext) {
+  globalForTheme.__transfohubThemeContext = ThemeContext;
+}
 
 function applyThemeClass(theme: Theme) {
   const root = document.documentElement;
@@ -78,10 +91,28 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+const fallbackThemeValue: ThemeContextValue = {
+  theme: "light",
+  setTheme: () => {
+    /* no-op outside provider */
+  },
+  toggleTheme: () => {
+    /* no-op outside provider */
+  },
+  ready: false,
+};
+
 export function useTheme() {
   const ctx = useContext(ThemeContext);
+  // Prefer never hard-crashing the shell (HMR / edge bundler cases).
+  // Root layout always mounts ThemeProvider in normal navigation.
   if (!ctx) {
-    throw new Error("useTheme must be used within ThemeProvider");
+    if (process.env.NODE_ENV === "development") {
+      console.warn(
+        "useTheme: ThemeProvider context missing — using light fallback"
+      );
+    }
+    return fallbackThemeValue;
   }
   return ctx;
 }

@@ -30,7 +30,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { UserAvatar } from "@/components/user-avatar";
 import { AvatarCropDialog } from "@/components/avatar-crop-dialog";
-import { useTheme, type Theme } from "@/components/theme-provider";
+import { useTheme } from "@/components/theme-provider";
+import type { Theme } from "@/lib/theme-script";
 import {
   updateMyPhone,
   changeMyPassword,

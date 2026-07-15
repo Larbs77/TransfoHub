@@ -14,7 +14,7 @@ import {
   LEGACY_ROLE_LABELS,
 } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
-import type { Theme } from "@/components/theme-provider";
+import type { Theme } from "@/lib/theme-script";
 
 export default async function AppLayout({
   children,

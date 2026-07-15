@@ -10,6 +10,10 @@ import {
   slugifyRoleCode,
   type RaidCreateScope,
 } from "@/lib/roles";
+import {
+  isWorkflowMode,
+  type WorkflowMode,
+} from "@/lib/workflow-shared";
 
 async function requireRolesAdmin() {
   return requirePageAccess("/admin/roles", "/admin/users");
@@ -39,6 +43,14 @@ export async function getRolesForAdmin() {
     is_system: r.is_system,
     chantier_scope: r.chantier_scope,
     raid_create_scope: normalizeRaidCreateScope(r.raid_create_scope),
+    jalon_create_mode: r.jalon_create_mode ?? "DIRECT",
+    jalon_update_mode: r.jalon_update_mode ?? "DIRECT",
+    jalon_delete_mode: r.jalon_delete_mode ?? "DIRECT",
+    workflow_can_approve: !!r.workflow_can_approve,
+    workflow_can_reject: !!r.workflow_can_reject,
+    workflow_can_view_requests: !!r.workflow_can_view_requests,
+    workflow_can_view_history: !!r.workflow_can_view_history,
+    workflow_can_view_kpi: !!r.workflow_can_view_kpi,
     pages: parsePages(r.pages),
     userCount: usageMap[r.code] ?? 0,
     createdAt: r.createdAt,
@@ -80,12 +92,25 @@ function validateRaidCreateScope(scope: string): RaidCreateScope {
   throw new Error("Niveau de création RAID invalide.");
 }
 
+function validateWorkflowMode(mode: string, label: string): WorkflowMode {
+  if (isWorkflowMode(mode)) return mode;
+  throw new Error(`Mode workflow invalide pour ${label}.`);
+}
+
 export async function createRole(data: {
   label: string;
   description?: string;
   color?: string;
   chantier_scope: string;
   raid_create_scope?: string;
+  jalon_create_mode?: string;
+  jalon_update_mode?: string;
+  jalon_delete_mode?: string;
+  workflow_can_approve?: boolean;
+  workflow_can_reject?: boolean;
+  workflow_can_view_requests?: boolean;
+  workflow_can_view_history?: boolean;
+  workflow_can_view_kpi?: boolean;
   pages: string[];
   code?: string;
 }) {
@@ -123,6 +148,23 @@ export async function createRole(data: {
       raid_create_scope: validateRaidCreateScope(
         data.raid_create_scope ?? "none"
       ),
+      jalon_create_mode: validateWorkflowMode(
+        data.jalon_create_mode ?? "DIRECT",
+        "création jalon"
+      ),
+      jalon_update_mode: validateWorkflowMode(
+        data.jalon_update_mode ?? "DIRECT",
+        "modification jalon"
+      ),
+      jalon_delete_mode: validateWorkflowMode(
+        data.jalon_delete_mode ?? "DIRECT",
+        "suppression jalon"
+      ),
+      workflow_can_approve: !!data.workflow_can_approve,
+      workflow_can_reject: !!data.workflow_can_reject,
+      workflow_can_view_requests: !!data.workflow_can_view_requests,
+      workflow_can_view_history: !!data.workflow_can_view_history,
+      workflow_can_view_kpi: !!data.workflow_can_view_kpi,
       pages,
     },
   });
@@ -139,6 +181,14 @@ export async function updateRole(
     color?: string;
     chantier_scope: string;
     raid_create_scope?: string;
+    jalon_create_mode?: string;
+    jalon_update_mode?: string;
+    jalon_delete_mode?: string;
+    workflow_can_approve?: boolean;
+    workflow_can_reject?: boolean;
+    workflow_can_view_requests?: boolean;
+    workflow_can_view_history?: boolean;
+    workflow_can_view_kpi?: boolean;
     pages: string[];
   }
 ) {
@@ -159,19 +209,46 @@ export async function updateRole(
     throw new Error("Sélectionnez au moins une page autorisée.");
   }
 
+  const isAdmin = role.code === "Admin";
+
   await prisma.appRole.update({
     where: { id },
     data: {
       label,
       description: data.description?.trim() ?? "",
       color: data.color?.trim() || role.color,
-      chantier_scope:
-        role.code === "Admin" ? "all" : validateScope(data.chantier_scope),
+      chantier_scope: isAdmin ? "all" : validateScope(data.chantier_scope),
       // Admin always programme-level RAID create
-      raid_create_scope:
-        role.code === "Admin"
-          ? "programme"
-          : validateRaidCreateScope(data.raid_create_scope ?? "none"),
+      raid_create_scope: isAdmin
+        ? "programme"
+        : validateRaidCreateScope(data.raid_create_scope ?? "none"),
+      jalon_create_mode: isAdmin
+        ? "DIRECT"
+        : validateWorkflowMode(
+            data.jalon_create_mode ?? "DIRECT",
+            "création jalon"
+          ),
+      jalon_update_mode: isAdmin
+        ? "DIRECT"
+        : validateWorkflowMode(
+            data.jalon_update_mode ?? "DIRECT",
+            "modification jalon"
+          ),
+      jalon_delete_mode: isAdmin
+        ? "DIRECT"
+        : validateWorkflowMode(
+            data.jalon_delete_mode ?? "DIRECT",
+            "suppression jalon"
+          ),
+      workflow_can_approve: isAdmin ? true : !!data.workflow_can_approve,
+      workflow_can_reject: isAdmin ? true : !!data.workflow_can_reject,
+      workflow_can_view_requests: isAdmin
+        ? true
+        : !!data.workflow_can_view_requests,
+      workflow_can_view_history: isAdmin
+        ? true
+        : !!data.workflow_can_view_history,
+      workflow_can_view_kpi: isAdmin ? true : !!data.workflow_can_view_kpi,
       pages,
     },
   });

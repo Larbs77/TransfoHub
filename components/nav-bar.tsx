@@ -32,6 +32,9 @@ import {
   Database,
   UsersRound,
   LayoutPanelLeft,
+  GitBranch,
+  ListChecks,
+  History,
 } from "lucide-react";
 import { AlertBell } from "@/components/alert-bell";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -79,6 +82,27 @@ const ALL_SECTIONS: NavSection[] = [
       { href: "/dashboards", label: "Dashboards", icon: Presentation },
       { href: "/rmds", label: "RMD", icon: Users },
       { href: "/calendrier", label: "Calendrier", icon: CalendarDays },
+    ],
+  },
+  {
+    label: "Workflow",
+    icon: GitBranch,
+    items: [
+      {
+        href: "/workflow/demandes",
+        label: "Centre de Validation",
+        icon: ListChecks,
+      },
+      {
+        href: "/workflow/historique",
+        label: "Historique des demandes",
+        icon: History,
+      },
+      {
+        href: "/workflow/dashboard",
+        label: "Dashboard Workflow",
+        icon: LayoutPanelLeft,
+      },
     ],
   },
   {

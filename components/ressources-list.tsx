@@ -13,6 +13,12 @@ import {
   ArrowDown,
   ChevronLeft,
   ChevronRight,
+  Search,
+  Contact,
+  UserCheck,
+  UserX,
+  KeyRound,
+  Plus,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,13 +32,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardAction,
+} from "@/components/ui/card";
 import { RessourceCard } from "./ressource-card";
 import { RessourceFormDialog } from "./ressource-form-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
@@ -54,7 +60,12 @@ interface RessourceWithStats {
   actif: boolean;
   profilId?: string | null;
   equipeHierarchieId?: string | null;
-  profil?: { id: string; nom: string; type_ressource: string; tjm_defaut: number } | null;
+  profil?: {
+    id: string;
+    nom: string;
+    type_ressource: string;
+    tjm_defaut: number;
+  } | null;
   equipeHierarchie?: { id: string; name: string; is_active: boolean } | null;
   equipesFonctionnelles?: {
     equipeId: string;
@@ -92,7 +103,13 @@ function resolveEquipeHierarchieName(
 }
 
 type ViewMode = "grid" | "table";
-type SortField = "nom_complet" | "type" | "organisation" | "membres" | "raids" | "tarif";
+type SortField =
+  | "nom_complet"
+  | "type"
+  | "organisation"
+  | "membres"
+  | "raids"
+  | "tarif";
 type SortDir = "asc" | "desc";
 
 function SortHeader({
@@ -110,18 +127,19 @@ function SortHeader({
 }) {
   return (
     <button
-      className="flex items-center gap-1 hover:text-foreground transition-colors -ml-2 px-2 py-1 rounded"
+      type="button"
+      className="inline-flex items-center gap-1 font-medium hover:text-foreground transition-colors"
       onClick={() => onSort(field)}
     >
       {label}
       {current === field ? (
         dir === "asc" ? (
-          <ArrowUp className="size-3.5" />
+          <ArrowUp className="size-3" />
         ) : (
-          <ArrowDown className="size-3.5" />
+          <ArrowDown className="size-3" />
         )
       ) : (
-        <ArrowUpDown className="size-3.5 opacity-40" />
+        <ArrowUpDown className="size-3 opacity-40" />
       )}
     </button>
   );
@@ -144,14 +162,15 @@ function PaginationControls({
   const to = Math.min(currentPage * pageSize, totalItems);
 
   return (
-    <div className="flex items-center justify-between mt-4">
+    <div className="flex items-center justify-between gap-3 border-t px-1 pt-4">
       <span className="text-xs text-muted-foreground">
         {from}–{to} sur {totalItems}
       </span>
       <div className="flex items-center gap-1">
         <Button
           variant="outline"
-          size="icon-xs"
+          size="icon"
+          className="size-7"
           disabled={currentPage <= 1}
           onClick={() => onPageChange(currentPage - 1)}
         >
@@ -196,7 +215,8 @@ function PaginationControls({
         })()}
         <Button
           variant="outline"
-          size="icon-xs"
+          size="icon"
+          className="size-7"
           disabled={currentPage >= totalPages}
           onClick={() => onPageChange(currentPage + 1)}
         >
@@ -231,14 +251,16 @@ export function RessourcesList({
   const [filterActif, setFilterActif] = useState("all");
   const [pageSize, setPageSize] = useState<number>(10);
   const [currentPage, setCurrentPage] = useState(1);
-  const [sortField, setSortField] = useState<SortField | null>(null);
+  const [sortField, setSortField] = useState<SortField | null>("nom_complet");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  const [editRessource, setEditRessource] = useState<RessourceWithStats | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editRessource, setEditRessource] = useState<RessourceWithStats | null>(
+    null
+  );
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // Build dynamic organisation options
   const orgOptions = useMemo(() => {
     const orgs = new Set(ressources.map((r) => r.organisation).filter(Boolean));
     return Array.from(orgs)
@@ -256,7 +278,10 @@ export function RessourcesList({
   }
 
   const hasActiveFilters =
-    search || filterType.length > 0 || filterOrg.length > 0 || filterActif !== "all";
+    search ||
+    filterType.length > 0 ||
+    filterOrg.length > 0 ||
+    filterActif !== "all";
 
   const filtered = useMemo(() => {
     let result = ressources;
@@ -340,312 +365,461 @@ export function RessourcesList({
     setFilterActif("all");
   }
 
+  const total = ressources.length;
+  const actifs = ressources.filter((r) => r.actif).length;
+  const inactifs = total - actifs;
+  const avecCompte = ressources.filter((r) => !!r.user).length;
+
   return (
-    <>
-      {/* Filter bar */}
-      <div className="space-y-3 mb-6">
-        <div className="flex flex-wrap items-center gap-3">
-          <Input
-            placeholder="Rechercher (nom, email, org)..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-64"
-          />
-          <MultiSelect
-            options={TYPE_OPTIONS}
-            selected={filterType}
-            onChange={setFilterType}
-            placeholder="Type"
-            className="w-40"
-          />
-          {orgOptions.length > 0 && (
-            <MultiSelect
-              options={orgOptions}
-              selected={filterOrg}
-              onChange={setFilterOrg}
-              placeholder="Organisation"
-              className="w-48"
-            />
-          )}
-          <Select value={filterActif} onValueChange={setFilterActif}>
-            <SelectTrigger className="w-28 h-9">
-              <SelectValue placeholder="Statut" />
-            </SelectTrigger>
-            <SelectContent>
-              {ACTIF_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+    <main className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Ressources</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Personnes du programme — avec ou sans compte applicatif
+        </p>
+      </div>
+
+      {/* KPI strip — same pattern as users page */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="flex items-center gap-3 rounded-lg border p-3">
+          <div className="flex size-9 items-center justify-center rounded-md bg-blue-500/10 text-blue-600">
+            <Contact className="size-5" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Total</p>
+            <p className="text-lg font-bold tabular-nums">{total}</p>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          {hasActiveFilters && (
-            <Button variant="ghost" size="sm" onClick={resetFilters}>
-              Réinitialiser
-            </Button>
-          )}
-          <span className="text-xs text-muted-foreground">
-            {filtered.length} / {ressources.length} ressource(s)
-          </span>
-          <div className="ml-auto flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-muted-foreground whitespace-nowrap">
-                Afficher
-              </label>
-              <Select
-                value={pageSize === 0 ? "all" : String(pageSize)}
-                onValueChange={(v) => {
-                  setPageSize(v === "all" ? 0 : Number(v));
-                  setCurrentPage(1);
-                }}
-              >
-                <SelectTrigger className="w-20 h-8" size="sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {[5, 10, 15, 20, 25, 30].map((n) => (
-                    <SelectItem key={n} value={String(n)}>
-                      {n}
-                    </SelectItem>
-                  ))}
-                  <SelectItem value="all">Tout</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-center gap-1 border rounded-md p-0.5">
-              <Button
-                variant={viewMode === "grid" ? "default" : "ghost"}
-                size="icon-xs"
-                onClick={() => setViewMode("grid")}
-                title="Vue cartes"
-              >
-                <LayoutGrid className="size-4" />
-              </Button>
-              <Button
-                variant={viewMode === "table" ? "default" : "ghost"}
-                size="icon-xs"
-                onClick={() => setViewMode("table")}
-                title="Vue tableau"
-              >
-                <TableIcon className="size-4" />
-              </Button>
-            </div>
+        <div className="flex items-center gap-3 rounded-lg border p-3">
+          <div className="flex size-9 items-center justify-center rounded-md bg-green-500/10 text-green-600">
+            <UserCheck className="size-5" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Actives</p>
+            <p className="text-lg font-bold tabular-nums">{actifs}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 rounded-lg border p-3">
+          <div className="flex size-9 items-center justify-center rounded-md bg-amber-500/10 text-amber-600">
+            <UserX className="size-5" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Inactives</p>
+            <p className="text-lg font-bold tabular-nums">{inactifs}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 rounded-lg border p-3">
+          <div className="flex size-9 items-center justify-center rounded-md bg-violet-500/10 text-violet-600">
+            <KeyRound className="size-5" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Avec compte</p>
+            <p className="text-lg font-bold tabular-nums">{avecCompte}</p>
           </div>
         </div>
       </div>
 
-      {/* Content */}
-      {viewMode === "grid" ? (
-        <>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {filtered.length === 0 ? (
-              <p className="col-span-full text-center text-muted-foreground py-8">
-                Aucune ressource trouvée
-              </p>
-            ) : (
-              paginated.map((r) => (
-                <RessourceCard
-                  key={r.id}
-                  ressource={r}
-                  equipes={equipes}
-                  activeRoles={activeRoles}
-                  canCreateAccount={canCreateAccount}
-                />
-              ))
-            )}
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Annuaire des ressources</CardTitle>
+            <CardDescription>
+              {filtered.length} ressource(s) sur {total}
+              {hasActiveFilters ? " (filtrées)" : ""}
+            </CardDescription>
           </div>
-          {pageSize > 0 && totalPages > 1 && (
-            <PaginationControls
-              currentPage={safePage}
-              totalPages={totalPages}
-              onPageChange={setCurrentPage}
-              totalItems={filtered.length}
-              pageSize={pageSize}
-            />
-          )}
-        </>
-      ) : (
-        <>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>
-                  <SortHeader label="Nom complet" field="nom_complet" current={sortField} dir={sortDir} onSort={handleSort} />
-                </TableHead>
-                <TableHead>
-                  <SortHeader label="Type" field="type" current={sortField} dir={sortDir} onSort={handleSort} />
-                </TableHead>
-                <TableHead>Profil</TableHead>
-                <TableHead>Équipe hier.</TableHead>
-                <TableHead>Compte</TableHead>
-                <TableHead>
-                  <SortHeader label="Chantiers" field="membres" current={sortField} dir={sortDir} onSort={handleSort} />
-                </TableHead>
-                <TableHead>
-                  <SortHeader label="RAID" field="raids" current={sortField} dir={sortDir} onSort={handleSort} />
-                </TableHead>
-                <TableHead>Statut</TableHead>
-                <TableHead className="w-[100px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={9}
-                    className="text-center text-muted-foreground py-8"
-                  >
-                    Aucune ressource trouvée
-                  </TableCell>
-                </TableRow>
-              ) : (
-                paginated.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell className="font-medium">
-                      <div>{r.nom_complet}</div>
-                      {r.email ? (
-                        <div className="text-[11px] text-muted-foreground">
-                          {r.email}
-                        </div>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        className="text-[10px]"
-                        style={{
-                          backgroundColor: RESSOURCE_TYPE_COLORS[r.type],
-                          color: "white",
-                        }}
-                      >
-                        {RESSOURCE_TYPE_LABELS[r.type] ?? r.type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {r.profil?.nom || "—"}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      <div>{resolveEquipeHierarchieName(r, equipes)}</div>
-                      {(r.equipesFonctionnelles?.length ?? 0) > 0 && (
-                        <div
-                          className="text-[11px] text-muted-foreground truncate max-w-[200px]"
-                          title={r.equipesFonctionnelles!
-                            .map((l) => l.equipe?.name)
-                            .filter(Boolean)
-                            .join(", ")}
-                        >
-                          {(() => {
-                            const names = r.equipesFonctionnelles!
-                              .map((l) => l.equipe?.name?.trim())
-                              .filter(Boolean) as string[];
-                            if (names.length === 0) {
-                              return `+${r.equipesFonctionnelles!.length} fonct.`;
-                            }
-                            if (names.length <= 2) return names.join(", ");
-                            return `${names.slice(0, 2).join(", ")} (+${names.length - 2})`;
-                          })()}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {r.user ? (
-                        <Badge className="text-[10px] bg-blue-600 hover:bg-blue-600">
-                          {r.user.username}
-                        </Badge>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">
-                          Sans compte
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {r._count.membres}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {r._count.raids}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={r.actif ? "default" : "secondary"}
-                        className={`text-[10px] ${r.actif ? "bg-emerald-500 hover:bg-emerald-600" : ""}`}
-                      >
-                        {r.actif ? "Actif" : "Inactif"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          onClick={() => setEditRessource(r)}
-                        >
-                          <Pencil className="size-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          onClick={() => {
-                            setDeleteError(null);
-                            setDeleteId(r.id);
-                          }}
-                        >
-                          <Trash2 className="size-3.5 text-destructive" />
-                        </Button>
-                        <Link href={`/ressources/${r.id}`}>
-                          <Button variant="ghost" size="icon-xs">
-                            <ArrowRight className="size-3.5" />
-                          </Button>
-                        </Link>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
+          <CardAction>
+            <Button
+              size="sm"
+              onClick={() => setCreateOpen(true)}
+              disabled={equipes.length === 0}
+            >
+              <Plus className="mr-1.5 size-4" />
+              Nouvelle ressource
+            </Button>
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          {/* Filters */}
+          <div className="mb-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative min-w-[200px] flex-1">
+                <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+                <Input
+                  placeholder="Rechercher (nom, email, org, équipe, login)..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <MultiSelect
+                options={TYPE_OPTIONS}
+                selected={filterType}
+                onChange={setFilterType}
+                placeholder="Type"
+                className="w-40"
+              />
+              {orgOptions.length > 0 && (
+                <MultiSelect
+                  options={orgOptions}
+                  selected={filterOrg}
+                  onChange={setFilterOrg}
+                  placeholder="Organisation"
+                  className="w-48"
+                />
               )}
-            </TableBody>
-          </Table>
+              <Select value={filterActif} onValueChange={setFilterActif}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue placeholder="Statut" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ACTIF_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-          {pageSize > 0 && totalPages > 1 && (
-            <PaginationControls
-              currentPage={safePage}
-              totalPages={totalPages}
-              onPageChange={setCurrentPage}
-              totalItems={filtered.length}
-              pageSize={pageSize}
-            />
+            <div className="flex flex-wrap items-center gap-3">
+              {hasActiveFilters && (
+                <Button variant="ghost" size="sm" onClick={resetFilters}>
+                  Réinitialiser
+                </Button>
+              )}
+              <div className="ml-auto flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-muted-foreground whitespace-nowrap">
+                    Afficher
+                  </label>
+                  <Select
+                    value={pageSize === 0 ? "all" : String(pageSize)}
+                    onValueChange={(v) => {
+                      setPageSize(v === "all" ? 0 : Number(v));
+                      setCurrentPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-8 w-20" size="sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[5, 10, 15, 20, 25, 30].map((n) => (
+                        <SelectItem key={n} value={String(n)}>
+                          {n}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="all">Tout</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-0.5 rounded-md border p-0.5">
+                  <Button
+                    variant={viewMode === "grid" ? "default" : "ghost"}
+                    size="icon"
+                    className="size-7"
+                    onClick={() => setViewMode("grid")}
+                    title="Vue cartes"
+                  >
+                    <LayoutGrid className="size-3.5" />
+                  </Button>
+                  <Button
+                    variant={viewMode === "table" ? "default" : "ghost"}
+                    size="icon"
+                    className="size-7"
+                    onClick={() => setViewMode("table")}
+                    title="Vue tableau"
+                  >
+                    <TableIcon className="size-3.5" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {viewMode === "grid" ? (
+            <>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {filtered.length === 0 ? (
+                  <p className="col-span-full py-12 text-center text-sm text-muted-foreground">
+                    Aucune ressource trouvée
+                  </p>
+                ) : (
+                  paginated.map((r) => (
+                    <RessourceCard
+                      key={r.id}
+                      ressource={r}
+                      equipes={equipes}
+                      activeRoles={activeRoles}
+                      canCreateAccount={canCreateAccount}
+                    />
+                  ))
+                )}
+              </div>
+              {pageSize > 0 && totalPages > 1 && (
+                <PaginationControls
+                  currentPage={safePage}
+                  totalPages={totalPages}
+                  onPageChange={setCurrentPage}
+                  totalItems={filtered.length}
+                  pageSize={pageSize}
+                />
+              )}
+            </>
+          ) : (
+            <>
+              <div className="overflow-x-auto rounded-md border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/50">
+                      <th className="px-3 py-2 text-left">
+                        <SortHeader
+                          label="Nom complet"
+                          field="nom_complet"
+                          current={sortField}
+                          dir={sortDir}
+                          onSort={handleSort}
+                        />
+                      </th>
+                      <th className="px-3 py-2 text-left">
+                        <SortHeader
+                          label="Type"
+                          field="type"
+                          current={sortField}
+                          dir={sortDir}
+                          onSort={handleSort}
+                        />
+                      </th>
+                      <th className="px-3 py-2 text-left font-medium">
+                        Profil
+                      </th>
+                      <th className="px-3 py-2 text-left font-medium">
+                        Équipe hier.
+                      </th>
+                      <th className="px-3 py-2 text-left font-medium">
+                        Compte
+                      </th>
+                      <th className="px-3 py-2 text-center">
+                        <SortHeader
+                          label="Chantiers"
+                          field="membres"
+                          current={sortField}
+                          dir={sortDir}
+                          onSort={handleSort}
+                        />
+                      </th>
+                      <th className="px-3 py-2 text-center">
+                        <SortHeader
+                          label="RAID"
+                          field="raids"
+                          current={sortField}
+                          dir={sortDir}
+                          onSort={handleSort}
+                        />
+                      </th>
+                      <th className="px-3 py-2 text-center font-medium">
+                        Statut
+                      </th>
+                      <th className="px-3 py-2 text-right font-medium">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={9}
+                          className="px-3 py-12 text-center text-muted-foreground"
+                        >
+                          Aucune ressource trouvée
+                        </td>
+                      </tr>
+                    ) : (
+                      paginated.map((r) => (
+                        <tr
+                          key={r.id}
+                          className="border-b last:border-0 hover:bg-muted/30"
+                        >
+                          <td className="px-3 py-2.5">
+                            <div className="font-medium">{r.nom_complet}</div>
+                            {r.email ? (
+                              <div className="text-[11px] text-muted-foreground">
+                                {r.email}
+                              </div>
+                            ) : null}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <Badge
+                              className="text-[10px]"
+                              style={{
+                                backgroundColor:
+                                  RESSOURCE_TYPE_COLORS[r.type],
+                                color: "white",
+                              }}
+                            >
+                              {RESSOURCE_TYPE_LABELS[r.type] ?? r.type}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-2.5 text-muted-foreground">
+                            {r.profil?.nom || "—"}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div className="text-sm">
+                              {resolveEquipeHierarchieName(r, equipes)}
+                            </div>
+                            {(r.equipesFonctionnelles?.length ?? 0) > 0 && (
+                              <div
+                                className="max-w-[200px] truncate text-[11px] text-muted-foreground"
+                                title={r
+                                  .equipesFonctionnelles!.map(
+                                    (l) => l.equipe?.name
+                                  )
+                                  .filter(Boolean)
+                                  .join(", ")}
+                              >
+                                {(() => {
+                                  const names = r.equipesFonctionnelles!
+                                    .map((l) => l.equipe?.name?.trim())
+                                    .filter(Boolean) as string[];
+                                  if (names.length === 0) {
+                                    return `+${r.equipesFonctionnelles!.length} fonct.`;
+                                  }
+                                  if (names.length <= 2)
+                                    return names.join(", ");
+                                  return `${names.slice(0, 2).join(", ")} (+${names.length - 2})`;
+                                })()}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            {r.user ? (
+                              <Badge className="bg-blue-600 text-[10px] hover:bg-blue-600">
+                                {r.user.username}
+                              </Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">
+                                Sans compte
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-center tabular-nums">
+                            {r._count.membres}
+                          </td>
+                          <td className="px-3 py-2.5 text-center tabular-nums">
+                            {r._count.raids}
+                          </td>
+                          <td className="px-3 py-2.5 text-center">
+                            {r.actif ? (
+                              <Badge className="bg-green-600 text-[10px]">
+                                Actif
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="secondary"
+                                className="text-[10px]"
+                              >
+                                Inactif
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="size-7"
+                                title="Modifier"
+                                onClick={() => setEditRessource(r)}
+                              >
+                                <Pencil className="size-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="size-7"
+                                title="Supprimer"
+                                onClick={() => {
+                                  setDeleteError(null);
+                                  setDeleteId(r.id);
+                                }}
+                              >
+                                <Trash2 className="size-3.5 text-destructive" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="size-7"
+                                title="Ouvrir"
+                                asChild
+                              >
+                                <Link href={`/ressources/${r.id}`}>
+                                  <ArrowRight className="size-3.5" />
+                                </Link>
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {pageSize > 0 && totalPages > 1 && (
+                <PaginationControls
+                  currentPage={safePage}
+                  totalPages={totalPages}
+                  onPageChange={setCurrentPage}
+                  totalItems={filtered.length}
+                  pageSize={pageSize}
+                />
+              )}
+            </>
           )}
 
-          {editRessource && (
-            <RessourceFormDialog
-              open={!!editRessource}
-              onOpenChange={(open) => !open && setEditRessource(null)}
-              ressource={editRessource}
-              equipes={equipes}
-              activeRoles={activeRoles}
-              canCreateAccount={canCreateAccount}
-            />
-          )}
-
-          <DeleteConfirmDialog
-            open={!!deleteId}
-            onOpenChange={(open) => !open && setDeleteId(null)}
-            onConfirm={async () => {
-              try {
-                if (deleteId) await deleteRessource(deleteId);
-              } catch (err) {
-                setDeleteError(
-                  err instanceof Error ? err.message : "Erreur de suppression"
-                );
-                throw err;
-              }
-            }}
-            title="Supprimer la ressource"
-          />
           {deleteError && (
-            <p className="text-xs text-destructive mt-2">{deleteError}</p>
+            <p className="mt-3 text-xs text-destructive">{deleteError}</p>
           )}
-        </>
+        </CardContent>
+      </Card>
+
+      {createOpen && (
+        <RessourceFormDialog
+          open={createOpen}
+          onOpenChange={(o) => !o && setCreateOpen(false)}
+          equipes={equipes}
+          activeRoles={activeRoles}
+          canCreateAccount={canCreateAccount}
+        />
       )}
-    </>
+
+      {editRessource && (
+        <RessourceFormDialog
+          open={!!editRessource}
+          onOpenChange={(open) => !open && setEditRessource(null)}
+          ressource={editRessource}
+          equipes={equipes}
+          activeRoles={activeRoles}
+          canCreateAccount={canCreateAccount}
+        />
+      )}
+
+      <DeleteConfirmDialog
+        open={!!deleteId}
+        onOpenChange={(open) => !open && setDeleteId(null)}
+        onConfirm={async () => {
+          try {
+            if (deleteId) await deleteRessource(deleteId);
+          } catch (err) {
+            setDeleteError(
+              err instanceof Error ? err.message : "Erreur de suppression"
+            );
+            throw err;
+          }
+        }}
+        title="Supprimer la ressource"
+      />
+    </main>
   );
 }

@@ -1,6 +1,9 @@
 /** localStorage key for light/dark preference */
 export const THEME_STORAGE_KEY = "pmo-theme";
 
+/** Shared theme type — keep outside client ThemeProvider module (server-safe). */
+export type Theme = "light" | "dark";
+
 /**
  * Blocking bootstrap for theme class on <html>.
  * Used with next/script strategy="beforeInteractive".

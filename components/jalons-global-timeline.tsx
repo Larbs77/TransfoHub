@@ -21,14 +21,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   Milestone,
   CheckCircle2,
   AlertTriangle,
@@ -36,8 +28,16 @@ import {
   TrendingUp,
   LayoutList,
   GanttChart,
-  Filter,
+  Search,
 } from "lucide-react";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardAction,
+} from "@/components/ui/card";
 import {
   PHASES,
   PHASE_COLORS,
@@ -107,9 +107,13 @@ function KpiCard({
         <Icon className="size-4" style={{ color }} />
       </div>
       <div>
-        <p className="text-xl font-bold">
+        <p className="text-lg font-bold tabular-nums">
           {value}
-          {suffix && <span className="text-sm font-normal text-muted-foreground">{suffix}</span>}
+          {suffix && (
+            <span className="text-sm font-normal text-muted-foreground">
+              {suffix}
+            </span>
+          )}
         </p>
         <p className="text-xs text-muted-foreground">{label}</p>
       </div>
@@ -252,14 +256,58 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
     return null;
   }
 
+  const hasActiveFilters =
+    !!search ||
+    phaseFilter !== "all" ||
+    statutFilter !== "all" ||
+    domaineFilter !== "all" ||
+    overdueOnly;
+
+  function resetFilters() {
+    setSearch("");
+    setPhaseFilter("all");
+    setStatutFilter("all");
+    setDomaineFilter("all");
+    setOverdueOnly(false);
+  }
+
   return (
-    <div className="space-y-4">
-      {/* KPI Summary */}
-      <div className="grid grid-cols-5 gap-3">
-        <KpiCard label="Total jalons" value={stats.total} icon={Milestone} color="#6366f1" />
-        <KpiCard label="Atteints" value={stats.atteints} icon={CheckCircle2} color="#22c55e" />
-        <KpiCard label="En retard" value={stats.enRetard} icon={AlertTriangle} color="#ef4444" />
-        <KpiCard label="À venir (30j)" value={stats.aVenir} icon={Clock} color="#3b82f6" />
+    <main className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">
+          Jalons &amp; Milestones
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Vue globale des jalons de tous les chantiers du programme
+        </p>
+      </div>
+
+      {/* KPI strip — same pattern as users / ressources */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <KpiCard
+          label="Total jalons"
+          value={stats.total}
+          icon={Milestone}
+          color="#6366f1"
+        />
+        <KpiCard
+          label="Atteints"
+          value={stats.atteints}
+          icon={CheckCircle2}
+          color="#22c55e"
+        />
+        <KpiCard
+          label="En retard"
+          value={stats.enRetard}
+          icon={AlertTriangle}
+          color="#ef4444"
+        />
+        <KpiCard
+          label="À venir (30j)"
+          value={stats.aVenir}
+          icon={Clock}
+          color="#3b82f6"
+        />
         <KpiCard
           label="Taux de réalisation"
           value={stats.tauxRealisation}
@@ -269,99 +317,127 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
         />
       </div>
 
-      {/* Filters + View toggle */}
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border p-3">
-        <Filter className="size-4 text-muted-foreground" />
-        <Input
-          placeholder="Rechercher jalon ou chantier..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-52 h-8 text-xs"
-        />
-        <Select value={phaseFilter} onValueChange={setPhaseFilter}>
-          <SelectTrigger className="w-32 h-8 text-xs">
-            <SelectValue placeholder="Phase" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Toutes phases</SelectItem>
-            {PHASES.map((p) => (
-              <SelectItem key={p} value={p}>{p}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={statutFilter} onValueChange={setStatutFilter}>
-          <SelectTrigger className="w-32 h-8 text-xs">
-            <SelectValue placeholder="Statut" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Tous statuts</SelectItem>
-            {STATUT_JALON_LIST.map((s) => (
-              <SelectItem key={s} value={s}>{s}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={domaineFilter} onValueChange={setDomaineFilter}>
-          <SelectTrigger className="w-44 h-8 text-xs">
-            <SelectValue placeholder="Domaine" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Tous domaines</SelectItem>
-            {domaines.map((d) => (
-              <SelectItem key={d} value={d}>
-                {DOMAINE_LABELS[d] ?? d}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button
-          size="sm"
-          variant={overdueOnly ? "default" : "outline"}
-          className="h-8 text-xs"
-          onClick={() => setOverdueOnly(!overdueOnly)}
-        >
-          <AlertTriangle className="size-3" />
-          En retard
-        </Button>
-        <div className="ml-auto flex items-center gap-1">
-          {view === "timeline" && (
-            <Select value={zoom} onValueChange={(v) => setZoom(v as ZoomLevel)}>
-              <SelectTrigger className="w-28 h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="month">Mois</SelectItem>
-                <SelectItem value="quarter">Trimestre</SelectItem>
-              </SelectContent>
-            </Select>
-          )}
-          <Button
-            size="sm"
-            variant={view === "timeline" ? "default" : "outline"}
-            className="h-8"
-            onClick={() => setView("timeline")}
-          >
-            <GanttChart className="size-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant={view === "table" ? "default" : "outline"}
-            className="h-8"
-            onClick={() => setView("table")}
-          >
-            <LayoutList className="size-4" />
-          </Button>
-        </div>
-      </div>
-
-      <p className="text-xs text-muted-foreground">
-        {filtered.length} jalon(s) affiché(s) sur {jalons.length}
-      </p>
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Registre des jalons</CardTitle>
+            <CardDescription>
+              {filtered.length} jalon(s) sur {jalons.length}
+              {hasActiveFilters ? " (filtrés)" : ""}
+            </CardDescription>
+          </div>
+          <CardAction>
+            <div className="flex items-center gap-2">
+              {view === "timeline" && (
+                <Select
+                  value={zoom}
+                  onValueChange={(v) => setZoom(v as ZoomLevel)}
+                >
+                  <SelectTrigger className="h-8 w-[120px]" size="sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="month">Mois</SelectItem>
+                    <SelectItem value="quarter">Trimestre</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+              <div className="flex items-center gap-0.5 rounded-md border p-0.5">
+                <Button
+                  variant={view === "timeline" ? "default" : "ghost"}
+                  size="icon"
+                  className="size-7"
+                  onClick={() => setView("timeline")}
+                  title="Vue timeline"
+                >
+                  <GanttChart className="size-3.5" />
+                </Button>
+                <Button
+                  variant={view === "table" ? "default" : "ghost"}
+                  size="icon"
+                  className="size-7"
+                  onClick={() => setView("table")}
+                  title="Vue tableau"
+                >
+                  <LayoutList className="size-3.5" />
+                </Button>
+              </div>
+            </div>
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          {/* Filters */}
+          <div className="mb-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative min-w-[200px] flex-1">
+                <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+                <Input
+                  placeholder="Rechercher jalon ou chantier..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <Select value={phaseFilter} onValueChange={setPhaseFilter}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="Phase" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Toutes phases</SelectItem>
+                  {PHASES.map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {p}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={statutFilter} onValueChange={setStatutFilter}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="Statut" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous statuts</SelectItem>
+                  {STATUT_JALON_LIST.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={domaineFilter} onValueChange={setDomaineFilter}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Domaine" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous domaines</SelectItem>
+                  {domaines.map((d) => (
+                    <SelectItem key={d} value={d}>
+                      {DOMAINE_LABELS[d] ?? d}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                size="sm"
+                variant={overdueOnly ? "default" : "outline"}
+                onClick={() => setOverdueOnly(!overdueOnly)}
+              >
+                <AlertTriangle className="size-3.5" />
+                En retard
+              </Button>
+              {hasActiveFilters && (
+                <Button variant="ghost" size="sm" onClick={resetFilters}>
+                  Réinitialiser
+                </Button>
+              )}
+            </div>
+          </div>
 
       {/* Timeline View */}
       {view === "timeline" && (
         <div
           ref={containerRef}
-          className="border rounded-lg overflow-hidden relative"
+          className="relative overflow-hidden rounded-md border"
         >
           {filtered.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">
@@ -552,7 +628,7 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
 
       {/* Legend */}
       {view === "timeline" && (
-        <div className="flex flex-wrap gap-3 text-[10px] text-muted-foreground">
+        <div className="mt-3 flex flex-wrap gap-3 text-[10px] text-muted-foreground">
           {Object.entries(STATUT_JALON_COLORS).map(([statut, color]) => (
             <span key={statut} className="flex items-center gap-1">
               <span
@@ -563,7 +639,7 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
             </span>
           ))}
           <span className="flex items-center gap-1">
-            <span className="inline-block w-3 h-0.5 border-t-2 border-dashed border-red-500" />
+            <span className="inline-block h-0.5 w-3 border-t-2 border-dashed border-red-500" />
             Aujourd&apos;hui
           </span>
         </div>
@@ -571,90 +647,108 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
 
       {/* Table View */}
       {view === "table" && (
-        <div className="border rounded-lg overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Chantier</TableHead>
-                <TableHead>Phase</TableHead>
-                <TableHead>Jalon</TableHead>
-                <TableHead>Date cible</TableHead>
-                <TableHead>Date réelle</TableHead>
-                <TableHead className="text-center">Écart</TableHead>
-                <TableHead>Statut</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-muted/50">
+                <th className="px-3 py-2 text-left font-medium">Chantier</th>
+                <th className="px-3 py-2 text-left font-medium">Phase</th>
+                <th className="px-3 py-2 text-left font-medium">Jalon</th>
+                <th className="px-3 py-2 text-left font-medium">Date cible</th>
+                <th className="px-3 py-2 text-left font-medium">Date réelle</th>
+                <th className="px-3 py-2 text-center font-medium">Écart</th>
+                <th className="px-3 py-2 text-left font-medium">Statut</th>
+              </tr>
+            </thead>
+            <tbody>
               {filtered.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="px-3 py-12 text-center text-muted-foreground"
+                  >
                     Aucun jalon correspondant aux filtres
-                  </TableCell>
-                </TableRow>
+                  </td>
+                </tr>
               ) : (
                 filtered.map((j) => {
                   const e = ecartLabel(j);
                   return (
-                    <TableRow
+                    <tr
                       key={j.id}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => router.push(`/chantiers/${j.chantier.id}`)}
+                      className="cursor-pointer border-b last:border-0 hover:bg-muted/30"
+                      onClick={() =>
+                        router.push(`/chantiers/${j.chantier.id}`)
+                      }
                     >
-                      <TableCell>
-                        <span className="text-xs font-mono text-muted-foreground mr-1">
+                      <td className="px-3 py-2.5">
+                        <span className="mr-1 font-mono text-xs text-muted-foreground">
                           {j.chantier.code}
                         </span>
                         <span className="text-xs">{j.chantier.nom}</span>
-                      </TableCell>
-                      <TableCell>
+                      </td>
+                      <td className="px-3 py-2.5">
                         <Badge
                           variant="secondary"
                           className="text-[10px]"
                           style={{
-                            backgroundColor: (PHASE_COLORS[j.phase] ?? "#6b7280") + "20",
+                            backgroundColor:
+                              (PHASE_COLORS[j.phase] ?? "#6b7280") + "20",
                             color: PHASE_COLORS[j.phase] ?? "#6b7280",
                           }}
                         >
                           {j.phase}
                         </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm">{j.nom}</TableCell>
-                      <TableCell className="text-xs">
-                        {format(new Date(j.date_cible), "dd MMM yyyy", { locale: fr })}
-                      </TableCell>
-                      <TableCell className="text-xs">
+                      </td>
+                      <td className="px-3 py-2.5 font-medium">{j.nom}</td>
+                      <td className="px-3 py-2.5 text-xs tabular-nums">
+                        {format(new Date(j.date_cible), "dd MMM yyyy", {
+                          locale: fr,
+                        })}
+                      </td>
+                      <td className="px-3 py-2.5 text-xs tabular-nums">
                         {j.date_reelle
-                          ? format(new Date(j.date_reelle), "dd MMM yyyy", { locale: fr })
+                          ? format(new Date(j.date_reelle), "dd MMM yyyy", {
+                              locale: fr,
+                            })
                           : "—"}
-                      </TableCell>
-                      <TableCell className="text-center">
+                      </td>
+                      <td className="px-3 py-2.5 text-center">
                         {e ? (
-                          <span className="text-xs font-semibold" style={{ color: e.color }}>
+                          <span
+                            className="text-xs font-semibold"
+                            style={{ color: e.color }}
+                          >
                             {e.label}
                           </span>
                         ) : (
                           "—"
                         )}
-                      </TableCell>
-                      <TableCell>
+                      </td>
+                      <td className="px-3 py-2.5">
                         <Badge
                           variant="secondary"
+                          className="text-[10px]"
                           style={{
-                            backgroundColor: (STATUT_JALON_COLORS[j.statut] ?? "#94a3b8") + "20",
+                            backgroundColor:
+                              (STATUT_JALON_COLORS[j.statut] ?? "#94a3b8") +
+                              "20",
                             color: STATUT_JALON_COLORS[j.statut] ?? "#94a3b8",
                           }}
                         >
                           {j.statut}
                         </Badge>
-                      </TableCell>
-                    </TableRow>
+                      </td>
+                    </tr>
                   );
                 })
               )}
-            </TableBody>
-          </Table>
+            </tbody>
+          </table>
         </div>
       )}
-    </div>
+        </CardContent>
+      </Card>
+    </main>
   );
 }

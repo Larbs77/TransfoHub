@@ -15,6 +15,15 @@ export type RoleRecord = {
   chantier_scope: string;
   /** programme | chantier | none — who may create RAID entries */
   raid_create_scope: RaidCreateScope;
+  /** Jalon workflow: DIRECT | VALIDATION | INTERDIT */
+  jalon_create_mode: string;
+  jalon_update_mode: string;
+  jalon_delete_mode: string;
+  workflow_can_approve: boolean;
+  workflow_can_reject: boolean;
+  workflow_can_view_requests: boolean;
+  workflow_can_view_history: boolean;
+  workflow_can_view_kpi: boolean;
   pages: string[];
   createdAt: Date;
   updatedAt: Date;
@@ -66,6 +75,14 @@ function mapRole(row: {
   is_system: boolean;
   chantier_scope: string;
   raid_create_scope?: string | null;
+  jalon_create_mode?: string | null;
+  jalon_update_mode?: string | null;
+  jalon_delete_mode?: string | null;
+  workflow_can_approve?: boolean | null;
+  workflow_can_reject?: boolean | null;
+  workflow_can_view_requests?: boolean | null;
+  workflow_can_view_history?: boolean | null;
+  workflow_can_view_kpi?: boolean | null;
   pages: unknown;
   createdAt: Date;
   updatedAt: Date;
@@ -80,6 +97,14 @@ function mapRole(row: {
     is_system: row.is_system,
     chantier_scope: row.chantier_scope,
     raid_create_scope: normalizeRaidCreateScope(row.raid_create_scope),
+    jalon_create_mode: row.jalon_create_mode ?? "DIRECT",
+    jalon_update_mode: row.jalon_update_mode ?? "DIRECT",
+    jalon_delete_mode: row.jalon_delete_mode ?? "DIRECT",
+    workflow_can_approve: !!row.workflow_can_approve,
+    workflow_can_reject: !!row.workflow_can_reject,
+    workflow_can_view_requests: !!row.workflow_can_view_requests,
+    workflow_can_view_history: !!row.workflow_can_view_history,
+    workflow_can_view_kpi: !!row.workflow_can_view_kpi,
     pages: parsePages(row.pages),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

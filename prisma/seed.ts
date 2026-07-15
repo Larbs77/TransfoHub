@@ -8,6 +8,7 @@ const prisma = createPrismaClient();
 
 async function main() {
   // Nettoyage (order matters for FK constraints)
+  await prisma.workflowRequest.deleteMany().catch(() => undefined);
   await prisma.jalonTemplate.deleteMany();
   await prisma.consultationQuestion.deleteMany();
   await prisma.favoriChantier.deleteMany();
@@ -42,6 +43,14 @@ async function main() {
       is_system: true,
       chantier_scope: "all",
       raid_create_scope: "programme",
+      jalon_create_mode: "DIRECT",
+      jalon_update_mode: "DIRECT",
+      jalon_delete_mode: "DIRECT",
+      workflow_can_approve: true,
+      workflow_can_reject: true,
+      workflow_can_view_requests: true,
+      workflow_can_view_history: true,
+      workflow_can_view_kpi: true,
       pages: DEFAULT_ROLE_PAGES.Admin ?? ALL_PAGE_PATHS,
     },
     {
@@ -52,6 +61,14 @@ async function main() {
       is_system: true,
       chantier_scope: "all",
       raid_create_scope: "none",
+      jalon_create_mode: "DIRECT",
+      jalon_update_mode: "DIRECT",
+      jalon_delete_mode: "DIRECT",
+      workflow_can_approve: true,
+      workflow_can_reject: true,
+      workflow_can_view_requests: true,
+      workflow_can_view_history: true,
+      workflow_can_view_kpi: true,
       pages: DEFAULT_ROLE_PAGES.Programme_Office,
     },
     {
@@ -62,6 +79,14 @@ async function main() {
       is_system: true,
       chantier_scope: "assigned",
       raid_create_scope: "none",
+      jalon_create_mode: "DIRECT",
+      jalon_update_mode: "VALIDATION",
+      jalon_delete_mode: "VALIDATION",
+      workflow_can_approve: false,
+      workflow_can_reject: false,
+      workflow_can_view_requests: true,
+      workflow_can_view_history: true,
+      workflow_can_view_kpi: false,
       pages: DEFAULT_ROLE_PAGES.PMO_Chantier,
     },
     {
@@ -72,6 +97,14 @@ async function main() {
       is_system: true,
       chantier_scope: "none",
       raid_create_scope: "none",
+      jalon_create_mode: "INTERDIT",
+      jalon_update_mode: "INTERDIT",
+      jalon_delete_mode: "INTERDIT",
+      workflow_can_approve: false,
+      workflow_can_reject: false,
+      workflow_can_view_requests: false,
+      workflow_can_view_history: false,
+      workflow_can_view_kpi: false,
       pages: DEFAULT_ROLE_PAGES.Workforce_Manager,
     },
   ];

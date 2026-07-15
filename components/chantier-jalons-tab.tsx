@@ -27,6 +27,7 @@ import {
   Wand2,
   MapPin,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { deleteJalon, applyJalonTemplate } from "@/app/(app)/actions";
 import { JalonFormDialog } from "@/components/jalon-form-dialog";
 import {
@@ -34,6 +35,15 @@ import {
   PHASE_COLORS,
   STATUT_JALON_COLORS,
 } from "@/lib/jalon-labels";
+import type { JalonWorkflowCaps, WorkflowMode } from "@/lib/workflow-shared";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 
 interface JalonData {
   id: string;
@@ -49,11 +59,21 @@ interface JalonData {
   commentaire: string;
 }
 
+interface PendingInfo {
+  id: string;
+  operation: string;
+  motif: string;
+  requesterName: string;
+}
+
 interface Props {
   jalons: JalonData[];
   chantierId: string;
   dateDebut: Date;
   dateFin: Date;
+  workflowCaps?: JalonWorkflowCaps;
+  pendingByEntityId?: Record<string, PendingInfo>;
+  pendingCreatesCount?: number;
 }
 
 function KpiCard({
@@ -83,11 +103,43 @@ function KpiCard({
   );
 }
 
-export function ChantierJalonsTab({ jalons, chantierId, dateDebut, dateFin }: Props) {
+const DEFAULT_CAPS: JalonWorkflowCaps = {
+  create: "DIRECT",
+  update: "DIRECT",
+  delete: "DIRECT",
+  canApprove: false,
+  canReject: false,
+  canViewRequests: false,
+  canViewHistory: false,
+  canViewKpi: false,
+};
+
+export function ChantierJalonsTab({
+  jalons,
+  chantierId,
+  dateDebut,
+  dateFin,
+  workflowCaps = DEFAULT_CAPS,
+  pendingByEntityId = {},
+  pendingCreatesCount = 0,
+}: Props) {
+  const router = useRouter();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editJalon, setEditJalon] = useState<JalonData | null>(null);
   const [defaultPhase, setDefaultPhase] = useState<string | undefined>();
   const [applyingTemplate, setApplyingTemplate] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<JalonData | null>(null);
+  const [deleteMotif, setDeleteMotif] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [toast, setToast] = useState("");
+
+  const canCreate = workflowCaps.create !== "INTERDIT";
+  const canUpdate = workflowCaps.update !== "INTERDIT";
+  const canDelete = workflowCaps.delete !== "INTERDIT";
+  const formMode: WorkflowMode = editJalon
+    ? workflowCaps.update
+    : workflowCaps.create;
 
   // Stable "now" to avoid SSR/client hydration mismatch
   const [now] = useState(() => new Date());
@@ -126,15 +178,41 @@ export function ChantierJalonsTab({ jalons, chantierId, dateDebut, dateFin }: Pr
     return { days, label: `${days}j`, color: "#22c55e" };
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm("Supprimer ce jalon ?")) return;
-    await deleteJalon(id);
+  async function handleDeleteConfirm() {
+    if (!deleteTarget) return;
+    setDeleteError("");
+    if (!deleteMotif.trim()) {
+      setDeleteError(
+        workflowCaps.delete === "VALIDATION"
+          ? "Le motif de la demande est obligatoire."
+          : "Le commentaire est obligatoire pour supprimer un jalon."
+      );
+      return;
+    }
+    setDeleting(true);
+    try {
+      const result = await deleteJalon(deleteTarget.id, {
+        motif: deleteMotif.trim(),
+      });
+      setDeleteTarget(null);
+      setDeleteMotif("");
+      if (result.mode === "validation") {
+        setToast("Demande de suppression soumise — en attente de validation.");
+      }
+      router.refresh();
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : "Erreur");
+    } finally {
+      setDeleting(false);
+    }
   }
 
   async function handleApplyTemplate() {
+    if (!canCreate) return;
     setApplyingTemplate(true);
     try {
       await applyJalonTemplate(chantierId);
+      router.refresh();
     } catch {
       // template already applied
     }
@@ -302,7 +380,7 @@ export function ChantierJalonsTab({ jalons, chantierId, dateDebut, dateFin }: Pr
           </CardDescription>
           <CardAction>
             <div className="flex gap-2">
-              {total === 0 && (
+              {total === 0 && canCreate && workflowCaps.create === "DIRECT" && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -317,24 +395,41 @@ export function ChantierJalonsTab({ jalons, chantierId, dateDebut, dateFin }: Pr
                   Appliquer modèle
                 </Button>
               )}
-              <Button
-                size="sm"
-                onClick={() => {
-                  setEditJalon(null);
-                  setDefaultPhase(undefined);
-                  setDialogOpen(true);
-                }}
-              >
-                <Plus className="size-4" />
-                Nouveau jalon
-              </Button>
+              {canCreate && (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setEditJalon(null);
+                    setDefaultPhase(undefined);
+                    setDialogOpen(true);
+                  }}
+                >
+                  <Plus className="size-4" />
+                  {workflowCaps.create === "VALIDATION"
+                    ? "Demander un jalon"
+                    : "Nouveau jalon"}
+                </Button>
+              )}
             </div>
           </CardAction>
         </CardHeader>
         <CardContent>
+          {toast && (
+            <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
+              {toast}
+            </div>
+          )}
+          {pendingCreatesCount > 0 && (
+            <div className="mb-3 rounded-md border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs">
+              {pendingCreatesCount} demande(s) de création en attente de validation.
+            </div>
+          )}
           {total === 0 ? (
             <div className="text-center py-8 text-sm text-muted-foreground">
-              Aucun jalon. Cliquez sur &quot;Appliquer modèle&quot; pour créer les jalons standard.
+              Aucun jalon.
+              {canCreate && workflowCaps.create === "DIRECT"
+                ? " Cliquez sur « Appliquer modèle » pour créer les jalons standard."
+                : ""}
             </div>
           ) : (
             <Tabs defaultValue={defaultTab} className="space-y-3">
@@ -377,20 +472,22 @@ export function ChantierJalonsTab({ jalons, chantierId, dateDebut, dateFin }: Pr
                   ) : (
                     <div className="space-y-3">
                       {/* Add button for this phase */}
-                      <div className="flex justify-end">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setEditJalon(null);
-                            setDefaultPhase(group.phase);
-                            setDialogOpen(true);
-                          }}
-                        >
-                          <Plus className="size-3" />
-                          Ajouter à {group.phase}
-                        </Button>
-                      </div>
+                      {canCreate && (
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setEditJalon(null);
+                              setDefaultPhase(group.phase);
+                              setDialogOpen(true);
+                            }}
+                          >
+                            <Plus className="size-3" />
+                            Ajouter à {group.phase}
+                          </Button>
+                        </div>
+                      )}
 
                       <Table>
                         <TableHeader>
@@ -406,6 +503,7 @@ export function ChantierJalonsTab({ jalons, chantierId, dateDebut, dateFin }: Pr
                         <TableBody>
                           {group.items.map((j) => {
                             const e = ecart(j);
+                            const pending = pendingByEntityId[j.id];
                             return (
                               <TableRow key={j.id}>
                                 <TableCell>
@@ -415,6 +513,14 @@ export function ChantierJalonsTab({ jalons, chantierId, dateDebut, dateFin }: Pr
                                       <p className="text-xs text-muted-foreground truncate max-w-[180px]">
                                         {j.description}
                                       </p>
+                                    )}
+                                    {pending && (
+                                      <Badge
+                                        variant="outline"
+                                        className="mt-1 text-[10px] border-amber-500/50 text-amber-700 dark:text-amber-300"
+                                      >
+                                        Demande {pending.operation} en attente
+                                      </Badge>
                                     )}
                                   </div>
                                 </TableCell>
@@ -451,25 +557,43 @@ export function ChantierJalonsTab({ jalons, chantierId, dateDebut, dateFin }: Pr
                                 </TableCell>
                                 <TableCell>
                                   <div className="flex gap-1">
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="h-7 w-7 p-0"
-                                      onClick={() => {
-                                        setEditJalon(j);
-                                        setDialogOpen(true);
-                                      }}
-                                    >
-                                      <Pencil className="size-3" />
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                                      onClick={() => handleDelete(j.id)}
-                                    >
-                                      <Trash2 className="size-3" />
-                                    </Button>
+                                    {canUpdate && !pending && (
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-7 w-7 p-0"
+                                        title={
+                                          workflowCaps.update === "VALIDATION"
+                                            ? "Demander une modification"
+                                            : "Modifier"
+                                        }
+                                        onClick={() => {
+                                          setEditJalon(j);
+                                          setDialogOpen(true);
+                                        }}
+                                      >
+                                        <Pencil className="size-3" />
+                                      </Button>
+                                    )}
+                                    {canDelete && !pending && (
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                                        title={
+                                          workflowCaps.delete === "VALIDATION"
+                                            ? "Demander une suppression"
+                                            : "Supprimer"
+                                        }
+                                        onClick={() => {
+                                          setDeleteError("");
+                                          setDeleteMotif("");
+                                          setDeleteTarget(j);
+                                        }}
+                                      >
+                                        <Trash2 className="size-3" />
+                                      </Button>
+                                    )}
                                   </div>
                                 </TableCell>
                               </TableRow>
@@ -493,7 +617,73 @@ export function ChantierJalonsTab({ jalons, chantierId, dateDebut, dateFin }: Pr
         jalon={editJalon}
         chantierId={chantierId}
         defaultPhase={defaultPhase}
+        workflowMode={formMode === "INTERDIT" ? "DIRECT" : formMode}
+        onResult={(r) => {
+          if (r.mode === "validation") {
+            setToast("Demande soumise — en attente de validation.");
+          }
+          router.refresh();
+        }}
       />
+
+      <Dialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => {
+          if (!o) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {workflowCaps.delete === "VALIDATION"
+                ? "Demande de suppression"
+                : "Supprimer le jalon"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {deleteTarget
+                ? workflowCaps.delete === "VALIDATION"
+                  ? `Soumettre une demande de suppression pour « ${deleteTarget.nom} » ?`
+                  : `Confirmer la suppression de « ${deleteTarget.nom} » ? Un commentaire est obligatoire.`
+                : ""}
+            </p>
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">
+                {workflowCaps.delete === "VALIDATION"
+                  ? "Motif"
+                  : "Commentaire"}{" "}
+                <span className="text-destructive">*</span>
+              </label>
+              <Input
+                value={deleteMotif}
+                onChange={(e) => setDeleteMotif(e.target.value)}
+                placeholder="Justifiez la suppression..."
+              />
+            </div>
+            {deleteError && (
+              <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 text-sm text-destructive">
+                {deleteError}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+              Annuler
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleting}
+              onClick={handleDeleteConfirm}
+            >
+              {deleting && <Loader2 className="size-4 animate-spin" />}
+              {workflowCaps.delete === "VALIDATION"
+                ? "Soumettre"
+                : "Supprimer"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

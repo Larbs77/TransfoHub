@@ -186,12 +186,60 @@ model AppRole {
   /// - chantier: only chantiers where the user is attached as a Ressource
   /// - none: cannot create RAID (default)
   raid_create_scope String @default("none")
+  /// Jalon workflow mode per operation: DIRECT | VALIDATION | INTERDIT
+  jalon_create_mode String @default("DIRECT")
+  jalon_update_mode String @default("DIRECT")
+  jalon_delete_mode String @default("DIRECT")
+  /// Workflow governance capabilities (not tied to role names)
+  workflow_can_approve       Boolean @default(false)
+  workflow_can_reject        Boolean @default(false)
+  workflow_can_view_requests Boolean @default(false)
+  workflow_can_view_history  Boolean @default(false)
+  workflow_can_view_kpi      Boolean @default(false)
   /// Allowed app page paths (JSON string array)
   pages          Json
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   @@index([is_active])
+}
+
+/// Generic governance workflow request (first use-case: jalons).
+/// Never physically deleted — permanent audit trail.
+model WorkflowRequest {
+  id            String    @id @default(uuid())
+  /// Business object type e.g. jalon (future: raid, livrable…)
+  entityType    String
+  /// create | update | delete
+  operation     String
+  /// EN_ATTENTE | APPROUVEE | REJETEE
+  status        String    @default("EN_ATTENTE")
+  /// Target entity id (null for create until approved)
+  entityId      String?
+  entityLabel   String    @default("")
+  chantierId    String?
+  requesterId   String
+  requesterName String    @default("")
+  approverId    String?
+  approverName  String    @default("")
+  motif         String
+  rejectMotif   String    @default("")
+  /// Snapshot before change (JSON)
+  oldValues     Json?
+  /// Proposed values (JSON)
+  newValues     Json?
+  /// Array of decision events [{at, status, actorId, actorName, note?}]
+  decisionHistory Json?
+  priority      String    @default("")
+  createdAt     DateTime  @default(now())
+  processedAt   DateTime?
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([entityType, operation, status])
+  @@index([entityId, status])
+  @@index([chantierId])
+  @@index([requesterId])
 }
 
 model MembreEquipe {

@@ -1,7 +1,12 @@
 import { notFound } from "next/navigation";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { getChantierById, getBurnRateChantier, getConsultationQuestions } from "@/app/(app)/actions";
+import {
+  getChantierById,
+  getBurnRateChantier,
+  getConsultationQuestions,
+  getJalonWorkflowUiState,
+} from "@/app/(app)/actions";
 import { AccessDenied } from "@/components/access-denied";
 import {
   DOMAINE_LABELS,
@@ -44,12 +49,13 @@ interface Props {
 export default async function ChantierDetailPage({ params }: Props) {
   const { id } = await params;
 
-  let chantier, burnRate, consultationQuestions;
+  let chantier, burnRate, consultationQuestions, jalonWorkflow;
   try {
-    [chantier, burnRate, consultationQuestions] = await Promise.all([
+    [chantier, burnRate, consultationQuestions, jalonWorkflow] = await Promise.all([
       getChantierById(id),
       getBurnRateChantier(id),
       getConsultationQuestions(id),
+      getJalonWorkflowUiState(id),
     ]);
   } catch (e: unknown) {
     if (e instanceof Error && e.message.includes("non autorisé")) {
@@ -270,6 +276,9 @@ export default async function ChantierDetailPage({ params }: Props) {
               chantierId={chantier.id}
               dateDebut={chantier.date_debut}
               dateFin={chantier.date_fin}
+              workflowCaps={jalonWorkflow.caps}
+              pendingByEntityId={jalonWorkflow.pendingByEntityId}
+              pendingCreatesCount={jalonWorkflow.pendingCreates.length}
             />
           }
           jalonsCount={chantier.jalons.length}
