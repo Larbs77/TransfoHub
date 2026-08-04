@@ -12,6 +12,7 @@ import {
   getTemplateCsv,
   rowsToCsv,
   buildPreviewReport,
+  formatCsvDate,
   RESSOURCE_CSV_COLUMNS,
   RAID_CSV_COLUMNS,
 } from "@/lib/csv-data-admin";
@@ -66,6 +67,12 @@ export async function getDataTableCounts(): Promise<
     prisma.raid.count(),
   ]);
   return { ressources, raid };
+}
+
+/** Nombre de chantiers (badge onglet Planning jalons). */
+export async function getChantierCountForImport(): Promise<number> {
+  await requireDataAdmin();
+  return prisma.chantier.count();
 }
 
 export async function exportTableCsv(
@@ -124,11 +131,9 @@ export async function exportTableCsv(
     r.responsable,
     r.responsableRessource?.email ?? "",
     r.statut,
-    r.date_identification
-      ? r.date_identification.toISOString().slice(0, 10)
-      : "",
-    r.date_revision ? r.date_revision.toISOString().slice(0, 10) : "",
-    r.date_echeance ? r.date_echeance.toISOString().slice(0, 10) : "",
+    formatCsvDate(r.date_identification),
+    formatCsvDate(r.date_revision),
+    formatCsvDate(r.date_echeance),
     r.commentaires,
   ]);
   return { fileName, csv: rowsToCsv(headers, data) };

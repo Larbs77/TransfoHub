@@ -125,17 +125,17 @@ export const RAID_CSV_COLUMNS: CsvColumn[] = [
   {
     key: "date_identification",
     header: "date_identification",
-    description: "YYYY-MM-DD",
+    description: "jj/mm/aaaa",
   },
   {
     key: "date_revision",
     header: "date_revision",
-    description: "YYYY-MM-DD",
+    description: "jj/mm/aaaa",
   },
   {
     key: "date_echeance",
     header: "date_echeance",
-    description: "YYYY-MM-DD",
+    description: "jj/mm/aaaa",
   },
   { key: "commentaires", header: "commentaires", description: "Commentaires" },
 ];
@@ -167,17 +167,213 @@ export const DATA_TABLE_META: Record<
 
 export const DATA_TABLE_KEYS: DataTableKey[] = ["ressources", "raid"];
 
+// ── Dates CSV (format produit : jj/mm/aaaa) ───────────
+
+/** Format date for all TransfoHub CSV import/export files: jj/mm/aaaa */
+export function formatCsvDate(
+  d: Date | string | null | undefined
+): string {
+  if (d === null || d === undefined || d === "") return "";
+  let y: number;
+  let m: number;
+  let day: number;
+  if (typeof d === "string") {
+    const iso = d.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) {
+      y = Number(iso[1]);
+      m = Number(iso[2]);
+      day = Number(iso[3]);
+    } else {
+      const fr = d.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (fr) {
+        day = Number(fr[1]);
+        m = Number(fr[2]);
+        y = Number(fr[3]);
+      } else {
+        const x = new Date(d);
+        if (Number.isNaN(x.getTime())) return "";
+        y = x.getUTCFullYear();
+        m = x.getUTCMonth() + 1;
+        day = x.getUTCDate();
+      }
+    }
+  } else {
+    const x = d instanceof Date ? d : new Date(d);
+    if (Number.isNaN(x.getTime())) return "";
+    y = x.getUTCFullYear();
+    m = x.getUTCMonth() + 1;
+    day = x.getUTCDate();
+  }
+  const dd = String(day).padStart(2, "0");
+  const mm = String(m).padStart(2, "0");
+  return `${dd}/${mm}/${y}`;
+}
+
+/**
+ * Parse a CSV date field → internal ISO `YYYY-MM-DD` (UTC calendar day).
+ * Canonical product format: **jj/mm/aaaa**. Also accepts aaaa-mm-jj (legacy).
+ */
+export function parseOptionalDate(
+  raw: string
+): { value: string | null; error?: string } {
+  if (raw === "" || raw.trim() === "") return { value: null };
+  const s = raw.trim();
+
+  // Preferred: jj/mm/aaaa or j/m/aaaa
+  const fr = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (fr) {
+    const dd = fr[1].padStart(2, "0");
+    const mm = fr[2].padStart(2, "0");
+    const yyyy = fr[3];
+    const day = Number(dd);
+    const month = Number(mm);
+    const year = Number(yyyy);
+    const d = new Date(Date.UTC(year, month - 1, day));
+    if (
+      d.getUTCFullYear() !== year ||
+      d.getUTCMonth() !== month - 1 ||
+      d.getUTCDate() !== day
+    ) {
+      return { value: null, error: `date invalide (« ${raw} »)` };
+    }
+    return { value: `${yyyy}-${mm}-${dd}` };
+  }
+
+  // Also jj-mm-aaaa
+  const frDash = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (frDash) {
+    const day = Number(frDash[1]);
+    const month = Number(frDash[2]);
+    const year = Number(frDash[3]);
+    const d = new Date(Date.UTC(year, month - 1, day));
+    if (
+      d.getUTCFullYear() !== year ||
+      d.getUTCMonth() !== month - 1 ||
+      d.getUTCDate() !== day
+    ) {
+      return { value: null, error: `date invalide (« ${raw} »)` };
+    }
+    const dd = String(day).padStart(2, "0");
+    const mm = String(month).padStart(2, "0");
+    return { value: `${year}-${mm}-${dd}` };
+  }
+
+  // Legacy ISO aaaa-mm-jj
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) {
+    const year = Number(iso[1]);
+    const month = Number(iso[2]);
+    const day = Number(iso[3]);
+    const d = new Date(Date.UTC(year, month - 1, day));
+    if (
+      d.getUTCFullYear() !== year ||
+      d.getUTCMonth() !== month - 1 ||
+      d.getUTCDate() !== day
+    ) {
+      return { value: null, error: `date invalide (« ${raw} »)` };
+    }
+    return { value: `${iso[1]}-${iso[2]}-${iso[3]}` };
+  }
+
+  return {
+    value: null,
+    error: `format de date invalide (« ${raw} » — utiliser jj/mm/aaaa)`,
+  };
+}
+
+// ── Encoding (accents / Excel Windows) ────────────────
+
+/**
+ * Decode a CSV file buffer with robust encoding detection.
+ *
+ * Excel (FR/Windows) often saves CSV as **Windows-1252** (ANSI), not UTF-8.
+ * Reading those bytes as UTF-8 corrupts accents (é → �, Précadrage → PrÃ©cadrage, etc.).
+ *
+ * Order:
+ * 1. BOM UTF-8 / UTF-16
+ * 2. Valid UTF-8 (no replacement chars)
+ * 3. Fallback Windows-1252 (Western European / Excel ANSI)
+ */
+export function decodeCsvBytes(bytes: Uint8Array): string {
+  if (bytes.length === 0) return "";
+
+  // UTF-8 BOM
+  if (
+    bytes.length >= 3 &&
+    bytes[0] === 0xef &&
+    bytes[1] === 0xbb &&
+    bytes[2] === 0xbf
+  ) {
+    return new TextDecoder("utf-8").decode(bytes.subarray(3));
+  }
+  // UTF-16 LE BOM
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return new TextDecoder("utf-16le").decode(bytes.subarray(2));
+  }
+  // UTF-16 BE BOM
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    return new TextDecoder("utf-16be").decode(bytes.subarray(2));
+  }
+
+  // Prefer strict UTF-8 when the whole buffer is valid
+  try {
+    const strict = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return strict;
+  } catch {
+    // invalid UTF-8 → likely Windows-1252 from Excel
+  }
+
+  // Non-fatal UTF-8 may insert U+FFFD; compare with windows-1252
+  const asUtf8 = new TextDecoder("utf-8").decode(bytes);
+  const utf8Bad = (asUtf8.match(/\uFFFD/g) ?? []).length;
+  if (utf8Bad === 0) return asUtf8;
+
+  try {
+    return new TextDecoder("windows-1252").decode(bytes);
+  } catch {
+    return new TextDecoder("iso-8859-1").decode(bytes);
+  }
+}
+
+/**
+ * Read a File (browser) as CSV text with encoding auto-detection.
+ * Prefer this over `FileReader.readAsText(..., "UTF-8")`.
+ */
+export async function readCsvFileText(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  return decodeCsvBytes(new Uint8Array(buf));
+}
+
+/**
+ * Download CSV as UTF-8 with BOM so Excel opens accents correctly.
+ */
+export function downloadCsvFile(fileName: string, csv: string): void {
+  const withBom = csv.startsWith("\uFEFF") ? csv : `\uFEFF${csv}`;
+  // Explicit UTF-8 bytes (avoids ambiguous string Blob encoding edge cases)
+  const bytes = new TextEncoder().encode(withBom);
+  const blob = new Blob([bytes], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // ── CSV parse / serialize (pipe-separated) ────────────
 
 /**
  * Escape a single field for pipe-separated CSV.
  * Quotes when the value contains `|`, `"`, or line breaks.
+ * Dates are serialized as jj/mm/aaaa.
  */
 export function escapeCsvField(value: unknown): string {
   if (value === null || value === undefined) return "";
   const s =
     value instanceof Date
-      ? value.toISOString().slice(0, 10)
+      ? formatCsvDate(value)
       : typeof value === "boolean"
         ? value
           ? "true"
@@ -357,36 +553,6 @@ export function parseOptionalFloat(
     return { value: null, error: `nombre attendu (« ${raw} »)` };
   }
   return { value: n };
-}
-
-/** Accept YYYY-MM-DD or DD/MM/YYYY */
-export function parseOptionalDate(
-  raw: string
-): { value: string | null; error?: string } {
-  if (raw === "") return { value: null };
-  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (iso) {
-    const d = new Date(`${iso[1]}-${iso[2]}-${iso[3]}T00:00:00.000Z`);
-    if (Number.isNaN(d.getTime())) {
-      return { value: null, error: `date invalide (« ${raw} »)` };
-    }
-    return { value: `${iso[1]}-${iso[2]}-${iso[3]}` };
-  }
-  const fr = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (fr) {
-    const dd = fr[1].padStart(2, "0");
-    const mm = fr[2].padStart(2, "0");
-    const yyyy = fr[3];
-    const d = new Date(`${yyyy}-${mm}-${dd}T00:00:00.000Z`);
-    if (Number.isNaN(d.getTime())) {
-      return { value: null, error: `date invalide (« ${raw} »)` };
-    }
-    return { value: `${yyyy}-${mm}-${dd}` };
-  }
-  return {
-    value: null,
-    error: `format de date invalide (« ${raw} » — utiliser YYYY-MM-DD)`,
-  };
 }
 
 export function isValidRessourceType(t: string): boolean {

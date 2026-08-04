@@ -1,13 +1,16 @@
 import { requireRole, requirePageAccess } from "@/lib/auth";
 import { Database } from "lucide-react";
-import { getDataTableCounts } from "./actions";
+import { getChantierCountForImport, getDataTableCounts } from "./actions";
 import { DataAdminPanel } from "./data-admin-panel";
 
 export default async function DonneesAdminPage() {
   await requireRole("Admin");
   await requirePageAccess("/admin/donnees");
 
-  const counts = await getDataTableCounts();
+  const [counts, chantierCount] = await Promise.all([
+    getDataTableCounts(),
+    getChantierCountForImport(),
+  ]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -29,13 +32,17 @@ export default async function DonneesAdminPage() {
               <code className="rounded bg-muted px-1 text-xs">|</code>, pipe —
               les virgules restent autorisées dans le texte). Après lecture, un
               rapport de validation s&apos;affiche ; l&apos;import n&apos;est
-              effectué qu&apos;après votre approbation. Réservé aux
+              effectué qu&apos;après votre approbation. Onglets : planning
+              jalons par chantier, Ressources, RAID. Réservé aux
               administrateurs.
             </p>
           </div>
         </div>
 
-        <DataAdminPanel initialCounts={counts} />
+        <DataAdminPanel
+          initialCounts={counts}
+          chantierCount={chantierCount}
+        />
       </main>
     </div>
   );

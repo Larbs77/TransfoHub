@@ -12,6 +12,7 @@ import {
   Loader2,
   Database,
   FileDown,
+  Milestone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,6 +36,8 @@ import {
   DATA_TABLE_META,
   type DataTableKey,
   type PreviewReport,
+  downloadCsvFile,
+  readCsvFileText,
 } from "@/lib/csv-data-admin";
 import {
   exportTableCsv,
@@ -44,24 +47,19 @@ import {
   purgeTable,
   type ImportWriteMode,
 } from "./actions";
+import { JalonPlanningImportPanel } from "@/components/jalon-planning-import-panel";
 
-function downloadBlob(fileName: string, csv: string) {
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
+/** Top-level Import/Purge sections — Planning jalons before Ressources / RAID. */
+type AdminSection = "planning" | DataTableKey;
 
 type Props = {
   initialCounts: Record<DataTableKey, number>;
+  /** Total chantiers (badge onglet Planning). */
+  chantierCount?: number;
 };
 
-export function DataAdminPanel({ initialCounts }: Props) {
+export function DataAdminPanel({ initialCounts, chantierCount = 0 }: Props) {
+  const [section, setSection] = useState<AdminSection>("planning");
   const [active, setActive] = useState<DataTableKey>("ressources");
   const [counts, setCounts] =
     useState<Record<DataTableKey, number>>(initialCounts);
@@ -105,15 +103,20 @@ export function DataAdminPanel({ initialCounts }: Props) {
     setPurgeOpen(true);
   }
 
-  function handleTab(key: DataTableKey) {
-    setActive(key);
-    setPreview(null);
-    setImportMode("append");
-    setBackupDownloaded(false);
-    setConfirmWord("");
-    resetPurgeWizard();
-    clearFeedback();
-    if (fileRef.current) fileRef.current.value = "";
+  function handleSection(next: AdminSection) {
+    setSection(next);
+    if (next !== "planning") {
+      setActive(next);
+      setPreview(null);
+      setImportMode("append");
+      setBackupDownloaded(false);
+      setConfirmWord("");
+      resetPurgeWizard();
+      clearFeedback();
+      if (fileRef.current) fileRef.current.value = "";
+    } else {
+      clearFeedback();
+    }
   }
 
   function runExport(opts?: { asBackup?: "replace" | "purge" }) {
@@ -128,7 +131,7 @@ export function DataAdminPanel({ initialCounts }: Props) {
               `_sauvegarde_avant_purge_${Date.now()}.csv`
             )
           : fileName;
-        downloadBlob(name, csv);
+        downloadCsvFile(name, csv);
         if (opts?.asBackup === "purge") {
           setPurgeBackupOk(true);
           setMessage({
@@ -161,7 +164,7 @@ export function DataAdminPanel({ initialCounts }: Props) {
     startTransition(async () => {
       try {
         const { fileName, csv } = await downloadTemplateCsv(active);
-        downloadBlob(fileName, csv);
+        downloadCsvFile(fileName, csv);
         setMessage({
           type: "info",
           text: `Modèle (structure) téléchargé : ${fileName}`,
@@ -179,36 +182,30 @@ export function DataAdminPanel({ initialCounts }: Props) {
     if (!file) return;
     clearFeedback();
     setPreview(null);
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = String(reader.result ?? "");
-      startTransition(async () => {
-        try {
-          const report = await previewCsvImport(active, text);
-          setPreview(report);
-          if (report.total === 0 && report.errorCount === 0) {
-            setMessage({
-              type: "info",
-              text: "Aucune ligne de données dans le fichier.",
-            });
-          } else {
-            setMessage({
-              type: report.errorCount > 0 ? "info" : "ok",
-              text: `Lecture terminée : ${report.okCount} valide(s), ${report.errorCount} erreur(s) sur ${report.total} ligne(s).`,
-            });
-          }
-        } catch (e) {
+    startTransition(async () => {
+      try {
+        // Auto-detect UTF-8 vs Windows-1252 (Excel) so accents stay intact
+        const text = await readCsvFileText(file);
+        const report = await previewCsvImport(active, text);
+        setPreview(report);
+        if (report.total === 0 && report.errorCount === 0) {
           setMessage({
-            type: "error",
-            text: e instanceof Error ? e.message : "Échec de la lecture CSV",
+            type: "info",
+            text: "Aucune ligne de données dans le fichier.",
+          });
+        } else {
+          setMessage({
+            type: report.errorCount > 0 ? "info" : "ok",
+            text: `Lecture terminée : ${report.okCount} valide(s), ${report.errorCount} erreur(s) sur ${report.total} ligne(s).`,
           });
         }
-      });
-    };
-    reader.onerror = () => {
-      setMessage({ type: "error", text: "Impossible de lire le fichier." });
-    };
-    reader.readAsText(file, "UTF-8");
+      } catch (e) {
+        setMessage({
+          type: "error",
+          text: e instanceof Error ? e.message : "Échec de la lecture CSV",
+        });
+      }
+    });
   }
 
   function openImportConfirm() {
@@ -297,16 +294,40 @@ export function DataAdminPanel({ initialCounts }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* Table selector */}
+      {/* Section selector — Chantiers (planning) first, then Ressources / RAID */}
       <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => handleSection("planning")}
+          className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors ${
+            section === "planning"
+              ? "border-primary bg-primary text-primary-foreground shadow-sm"
+              : "border-border bg-card text-foreground hover:border-[#00BDBB]/50 hover:bg-muted/40"
+          }`}
+        >
+          <Milestone
+            className={`size-4 ${section === "planning" ? "text-[#00BDBB]" : "text-muted-foreground"}`}
+          />
+          <span>Chantiers</span>
+          <Badge
+            variant={section === "planning" ? "secondary" : "outline"}
+            className={
+              section === "planning"
+                ? "bg-white/15 text-primary-foreground border-0"
+                : ""
+            }
+          >
+            {chantierCount}
+          </Badge>
+        </button>
         {DATA_TABLE_KEYS.map((key) => {
           const m = DATA_TABLE_META[key];
-          const selected = active === key;
+          const selected = section === key;
           return (
             <button
               key={key}
               type="button"
-              onClick={() => handleTab(key)}
+              onClick={() => handleSection(key)}
               className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors ${
                 selected
                   ? "border-primary bg-primary text-primary-foreground shadow-sm"
@@ -332,6 +353,9 @@ export function DataAdminPanel({ initialCounts }: Props) {
         })}
       </div>
 
+      {section === "planning" ? (
+        <JalonPlanningImportPanel />
+      ) : (
       <Card className="border-border/80 shadow-sm">
         <CardHeader className="border-b pb-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -433,8 +457,8 @@ export function DataAdminPanel({ initialCounts }: Props) {
             <p className="mt-2 text-[11px] text-muted-foreground">
               * = obligatoire · Séparateur de champs :{" "}
               <code className="rounded bg-muted px-1">|</code> (pipe) · les
-              virgules sont autorisées dans le texte · Encodage UTF-8 · Dates :
-              YYYY-MM-DD
+              virgules sont autorisées dans le texte · Encodage UTF-8 (export) ·
+              import auto UTF-8 / Windows-1252 (Excel) · Dates : jj/mm/aaaa
               {active === "raid" &&
                 " · chantier_code = code du chantier · responsable_email = e-mail d’une ressource existante"}
               {active === "ressources" &&
@@ -721,10 +745,11 @@ export function DataAdminPanel({ initialCounts }: Props) {
           )}
         </CardContent>
       </Card>
+      )}
 
       {/* Purge confirm — multi-step: backup → table name → PURGE */}
       <Dialog
-        open={purgeOpen}
+        open={purgeOpen && section !== "planning"}
         onOpenChange={(open) => {
           setPurgeOpen(open);
           if (!open) resetPurgeWizard();
@@ -948,7 +973,7 @@ export function DataAdminPanel({ initialCounts }: Props) {
 
       {/* Import confirm */}
       <Dialog
-        open={importConfirmOpen}
+        open={importConfirmOpen && section !== "planning"}
         onOpenChange={(open) => {
           setImportConfirmOpen(open);
           if (!open) setConfirmWord("");
