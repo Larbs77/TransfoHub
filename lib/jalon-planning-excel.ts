@@ -107,6 +107,7 @@ export function buildExcelPlanningPreview(args:{chantierId:string;chantierCode:s
   const ws=wb.Sheets.Planning;if(!ws)formatErrors.push("Onglet obligatoire « Planning » introuvable.");
   const raw=ws?XLSX.utils.sheet_to_json<Record<string,unknown>>(ws,{defval:"",raw:true}):[];
   const byId=new Map(args.existing.map(n=>[n.id,n]));
+  const restoreIntoEmptyPlanning=args.existing.length===0;
   let currentJalon:{ref:string;id?:string;phase:string;label:string}|null=null;
   let currentWs:{ref:string;id?:string;label:string}|null=null;
   const seen=new Map<string,number>();
@@ -125,7 +126,7 @@ export function buildExcelPlanningPreview(args:{chantierId:string;chantierCode:s
     const ordre=Number(r.Ordre||0);if(!Number.isInteger(ordre)||ordre<0)errors.push("Ordre invalide.");const statut=norm(r.Statut)||"Planifié";
     if(level==="JALON"&&!STATUT_JALON_LIST.some(s=>key(s)===key(statut)))errors.push("Statut de jalon invalide.");
     if(level!=="JALON"&&!DETAIL_STATUSES.some(s=>key(s)===key(statut)))errors.push("Statut de workstream ou d'activité invalide.");
-    const id=norm(r["ID technique"]);let existing=id?byId.get(id):undefined;if(id&&!existing)errors.push("ID technique inconnu.");if(existing&&existing.level!==level)errors.push("L'ID ne correspond pas au niveau indiqué.");
+    const id=norm(r["ID technique"]);let existing=id?byId.get(id):undefined;if(id&&!existing&&!restoreIntoEmptyPlanning)errors.push("ID technique inconnu.");if(id&&!existing&&restoreIntoEmptyPlanning)warnings.push("ID technique de sauvegarde ignoré : l'élément sera recréé avec un nouvel identifiant.");if(existing&&existing.level!==level)errors.push("L'ID ne correspond pas au niveau indiqué.");
     if(!existing&&!id){
       existing=args.existing.find(n=>n.level===level&&key(labelOf(n))===key(label)&&(level==="JALON"?key(n.phase)===key(phase):level==="WORKSTREAM"?n.parentId===currentJalon?.id:n.parentId===currentWs?.id));
     }

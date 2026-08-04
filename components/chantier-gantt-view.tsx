@@ -531,7 +531,6 @@ export function ChantierGanttView({
     setFilterDu("");
     setFilterAu("");
     setPeriodContentMode("all");
-    setScale("quarter");
     setToast("");
   }, []);
 

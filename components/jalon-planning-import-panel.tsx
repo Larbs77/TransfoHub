@@ -12,8 +12,17 @@ import {
   XCircle,
   AlertTriangle,
   Info,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Card,
   CardContent,
@@ -31,6 +40,7 @@ import {
   exportJalonPlanningExcel,
   previewJalonPlanningExcel,
   confirmJalonPlanningExcel,
+  purgeJalonPlanning,
   type ChantierPlanningOption,
 } from "@/app/(app)/admin/donnees/planning-actions";
 
@@ -57,6 +67,7 @@ const ACTION_STYLE: Record<
 };
 
 type FilterKey = "all" | PlanningAction;
+type PlanningPurgeStep = "backup" | "code" | "keyword";
 
 export function JalonPlanningImportPanel() {
   const [chantiers, setChantiers] = useState<ChantierPlanningOption[]>([]);
@@ -70,6 +81,11 @@ export function JalonPlanningImportPanel() {
   } | null>(null);
   const [pending, startTransition] = useTransition();
   const [loaded, setLoaded] = useState(false);
+  const [purgeOpen, setPurgeOpen] = useState(false);
+  const [purgeStep, setPurgeStep] = useState<PlanningPurgeStep>("backup");
+  const [purgeBackupFingerprint, setPurgeBackupFingerprint] = useState("");
+  const [purgeCodeInput, setPurgeCodeInput] = useState("");
+  const [purgeKeywordInput, setPurgeKeywordInput] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const selected = useMemo(
@@ -106,10 +122,34 @@ export function JalonPlanningImportPanel() {
     if (fileRef.current) fileRef.current.value = "";
   }
 
+  function resetPurgeWizard() {
+    setPurgeStep("backup");
+    setPurgeBackupFingerprint("");
+    setPurgeCodeInput("");
+    setPurgeKeywordInput("");
+  }
+
   function onChantierChange(id: string) {
     setChantierId(id);
     clearPreview();
+    setPurgeOpen(false);
+    resetPurgeWizard();
     setMessage(null);
+  }
+
+  function openPurgeDialog() {
+    if (!selected || selected.jalonCount === 0) return;
+    clearPreview();
+    resetPurgeWizard();
+    setMessage(null);
+    setPurgeOpen(true);
+  }
+
+  function downloadBase64Workbook(fileName: string, base64: string) {
+    const link = document.createElement("a");
+    link.href = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${base64}`;
+    link.download = fileName;
+    link.click();
   }
 
   function runExport(mode: "current" | "template" | "empty") {
@@ -124,10 +164,7 @@ export function JalonPlanningImportPanel() {
           chantierId,
           mode
         );
-        const link = document.createElement("a");
-        link.href = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${base64}`;
-        link.download = fileName;
-        link.click();
+        downloadBase64Workbook(fileName, base64);
         setMessage({
           type: "ok",
           text: `Fichier téléchargé : ${fileName}`,
@@ -136,6 +173,59 @@ export function JalonPlanningImportPanel() {
         setMessage({
           type: "error",
           text: e instanceof Error ? e.message : "Échec de l'export",
+        });
+      }
+    });
+  }
+
+  function runPurgeBackup() {
+    if (!selected) return;
+    startTransition(async () => {
+      try {
+        const { fileName, base64, fingerprint } =
+          await exportJalonPlanningExcel(selected.id, "current");
+        const backupName = fileName.replace(
+          /\.xlsx$/i,
+          `_sauvegarde_avant_purge_${Date.now()}.xlsx`
+        );
+        downloadBase64Workbook(backupName, base64);
+        setPurgeBackupFingerprint(fingerprint);
+        setMessage({
+          type: "ok",
+          text: `Sauvegarde téléchargée : ${backupName}. Vous pouvez poursuivre la purge.`,
+        });
+      } catch (e) {
+        setMessage({
+          type: "error",
+          text: e instanceof Error ? e.message : "Échec de la sauvegarde du planning",
+        });
+      }
+    });
+  }
+
+  function confirmPurge() {
+    if (!selected || !purgeBackupFingerprint) return;
+    startTransition(async () => {
+      try {
+        const result = await purgeJalonPlanning(
+          selected.id,
+          purgeBackupFingerprint,
+          purgeCodeInput,
+          purgeKeywordInput
+        );
+        clearPreview();
+        setPurgeOpen(false);
+        resetPurgeWizard();
+        const list = await listChantiersForPlanningImport();
+        setChantiers(list);
+        setMessage({
+          type: "ok",
+          text: `Planning ${result.chantierCode} purgé : ${result.jalons} jalon(s), ${result.workstreams} workstream(s) et ${result.activites} activité(s) supprimés. Vous pouvez maintenant charger un nouveau fichier Excel.`,
+        });
+      } catch (e) {
+        setMessage({
+          type: "error",
+          text: e instanceof Error ? e.message : "Échec de la purge du planning",
         });
       }
     });
@@ -313,35 +403,36 @@ export function JalonPlanningImportPanel() {
         </div>
 
         {/* Actions */}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1.3fr_1fr_1fr]">
           <Button
             type="button"
             variant="outline"
-            className="justify-start gap-2"
+            className="min-w-0 justify-start gap-2"
             disabled={pending || !chantierId}
             onClick={() => runExport("current")}
           >
-            <Download className="size-4 text-[#00BDBB]" />
+            <Download className="size-4 shrink-0 text-[#00BDBB]" />
             Exporter le planning
           </Button>
           <Button
             type="button"
             variant="outline"
-            className="justify-start gap-2"
+            className="h-auto min-h-9 min-w-0 justify-start gap-2 whitespace-normal py-2 text-left leading-tight"
             disabled={pending || !chantierId}
             onClick={() => runExport("template")}
           >
-            <FileDown className="size-4 text-[#00BDBB]" />
+            <FileDown className="size-4 shrink-0 text-[#00BDBB]" />
             Modèle template prérempli
           </Button>
           <Button
             type="button"
             variant="outline"
-            className="justify-start gap-2"
+            className="min-w-0 justify-start gap-2"
             disabled={pending || !chantierId}
             onClick={() => runExport("empty")}
           >
-            <FileSpreadsheet className="size-4 text-[#00BDBB]" />
+            <FileSpreadsheet className="size-4 shrink-0 text-[#00BDBB]" />
             Classeur Excel vide
           </Button>
           <div>
@@ -355,12 +446,30 @@ export function JalonPlanningImportPanel() {
             <Button
               type="button"
               variant="outline"
-              className="w-full justify-start gap-2"
+              className="w-full min-w-0 justify-start gap-2"
               disabled={pending || !chantierId}
               onClick={() => fileRef.current?.click()}
             >
-              <Upload className="size-4 text-[#00BDBB]" />
+              <Upload className="size-4 shrink-0 text-[#00BDBB]" />
               Charger un Excel…
+            </Button>
+          </div>
+          </div>
+          <div className="flex justify-end border-t border-dashed pt-3">
+            <Button
+            type="button"
+            variant="outline"
+            className="w-full justify-center gap-2 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive sm:w-auto sm:min-w-48"
+            disabled={pending || !selected || selected.jalonCount === 0}
+            onClick={openPurgeDialog}
+            title={
+              selected?.jalonCount === 0
+                ? "Ce chantier ne contient aucun planning à purger"
+                : "Sauvegarder puis vider entièrement le planning du chantier"
+            }
+          >
+            <Trash2 className="size-4 shrink-0" />
+            Purger le planning
             </Button>
           </div>
         </div>
@@ -624,6 +733,185 @@ export function JalonPlanningImportPanel() {
           </div>
         )}
       </CardContent>
+
+      <Dialog
+        open={purgeOpen}
+        onOpenChange={(open) => {
+          if (pending) return;
+          setPurgeOpen(open);
+          if (!open) resetPurgeWizard();
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="size-5" />
+              Purger le planning {selected?.code ?? ""}
+            </DialogTitle>
+            <DialogDescription className="space-y-2 text-left">
+              <span className="block">
+                Cette opération supprimera définitivement tous les
+                <strong> jalons, workstreams et activités</strong> du chantier.
+                Le chantier sera conservé et repassera à 0 % d&apos;avancement.
+              </span>
+              <span className="block text-xs">
+                La sauvegarde Excel correspondant à la version purgée est
+                obligatoire avant confirmation.
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className={purgeStep === "backup" ? "rounded-md bg-destructive px-2 py-1.5 text-center font-semibold text-destructive-foreground" : "rounded-md bg-muted px-2 py-1.5 text-center text-muted-foreground"}>
+              1 · Sauvegarde
+            </div>
+            <div className={purgeStep === "code" ? "rounded-md bg-destructive px-2 py-1.5 text-center font-semibold text-destructive-foreground" : "rounded-md bg-muted px-2 py-1.5 text-center text-muted-foreground"}>
+              2 · Chantier
+            </div>
+            <div className={purgeStep === "keyword" ? "rounded-md bg-destructive px-2 py-1.5 text-center font-semibold text-destructive-foreground" : "rounded-md bg-muted px-2 py-1.5 text-center text-muted-foreground"}>
+              3 · Confirmation
+            </div>
+          </div>
+
+          {purgeStep === "backup" && (
+            <div className="space-y-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+              <p className="text-sm font-medium">Sauvegarde obligatoire</p>
+              <p className="text-xs text-muted-foreground">
+                Téléchargez le planning complet de {selected?.code}. Le fichier
+                contient les identifiants techniques nécessaires à une
+                restauration ultérieure par import.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={pending || !selected}
+                onClick={runPurgeBackup}
+                className="w-full justify-center gap-2"
+              >
+                {pending ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : purgeBackupFingerprint ? (
+                  <CheckCircle2 className="size-4 text-emerald-600" />
+                ) : (
+                  <Download className="size-4" />
+                )}
+                {purgeBackupFingerprint
+                  ? "Sauvegarde téléchargée"
+                  : "Télécharger la sauvegarde Excel"}
+              </Button>
+            </div>
+          )}
+
+          {purgeStep === "code" && (
+            <div className="space-y-3">
+              <p className="rounded-lg border bg-muted/40 p-3 text-sm">
+                Tapez exactement le code
+                <strong className="ml-1 font-mono">{selected?.code}</strong>.
+              </p>
+              <input
+                aria-label="Code du chantier à purger"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-destructive/30"
+                value={purgeCodeInput}
+                onChange={(event) => setPurgeCodeInput(event.target.value)}
+                placeholder={selected?.code ?? "Code chantier"}
+                autoComplete="off"
+                disabled={pending}
+              />
+            </div>
+          )}
+
+          {purgeStep === "keyword" && (
+            <div className="space-y-3">
+              <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
+                Dernière confirmation : tapez
+                <strong className="mx-1 font-mono text-destructive">PURGE</strong>
+                pour vider définitivement le planning de {selected?.code}.
+              </p>
+              <input
+                aria-label="Confirmation définitive de la purge"
+                className="w-full rounded-md border border-destructive/40 bg-background px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-destructive/30"
+                value={purgeKeywordInput}
+                onChange={(event) => setPurgeKeywordInput(event.target.value)}
+                placeholder="PURGE"
+                autoComplete="off"
+                disabled={pending}
+              />
+            </div>
+          )}
+
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending}
+              onClick={() => {
+                setPurgeOpen(false);
+                resetPurgeWizard();
+              }}
+            >
+              Annuler
+            </Button>
+            <div className="flex gap-2">
+              {purgeStep !== "backup" && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={pending}
+                  onClick={() => {
+                    if (purgeStep === "keyword") {
+                      setPurgeStep("code");
+                      setPurgeKeywordInput("");
+                    } else {
+                      setPurgeStep("backup");
+                      setPurgeCodeInput("");
+                    }
+                  }}
+                >
+                  Retour
+                </Button>
+              )}
+              {purgeStep === "backup" && (
+                <Button
+                  type="button"
+                  disabled={pending || !purgeBackupFingerprint}
+                  onClick={() => setPurgeStep("code")}
+                >
+                  Continuer →
+                </Button>
+              )}
+              {purgeStep === "code" && (
+                <Button
+                  type="button"
+                  disabled={pending || purgeCodeInput.trim() !== selected?.code}
+                  onClick={() => setPurgeStep("keyword")}
+                >
+                  Continuer →
+                </Button>
+              )}
+              {purgeStep === "keyword" && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={
+                    pending ||
+                    !purgeBackupFingerprint ||
+                    purgeCodeInput.trim() !== selected?.code ||
+                    purgeKeywordInput.trim() !== "PURGE"
+                  }
+                  onClick={confirmPurge}
+                >
+                  {pending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="size-4" />
+                  )}
+                  Purger définitivement
+                </Button>
+              )}
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

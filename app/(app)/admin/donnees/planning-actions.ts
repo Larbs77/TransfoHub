@@ -49,6 +49,17 @@ async function assertJalonBulkDirect() {
   }
 }
 
+async function assertJalonPurgeDirect() {
+  const session = await requireAuth();
+  const caps = await getSessionJalonWorkflowCaps(session);
+  const deleteMode = modeForOperation(caps, WORKFLOW_OPERATION.DELETE);
+  if (deleteMode !== "DIRECT") {
+    throw new Error(
+      "La purge d'un planning n'est disponible qu'en mode Direct pour la suppression des jalons. Ajustez les droits workflow du rôle Administrateur."
+    );
+  }
+}
+
 const PHASE_WEIGHT_KEYS: Record<string, string> = {
   Précadrage: "poids_precadrage",
   Cadrage: "poids_cadrage",
@@ -491,7 +502,61 @@ export async function exportJalonPlanningExcel(chantierId:string, mode:"current"
   const rawNodes = mode === "empty" ? [] : mode === "template" ? templateNodes : nodes.length ? nodes : await loadExcelTemplateNodes(chantier.date_debut, chantier.date_fin);
   const exportedNodes = orderPlanningNodes(rawNodes, mode === "template" || (!nodes.length && mode === "current") ? "template" : "current");
   const suffix = mode === "empty" ? "vide" : mode === "template" ? "template" : "planning";
-  return { fileName:`planning_${chantier.code}_${suffix}_${new Date().toISOString().slice(0,10)}.xlsx`, base64:await buildPlanningWorkbookBase64({chantierCode:chantier.code,chantierNom:chantier.nom,nodes:exportedNodes}) };
+  return { fileName:`planning_${chantier.code}_${suffix}_${new Date().toISOString().slice(0,10)}.xlsx`, base64:await buildPlanningWorkbookBase64({chantierCode:chantier.code,chantierNom:chantier.nom,nodes:exportedNodes}), fingerprint:excelPlanningFingerprint(nodes) };
+}
+
+export type PurgeJalonPlanningResult = {
+  chantierCode: string;
+  jalons: number;
+  workstreams: number;
+  activites: number;
+};
+
+export async function purgeJalonPlanning(
+  chantierId: string,
+  expectedFingerprint: string,
+  chantierCodeConfirmation: string,
+  keywordConfirmation: string
+): Promise<PurgeJalonPlanningResult> {
+  await requireDataAdmin();
+  await assertJalonPurgeDirect();
+  const { chantier, nodes } = await loadExcelPlanningContext(chantierId);
+  if (chantierCodeConfirmation.trim() !== chantier.code) {
+    throw new Error(`Le code de confirmation doit être exactement « ${chantier.code} ».`);
+  }
+  if (keywordConfirmation.trim() !== "PURGE") {
+    throw new Error("Le mot de confirmation doit être exactement « PURGE ».");
+  }
+  if (nodes.length === 0) {
+    throw new Error(`Le chantier ${chantier.code} ne contient aucun planning à purger.`);
+  }
+  if (excelPlanningFingerprint(nodes) !== expectedFingerprint) {
+    throw new Error(
+      "Le planning a changé depuis la sauvegarde. Téléchargez une nouvelle sauvegarde avant de recommencer la purge."
+    );
+  }
+
+  const counts = {
+    jalons: nodes.filter((node) => node.level === "JALON").length,
+    workstreams: nodes.filter((node) => node.level === "WORKSTREAM").length,
+    activites: nodes.filter((node) => node.level === "ACTIVITE").length,
+  };
+
+  await prisma.$transaction(async (tx) => {
+    await tx.jalon.deleteMany({ where: { chantierId } });
+    await tx.chantier.update({
+      where: { id: chantierId },
+      data: { avancement: 0, statut: "Non démarré" },
+    });
+  });
+
+  revalidatePath(`/chantiers/${chantierId}`);
+  revalidatePath(`/chantiers/${chantierId}/gantt`);
+  revalidatePath("/gantt");
+  revalidatePath("/jalons");
+  revalidatePath("/admin/donnees");
+  revalidatePath("/");
+  return { chantierCode: chantier.code, ...counts };
 }
 
 export async function previewJalonPlanningExcel(chantierId:string, base64:string):Promise<ExcelPlanningPreview>{

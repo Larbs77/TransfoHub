@@ -5,6 +5,7 @@
  * Run: npx tsx scripts/seed-ch023-planning.ts
  */
 import { createPrismaClient } from "../lib/create-prisma";
+import { basename } from "node:path";
 
 const prisma = createPrismaClient();
 
@@ -12,14 +13,14 @@ function d(iso: string): Date {
   return new Date(iso + "T12:00:00.000Z");
 }
 
-type Act = {
+export type Act = {
   nom: string;
   ordre: number;
   date_debut: string;
   date_fin: string;
   statut?: string;
 };
-type Ws = {
+export type Ws = {
   nom: string;
   ordre: number;
   date_debut: string;
@@ -27,7 +28,7 @@ type Ws = {
   statut?: string;
   activites: Act[];
 };
-type JalonSeed = {
+export type JalonSeed = {
   phase: string;
   nom: string;
   ordre: number;
@@ -65,7 +66,7 @@ function ws(
  * Planning programme CBS — sélection éditeur + implémentation multi-vagues.
  * Jalons A/B/C (sélection) conservés et enrichis ; reste du cycle densifié.
  */
-const PLANNING: JalonSeed[] = [
+export const CH023_PLANNING: JalonSeed[] = [
   // ═══════════════════════════════════════════════════
   // PRÉCADRAGE
   // ═══════════════════════════════════════════════════
@@ -1202,13 +1203,19 @@ async function main() {
   let wCount = 0;
   let aCount = 0;
 
-  for (const j of PLANNING) {
+  for (const j of CH023_PLANNING) {
+    const jalonStart = j.workstreams?.reduce(
+      (earliest, workstream) =>
+        workstream.date_debut < earliest ? workstream.date_debut : earliest,
+      j.date_cible
+    );
     await prisma.jalon.create({
       data: {
         chantierId: chantier.id,
         phase: j.phase,
         nom: j.nom,
         ordre: j.ordre,
+        date_debut: d(jalonStart ?? j.date_cible),
         date_cible: d(j.date_cible),
         statut: j.statut ?? "Planifié",
         description: j.description ?? "",
@@ -1259,11 +1266,13 @@ async function main() {
   );
 }
 
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+if (basename(process.argv[1] ?? "") === "seed-ch023-planning.ts") {
+  main()
+    .catch((e) => {
+      console.error(e);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}

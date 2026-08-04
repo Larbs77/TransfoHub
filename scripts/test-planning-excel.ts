@@ -45,6 +45,10 @@ const movedWorkstream = movePreview.rows.find(row => row.label === "WS test");
 if (movedWorkstream?.action !== "UPDATE" || movedWorkstream.apply?.parentRef !== "j2" || !movedWorkstream.changes.some(change => change.field === "rattachement")) {
   throw new Error("Déplacement séquentiel du workstream non détecté");
 }
+const restorePreview = buildExcelPlanningPreview({chantierId:"test",chantierCode:"CH_TEST",chantierNom:"Test",chantierStart:start,chantierEnd:new Date(Date.UTC(2026,11,31)),base64:moveBase64,existing:[]});
+if (restorePreview.createCount !== 3 || restorePreview.errorCount !== 0 || !restorePreview.rows.every(row => row.warnings.some(warning => warning.includes("nouvel identifiant")))) {
+  throw new Error("Restauration d'une sauvegarde après purge invalide");
+}
 console.log(`OK — ${preview.createCount} créations, ${base64.length} caractères base64`);
 }
 
