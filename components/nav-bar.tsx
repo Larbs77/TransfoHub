@@ -35,6 +35,7 @@ import {
   GitBranch,
   ListChecks,
   History,
+  GanttChart,
 } from "lucide-react";
 import { AlertBell } from "@/components/alert-bell";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -47,6 +48,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useUser } from "@/components/user-provider";
 import { logoutAction } from "@/app/(auth)/login/actions";
+import { ALL_PAGE_PATHS } from "@/lib/app-pages";
 
 interface NavItem {
   href: string;
@@ -69,6 +71,7 @@ const ALL_SECTIONS: NavSection[] = [
       { href: "/adherences", label: "Adhérences", icon: Link2 },
       { href: "/raid", label: "RAID", icon: BookOpen },
       { href: "/jalons", label: "Jalons", icon: Milestone },
+      { href: "/gantt", label: "Gantt Portefeuille", icon: GanttChart },
       { href: "/saisie-temps", label: "Saisie Temps", icon: Clock },
       { href: "/consultation-backlog", label: "Backlog Q&A", icon: HelpCircle },
       { href: "/favoris", label: "Favoris", icon: Star },
@@ -153,6 +156,7 @@ const ALL_SECTIONS: NavSection[] = [
 
 function canAccessPath(allowedPages: string[], href: string): boolean {
   if (allowedPages.includes(href)) return true;
+  if (ALL_PAGE_PATHS.includes(href)) return false;
   return allowedPages.some(
     (p) => p !== "/" && (href === p || href.startsWith(p + "/"))
   );
@@ -161,6 +165,13 @@ function canAccessPath(allowedPages: string[], href: string): boolean {
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(href + "/");
+}
+
+function isItemActive(pathname: string, href: string, items: NavItem[]): boolean {
+  if (!isActive(pathname, href)) return false;
+  return !items.some(
+    (item) => item.href !== href && item.href.startsWith(href + "/") && isActive(pathname, item.href)
+  );
 }
 
 /** Top Général dashboard links: home and/or personal dashboard. */
@@ -211,7 +222,7 @@ function SidebarSection({
     return (
       <div className="space-y-1 px-2">
         {section.items.map((item) => {
-          const active = isActive(pathname, item.href);
+          const active = isItemActive(pathname, item.href, section.items);
           return (
             <Tooltip key={item.href} delayDuration={0}>
               <TooltipTrigger asChild>
@@ -258,7 +269,7 @@ function SidebarSection({
       {open && (
         <div className="mt-0.5 space-y-0.5 px-1">
           {section.items.map((item) => {
-            const active = isActive(pathname, item.href);
+            const active = isItemActive(pathname, item.href, section.items);
             return (
               <Link
                 key={item.href}

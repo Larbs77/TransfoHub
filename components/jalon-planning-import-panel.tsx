@@ -23,16 +23,14 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  JALON_PLANNING_CSV_COLUMNS,
   type PlanningAction,
-  type PlanningPreviewReport,
-} from "@/lib/jalon-planning-import";
-import { downloadCsvFile, readCsvFileText } from "@/lib/csv-data-admin";
+  type ExcelPlanningPreview,
+} from "@/lib/jalon-planning-excel";
 import {
   listChantiersForPlanningImport,
-  exportJalonPlanningCsv,
-  previewJalonPlanningImport,
-  confirmJalonPlanningImport,
+  exportJalonPlanningExcel,
+  previewJalonPlanningExcel,
+  confirmJalonPlanningExcel,
   type ChantierPlanningOption,
 } from "@/app/(app)/admin/donnees/planning-actions";
 
@@ -63,7 +61,7 @@ type FilterKey = "all" | PlanningAction;
 export function JalonPlanningImportPanel() {
   const [chantiers, setChantiers] = useState<ChantierPlanningOption[]>([]);
   const [chantierId, setChantierId] = useState("");
-  const [preview, setPreview] = useState<PlanningPreviewReport | null>(null);
+  const [preview, setPreview] = useState<ExcelPlanningPreview | null>(null);
   const [csvText, setCsvText] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>("all");
   const [message, setMessage] = useState<{
@@ -122,11 +120,14 @@ export function JalonPlanningImportPanel() {
     setMessage(null);
     startTransition(async () => {
       try {
-        const { fileName, csv } = await exportJalonPlanningCsv(
+        const { fileName, base64 } = await exportJalonPlanningExcel(
           chantierId,
           mode
         );
-        downloadCsvFile(fileName, csv);
+        const link = document.createElement("a");
+        link.href = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${base64}`;
+        link.download = fileName;
+        link.click();
         setMessage({
           type: "ok",
           text: `Fichier téléchargé : ${fileName}`,
@@ -151,10 +152,14 @@ export function JalonPlanningImportPanel() {
     setPreview(null);
     startTransition(async () => {
       try {
-        // Auto-detect UTF-8 vs Windows-1252 (Excel) so accents stay intact
-        const text = await readCsvFileText(file);
-        setCsvText(text);
-        const report = await previewJalonPlanningImport(chantierId, text);
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onerror = () => reject(new Error("Lecture du fichier impossible"));
+          reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+          reader.readAsDataURL(file);
+        });
+        setCsvText(base64);
+        const report = await previewJalonPlanningExcel(chantierId, base64);
         setPreview(report);
         if (report.formatErrors.length > 0) {
           setMessage({
@@ -198,7 +203,7 @@ export function JalonPlanningImportPanel() {
 
     startTransition(async () => {
       try {
-        const result = await confirmJalonPlanningImport(
+        const result = await confirmJalonPlanningExcel(
           chantierId,
           csvText,
           preview.fingerprint
@@ -209,11 +214,7 @@ export function JalonPlanningImportPanel() {
         setChantiers(list);
         setMessage({
           type: "ok",
-          text: `Injection terminée pour ${result.chantierCode} : ${result.created} créé(s), ${result.updated} mis à jour, ${result.skipped} inchangé(s)${
-            result.willApplyTemplate
-              ? " (template appliqué puis fusionné)"
-              : ""
-          }.`,
+          text: `Injection terminée pour ${result.chantierCode} : ${result.created} créé(s), ${result.updated} mis à jour, ${result.skipped} inchangé(s).`,
         });
       } catch (e) {
         setMessage({
@@ -250,15 +251,14 @@ export function JalonPlanningImportPanel() {
                 Chantiers — planning jalons
               </CardTitle>
               <CardDescription className="mt-1 max-w-2xl">
-                Importez un CSV{" "}
-                <code className="rounded bg-muted px-1 text-[11px]">|</code>{" "}
-                pour planifier les jalons d&apos;un chantier sélectionné.{" "}
+                Importez un classeur Excel métier pour gérer les jalons,
+                workstreams et activités d&apos;un chantier sélectionné.{" "}
                 <strong className="font-medium text-foreground">
                   Chargement à blanc obligatoire
                 </strong>{" "}
                 : CREATE / UPDATE / SKIP / ERROR, puis rejet ou confirmation.
-                Cas vide → template puis fusion. Cas existant → fusion seule
-                (pas de suppression).
+                Les éléments absents du fichier sont conservés : aucune
+                suppression automatique.
               </CardDescription>
             </div>
           </div>
@@ -342,13 +342,13 @@ export function JalonPlanningImportPanel() {
             onClick={() => runExport("empty")}
           >
             <FileSpreadsheet className="size-4 text-[#00BDBB]" />
-            Structure vide (CSV · |)
+            Classeur Excel vide
           </Button>
           <div>
             <input
               ref={fileRef}
               type="file"
-              accept=".csv,text/csv"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               className="hidden"
               onChange={(e) => onFileSelected(e.target.files?.[0] ?? null)}
             />
@@ -360,39 +360,28 @@ export function JalonPlanningImportPanel() {
               onClick={() => fileRef.current?.click()}
             >
               <Upload className="size-4 text-[#00BDBB]" />
-              Charger un CSV…
+              Charger un Excel…
             </Button>
           </div>
         </div>
 
-        {/* Columns help */}
+        {/* Excel help */}
         <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Colonnes CSV
+            Classeur Excel métier
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {JALON_PLANNING_CSV_COLUMNS.map((col) => (
-              <span
-                key={col.key}
-                title={col.description}
-                className={`inline-flex items-center rounded-md border px-2 py-0.5 font-mono text-[11px] ${
-                  col.required
-                    ? "border-[#00BDBB]/40 bg-[#00BDBB]/10 text-foreground"
-                    : "border-border bg-background text-muted-foreground"
-                }`}
-              >
-                {col.header}
-                {col.required ? " *" : ""}
-              </span>
-            ))}
+            {[
+              "Niveau", "Phase", "Élément", "Ordre", "Date de début",
+              "Date de fin / cible", "Date réelle", "Statut", "Description",
+            ].map((label) => <span key={label} className="inline-flex items-center rounded-md border border-[#00BDBB]/30 bg-background px-2 py-0.5 text-[11px]">{label}</span>)}
           </div>
           <p className="mt-2 text-[11px] text-muted-foreground">
-            * = obligatoire · Séparateur{" "}
-            <code className="rounded bg-muted px-1">|</code> · Dates{" "}
-            <strong>jj/mm/aaaa</strong> · Encodage : export UTF-8 + BOM, import
-            auto UTF-8 / Windows-1252 (Excel) · Clé :{" "}
-            <strong>phase + nom</strong> · Jalons absents du fichier conservés ·
-            Workflow Direct requis
+            Onglets <strong>Mode d&apos;emploi</strong>, <strong>Planning</strong> et
+            référentiels intégrés · Dates <strong>jj/mm/aaaa</strong> · L&apos;ordre des
+            lignes construit l&apos;arborescence : Jalon, puis Workstream, puis Activités ·
+            Les ID techniques masqués sécurisent le merge et les renommages ·
+            Éléments absents conservés · Workflow Direct requis
           </p>
         </div>
 
@@ -434,9 +423,8 @@ export function JalonPlanningImportPanel() {
                 Résultat de la simulation — aucune donnée enregistrée
               </p>
               <p className="mt-1 text-xs opacity-90">
-                {preview.willApplyTemplate
-                  ? `Chantier sans jalon : le template (${preview.templateJalonCount} jalons) serait appliqué puis fusionné avec le fichier.`
-                  : `Merge sur ${preview.existingJalonCount} jalon(s) existant(s). Les jalons absents du fichier restent en base.`}
+                Merge hiérarchique sur les jalons, workstreams et activités.
+                Les éléments absents du classeur restent en base.
               </p>
             </div>
 
@@ -449,6 +437,13 @@ export function JalonPlanningImportPanel() {
                 </ul>
               </div>
             )}
+
+            <div className="grid gap-2 sm:grid-cols-3">
+              {([['JALON','Jalons'],['WORKSTREAM','Workstreams'],['ACTIVITE','Activités']] as const).map(([level,label]) => {
+                const count = preview.counts[level];
+                return <div key={level} className="rounded-lg border bg-card px-3 py-2 text-xs"><p className="font-semibold text-primary">{label}</p><p className="mt-1 text-muted-foreground"><span className="text-emerald-700">{count.create} création(s)</span> · <span className="text-sky-700">{count.update} modification(s)</span> · {count.skip} inchangé(s){count.error ? ` · ${count.error} erreur(s)` : ''}</p></div>;
+              })}
+            </div>
 
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap gap-2">
@@ -511,7 +506,7 @@ export function JalonPlanningImportPanel() {
             {preview.errorCount > 0 && (
               <p className="text-xs text-destructive">
                 La confirmation est désactivée tant qu&apos;il reste des lignes
-                en erreur. Corrigez le CSV et rechargez le fichier.
+                en erreur. Corrigez le classeur Excel et rechargez-le.
               </p>
             )}
 
@@ -526,10 +521,10 @@ export function JalonPlanningImportPanel() {
                       Action
                     </th>
                     <th className="min-w-[120px] px-2 py-2 text-left text-xs font-medium">
-                      Phase
+                      Niveau
                     </th>
                     <th className="min-w-[180px] px-2 py-2 text-left text-xs font-medium">
-                      Nom
+                      Élément
                     </th>
                     <th className="min-w-[220px] px-2 py-2 text-left text-xs font-medium">
                       Modifications
@@ -554,7 +549,7 @@ export function JalonPlanningImportPanel() {
                       const style = ACTION_STYLE[row.action];
                       return (
                         <tr
-                          key={`${row.line}-${row.phase}-${row.nom}-${i}`}
+                          key={`${row.line}-${row.level}-${row.label}-${i}`}
                           className={`border-b last:border-0 ${
                             row.action === "ERROR"
                               ? "bg-destructive/5"
@@ -573,9 +568,10 @@ export function JalonPlanningImportPanel() {
                               {style.label}
                             </Badge>
                           </td>
-                          <td className="px-2 py-2 text-xs">{row.phase}</td>
+                          <td className="px-2 py-2 text-xs">{row.level === "ACTIVITE" ? "Activité" : row.level === "WORKSTREAM" ? "Workstream" : "Jalon"}</td>
                           <td className="px-2 py-2 text-xs font-medium">
-                            {row.nom}
+                            <span>{row.label}</span>
+                            <span className="mt-0.5 block text-[10px] font-normal text-muted-foreground">Sous : {row.parent}</span>
                           </td>
                           <td className="px-2 py-2 text-xs text-muted-foreground">
                             {row.changes.length === 0 ? (

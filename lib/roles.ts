@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { prisma } from "@/lib/prisma";
-import { ALL_PAGE_PATHS } from "@/lib/app-pages";
+import { ALL_PAGE_PATHS, getOwningAppPagePath } from "@/lib/app-pages";
 
 export type RaidCreateScope = "none" | "chantier" | "programme";
 
@@ -142,6 +142,8 @@ export function roleCanAccessPage(
   if (role.code === "Admin") return true;
 
   const pages = role.pages.length ? role.pages : [];
+  const owningPage = getOwningAppPagePath(path);
+  if (owningPage) return pages.includes(owningPage);
   if (pages.includes(path)) return true;
   // Prefix match for nested routes (e.g. /chantiers/123, /raid/risques)
   return pages.some(

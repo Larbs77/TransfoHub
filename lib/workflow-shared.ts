@@ -7,6 +7,8 @@
 
 export const WORKFLOW_ENTITY = {
   JALON: "jalon",
+  WORKSTREAM: "workstream",
+  ACTIVITE: "activite",
 } as const;
 
 export type WorkflowEntityType =
@@ -223,6 +225,20 @@ export function formatJalonWorkflowLabel(params: {
   if (nom) return nom;
   if (phase) return phase;
   return params.entityLabel?.trim() || "—";
+}
+
+export function buildWorkstreamEntityLabel(
+  jalonNom: string,
+  wsNom: string
+): string {
+  return `WS · ${jalonNom} \\ ${wsNom}`.trim();
+}
+
+export function buildActiviteEntityLabel(
+  wsNom: string,
+  actNom: string
+): string {
+  return `Act · ${wsNom} \\ ${actNom}`.trim();
 }
 
 export function buildJalonEntityLabel(phase: string, nom: string): string {

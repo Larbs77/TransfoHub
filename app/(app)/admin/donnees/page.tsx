@@ -26,16 +26,6 @@ export default async function DonneesAdminPage() {
             <h1 className="text-2xl font-bold tracking-tight text-primary">
               Import / Purge
             </h1>
-            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              Exportez, purgez ou chargez des données métier depuis des fichiers
-              CSV (séparateur{" "}
-              <code className="rounded bg-muted px-1 text-xs">|</code>, pipe —
-              les virgules restent autorisées dans le texte). Après lecture, un
-              rapport de validation s&apos;affiche ; l&apos;import n&apos;est
-              effectué qu&apos;après votre approbation. Onglets : planning
-              jalons par chantier, Ressources, RAID. Réservé aux
-              administrateurs.
-            </p>
           </div>
         </div>
 

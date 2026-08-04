@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
     "@prisma/adapter-pg",
     "pg",
     "pg-native",
+    "xlsx",
   ],
   // DB dump / SQL restore payloads (maintenance console)
   experimental: {

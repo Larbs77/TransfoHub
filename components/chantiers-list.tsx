@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { LayoutGrid, TableIcon, GanttChart, Pencil, Trash2, ArrowRight, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { LayoutGrid, TableIcon, GanttChart, Pencil, Trash2, ArrowRight, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, Search, SlidersHorizontal, CalendarRange, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -367,44 +367,63 @@ export function ChantiersList({ chantiers, favoris = [] }: Props) {
   return (
     <>
       {/* Filter bar */}
-      <div className="space-y-3 mb-6">
-        <div className="flex flex-wrap items-center gap-3">
-          <Input
-            placeholder="Rechercher (code, nom, directeur)..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-64"
-          />
+      <div className="mb-6 overflow-visible rounded-xl border bg-card shadow-sm">
+        <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[#0A3C74]">
+            <SlidersHorizontal className="size-4 text-[#00BDBB]" />
+            Filtres chantiers
+          </div>
+          <Badge variant="outline" className="border-[#00BDBB]/30 bg-[#00BDBB]/5 font-normal text-[#0A3C74]">
+            {filtered.length} affiché{filtered.length > 1 ? "s" : ""} / {chantiers.length}
+          </Badge>
+          {hasActiveFilters && (
+            <Button variant="ghost" size="sm" className="ml-auto h-8 gap-1.5 text-xs" onClick={resetFilters}>
+              <RotateCcw className="size-3.5" /> Réinitialiser
+            </Button>
+          )}
+        </div>
+
+        <div className="space-y-3 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-full sm:w-64 lg:flex-none">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#00BDBB]" />
+            <Input
+              placeholder="Code, nom, directeur ou PMO…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-9 border-[#0A3C74]/15 bg-background pl-9 focus-visible:ring-[#00BDBB]/40"
+            />
+          </div>
           <MultiSelect
             options={STATUT_OPTIONS}
             selected={filterStatut}
             onChange={setFilterStatut}
             placeholder="Statut"
-            className="w-40"
+            className="w-36"
           />
           <MultiSelect
             options={DOMAINE_OPTIONS}
             selected={filterDomaine}
             onChange={setFilterDomaine}
             placeholder="Domaine"
-            className="w-48"
+            className="w-36"
           />
           <MultiSelect
             options={TYPE_OPTIONS}
             selected={filterType}
             onChange={setFilterType}
             placeholder="Type chantier"
-            className="w-48"
+            className="w-36"
           />
           <MultiSelect
             options={PRIORITE_OPTIONS}
             selected={filterPriorite}
             onChange={setFilterPriorite}
             placeholder="Priorité"
-            className="w-48"
+            className="w-36"
           />
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 border-t border-dashed pt-3">
           {directeurOptions.length > 0 && (
             <MultiSelect
               options={directeurOptions}
@@ -432,28 +451,23 @@ export function ChantiersList({ chantiers, favoris = [] }: Props) {
               className="w-48"
             />
           )}
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-muted-foreground whitespace-nowrap">Début du</label>
-            <Input type="date" value={dateDebutFrom} onChange={(e) => setDateDebutFrom(e.target.value)} className="w-36 h-9" />
-            <label className="text-xs text-muted-foreground whitespace-nowrap">au</label>
-            <Input type="date" value={dateDebutTo} onChange={(e) => setDateDebutTo(e.target.value)} className="w-36 h-9" />
+          <div className="ml-1 flex items-center gap-1.5 rounded-md border bg-muted/20 px-2 py-1">
+            <CalendarRange className="size-3.5 text-[#00BDBB]" />
+            <label className="whitespace-nowrap text-[11px] font-medium text-muted-foreground">Début</label>
+            <Input type="date" value={dateDebutFrom} onChange={(e) => setDateDebutFrom(e.target.value)} className="h-7 w-32 border-0 bg-transparent px-1 text-xs shadow-none" />
+            <span className="text-[10px] text-muted-foreground">→</span>
+            <Input type="date" value={dateDebutTo} min={dateDebutFrom || undefined} onChange={(e) => setDateDebutTo(e.target.value)} className="h-7 w-32 border-0 bg-transparent px-1 text-xs shadow-none" />
           </div>
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-muted-foreground whitespace-nowrap">Fin du</label>
-            <Input type="date" value={dateFinFrom} onChange={(e) => setDateFinFrom(e.target.value)} className="w-36 h-9" />
-            <label className="text-xs text-muted-foreground whitespace-nowrap">au</label>
-            <Input type="date" value={dateFinTo} onChange={(e) => setDateFinTo(e.target.value)} className="w-36 h-9" />
+          <div className="flex items-center gap-1.5 rounded-md border bg-muted/20 px-2 py-1">
+            <CalendarRange className="size-3.5 text-[#0A3C74]" />
+            <label className="whitespace-nowrap text-[11px] font-medium text-muted-foreground">Fin</label>
+            <Input type="date" value={dateFinFrom} onChange={(e) => setDateFinFrom(e.target.value)} className="h-7 w-32 border-0 bg-transparent px-1 text-xs shadow-none" />
+            <span className="text-[10px] text-muted-foreground">→</span>
+            <Input type="date" value={dateFinTo} min={dateFinFrom || undefined} onChange={(e) => setDateFinTo(e.target.value)} className="h-7 w-32 border-0 bg-transparent px-1 text-xs shadow-none" />
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          {hasActiveFilters && (
-            <Button variant="ghost" size="sm" onClick={resetFilters}>
-              Réinitialiser
-            </Button>
-          )}
-          <span className="text-xs text-muted-foreground">
-            {filtered.length} / {chantiers.length} chantier(s)
-          </span>
+        <div className="flex items-center gap-3 border-t pt-3">
+          <span className="text-xs text-muted-foreground">Mode d&apos;affichage</span>
           <div className="ml-auto flex items-center gap-3">
             <div className="flex items-center gap-2">
               <label className="text-xs text-muted-foreground whitespace-nowrap">Afficher</label>
@@ -502,6 +516,7 @@ export function ChantiersList({ chantiers, favoris = [] }: Props) {
               </Button>
             </div>
           </div>
+        </div>
         </div>
       </div>
 

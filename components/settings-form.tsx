@@ -79,8 +79,8 @@ export function SettingsForm({ settings }: Props) {
         />
       </div>
 
-      <div className="border-t pt-4 mt-4">
-        <h3 className="text-sm font-semibold mb-3">Pondération des phases (%)</h3>
+      <div className="mt-4 border-t pt-4">
+        <h3 className="mb-3 text-sm font-semibold">Pondération des phases (%)</h3>
         <div className="grid grid-cols-4 gap-4">
           <div>
             <label className="text-xs text-muted-foreground">Précadrage</label>
@@ -123,7 +123,13 @@ export function SettingsForm({ settings }: Props) {
             />
           </div>
         </div>
-        <p className={`text-xs mt-2 ${isValidSum ? "text-muted-foreground" : "text-destructive font-medium"}`}>
+        <p
+          className={`mt-2 text-xs ${
+            isValidSum
+              ? "text-muted-foreground"
+              : "font-medium text-destructive"
+          }`}
+        >
           Total : {weightSum}%{isValidSum ? "" : " (doit être 100%)"}
         </p>
       </div>

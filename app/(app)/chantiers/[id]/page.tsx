@@ -279,6 +279,7 @@ export default async function ChantierDetailPage({ params }: Props) {
               workflowCaps={jalonWorkflow.caps}
               pendingByEntityId={jalonWorkflow.pendingByEntityId}
               pendingCreatesCount={jalonWorkflow.pendingCreates.length}
+              detailGouvernance={jalonWorkflow.detailGouvernance}
             />
           }
           jalonsCount={chantier.jalons.length}

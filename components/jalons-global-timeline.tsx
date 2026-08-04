@@ -328,6 +328,15 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
           </div>
           <CardAction>
             <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 bg-[#0A3C74] text-white hover:bg-[#0A3C74]/90"
+                onClick={() => router.push("/gantt")}
+              >
+                <GanttChart className="size-3.5 text-[#00BDBB]" />
+                Gantt portefeuille
+              </Button>
               {view === "timeline" && (
                 <Select
                   value={zoom}
@@ -446,25 +455,57 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
           ) : (
             <div className="flex">
               {/* Fixed left panel */}
-              <div className="w-52 shrink-0 border-r bg-background z-20">
-                <div className="h-9 flex items-center px-3 border-b bg-muted/30">
-                  <span className="text-xs font-semibold text-muted-foreground">
-                    Chantier
-                  </span>
+              <div className="z-20 w-[360px] shrink-0 border-r bg-background shadow-[3px_0_10px_rgba(15,23,42,0.04)]">
+                <div className="flex h-11 items-center justify-between border-b bg-muted/30 px-4">
+                  <div>
+                    <span className="text-xs font-semibold text-foreground">
+                      Chantiers en cours
+                    </span>
+                    <p className="text-[10px] text-muted-foreground">
+                      Cliquez sur un projet pour ouvrir sa fiche
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="h-5 text-[10px]">
+                    {chantierGroups.length}
+                  </Badge>
                 </div>
                 {chantierGroups.map((group) => (
                   <div
                     key={group.chantier.id}
-                    className="h-10 flex items-center px-3 border-b hover:bg-muted/10 cursor-pointer"
+                    className="group flex h-16 cursor-pointer items-center gap-3 border-b px-4 transition-colors hover:bg-[#0A3C74]/[0.035]"
                     onClick={() => router.push(`/chantiers/${group.chantier.id}`)}
                   >
-                    <span className="text-[11px] font-mono text-muted-foreground mr-2 shrink-0">
-                      {group.chantier.code}
-                    </span>
-                    <span className="text-[11px] truncate">{group.chantier.nom}</span>
-                    <Badge variant="secondary" className="ml-auto text-[9px] px-1 py-0 shrink-0">
-                      {group.jalons.length}
-                    </Badge>
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-1 flex items-center gap-2">
+                        <span className="rounded bg-[#0A3C74]/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#0A3C74]">
+                          {group.chantier.code}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {group.jalons.length} jalon{group.jalons.length > 1 ? "s" : ""}
+                        </span>
+                      </div>
+                      <p
+                        className="line-clamp-2 text-[11px] font-medium leading-[1.25] text-foreground/90"
+                        title={group.chantier.nom}
+                      >
+                        {group.chantier.nom}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-[#00BDBB]/50 bg-[#00BDBB]/10 px-2.5 text-[10px] font-semibold text-[#0A3C74] shadow-sm transition-all hover:border-[#00BDBB] hover:bg-[#00BDBB]/20 hover:shadow"
+                      title={`Afficher le Gantt de ${group.chantier.code}`}
+                      aria-label={`Afficher le Gantt de ${group.chantier.code}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        router.push(
+                          `/chantiers/${group.chantier.id}/gantt?from=jalons`
+                        );
+                      }}
+                    >
+                      <GanttChart className="size-3.5" />
+                      Gantt
+                    </button>
                   </div>
                 ))}
               </div>
@@ -473,7 +514,7 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
               <div className="flex-1 overflow-x-auto">
                 <div style={{ minWidth: `${totalWidth}px` }}>
                   {/* Header ticks */}
-                  <div className="h-9 flex items-center border-b bg-muted/30">
+                  <div className="flex h-11 items-center border-b bg-muted/30">
                     {ticks.map((tick, i) => (
                       <div
                         key={tick.label + i}
@@ -487,7 +528,7 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
 
                   {/* Rows */}
                   {chantierGroups.map((group) => (
-                    <div key={group.chantier.id} className="h-10 border-b relative">
+                    <div key={group.chantier.id} className="relative h-16 border-b">
                       {/* Grid lines */}
                       {ticks.map((_, i) => (
                         <div
@@ -512,7 +553,7 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
                         const barWidth = barRight - barLeft;
                         return (
                           <div
-                            className="absolute top-3 h-4 rounded-sm"
+                            className="absolute top-1/2 h-4 -translate-y-1/2 rounded-sm"
                             style={{
                               left: `${barLeft}%`,
                               width: `${barWidth}%`,

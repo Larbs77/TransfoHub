@@ -294,6 +294,37 @@ export function DataAdminPanel({ initialCounts, chantierCount = 0 }: Props) {
 
   return (
     <div className="space-y-6">
+      <div className="max-w-4xl rounded-xl border border-[#00BDBB]/20 bg-[#00BDBB]/5 px-4 py-3 text-sm text-muted-foreground">
+        {section === "planning" ? (
+          <div className="space-y-1.5">
+            <p>
+              Gérez les plannings des chantiers avec des classeurs Excel
+              structurés pour les <strong className="font-medium text-foreground">jalons, workstreams et activités</strong>.
+              Téléchargez le planning existant, un modèle prérempli ou un
+              classeur vide, puis complétez-le dans Excel.
+            </p>
+            <p className="text-xs leading-relaxed">
+              Sélectionnez un chantier, modifiez ou ajoutez les lignes sans
+              altérer les identifiants techniques, puis rechargez le fichier.
+              L&apos;analyse à blanc présente le merge avant toute confirmation
+              en base ; les éléments absents du classeur sont conservés.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <p>
+              <strong className="font-medium text-foreground">{meta.label}</strong> — {meta.description}
+            </p>
+            <p className="text-xs leading-relaxed">
+              Exportez, purgez ou chargez ces données depuis un fichier CSV
+              utilisant le séparateur <code className="rounded bg-background px-1">|</code>.
+              Après lecture, un rapport de validation s&apos;affiche et
+              l&apos;import n&apos;est effectué qu&apos;après votre approbation.
+            </p>
+          </div>
+        )}
+      </div>
+
       {/* Section selector — Chantiers (planning) first, then Ressources / RAID */}
       <div className="flex flex-wrap gap-2">
         <button

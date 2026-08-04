@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { format, differenceInDays } from "date-fns";
 import { fr } from "date-fns/locale";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardAction } from "@/components/ui/card";
@@ -26,16 +26,25 @@ import {
   Loader2,
   Wand2,
   MapPin,
+  ChevronDown,
+  ChevronRight,
+  GanttChart,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { deleteJalon, applyJalonTemplate } from "@/app/(app)/actions";
 import { JalonFormDialog } from "@/components/jalon-form-dialog";
+import {
+  ChantierJalonPlanningTree,
+  type WorkstreamData,
+} from "@/components/chantier-jalon-planning-tree";
 import {
   PHASES,
   PHASE_COLORS,
   STATUT_JALON_COLORS,
 } from "@/lib/jalon-labels";
 import type { JalonWorkflowCaps, WorkflowMode } from "@/lib/workflow-shared";
+import type { PlanningDetailGouvernance } from "@/lib/planning-coherence";
 import {
   Dialog,
   DialogContent,
@@ -52,11 +61,13 @@ interface JalonData {
   nom: string;
   description: string;
   ordre: number;
+  date_debut: Date | null;
   date_cible: Date;
   date_reelle: Date | null;
   statut: string;
   livrables: string;
   commentaire: string;
+  workstreams?: WorkstreamData[];
 }
 
 interface PendingInfo {
@@ -74,6 +85,7 @@ interface Props {
   workflowCaps?: JalonWorkflowCaps;
   pendingByEntityId?: Record<string, PendingInfo>;
   pendingCreatesCount?: number;
+  detailGouvernance?: PlanningDetailGouvernance;
 }
 
 function KpiCard({
@@ -122,6 +134,7 @@ export function ChantierJalonsTab({
   workflowCaps = DEFAULT_CAPS,
   pendingByEntityId = {},
   pendingCreatesCount = 0,
+  detailGouvernance = "libre",
 }: Props) {
   const router = useRouter();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -133,6 +146,19 @@ export function ChantierJalonsTab({
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState("");
+  const [expandedJalons, setExpandedJalons] = useState<Record<string, boolean>>(
+    {}
+  );
+
+  function isExpanded(id: string) {
+    return expandedJalons[id] ?? true;
+  }
+  function toggleJalon(id: string) {
+    setExpandedJalons((prev) => ({
+      ...prev,
+      [id]: !(prev[id] ?? true),
+    }));
+  }
 
   const canCreate = workflowCaps.create !== "INTERDIT";
   const canUpdate = workflowCaps.update !== "INTERDIT";
@@ -376,10 +402,38 @@ export function ChantierJalonsTab({
         <CardHeader>
           <CardTitle className="text-sm">Jalons par phase</CardTitle>
           <CardDescription>
-            {total} jalon(s) — {atteints}/{total} atteints
+            {total} jalon(s) — {atteints}/{total} atteints · arbre Workstream →
+            Activité
           </CardDescription>
           <CardAction>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                asChild
+                disabled={total === 0}
+                title={
+                  total === 0
+                    ? "Ajoutez des jalons pour afficher le Gantt"
+                    : "Ouvrir le diagramme de Gantt dans un nouvel onglet"
+                }
+              >
+                <Link
+                  href={`/chantiers/${chantierId}/gantt`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-disabled={total === 0}
+                  className={
+                    total === 0 ? "pointer-events-none opacity-50" : undefined
+                  }
+                  onClick={(e) => {
+                    if (total === 0) e.preventDefault();
+                  }}
+                >
+                  <GanttChart className="size-4" />
+                  Planning GANTT
+                </Link>
+              </Button>
               {total === 0 && canCreate && workflowCaps.create === "DIRECT" && (
                 <Button
                   size="sm"
@@ -492,11 +546,14 @@ export function ChantierJalonsTab({
                       <Table>
                         <TableHeader>
                           <TableRow>
+                            <TableHead className="w-8" />
                             <TableHead className="w-[200px]">Nom</TableHead>
+                            <TableHead className="w-[100px]">Date de début</TableHead>
                             <TableHead className="w-[100px]">Date cible</TableHead>
                             <TableHead className="w-[100px]">Date réelle</TableHead>
                             <TableHead className="w-[70px] text-center">Écart</TableHead>
                             <TableHead className="w-[90px]">Statut</TableHead>
+                            <TableHead className="w-[100px]">Détail</TableHead>
                             <TableHead className="w-[80px]" />
                           </TableRow>
                         </TableHeader>
@@ -504,99 +561,165 @@ export function ChantierJalonsTab({
                           {group.items.map((j) => {
                             const e = ecart(j);
                             const pending = pendingByEntityId[j.id];
+                            const wsCount = j.workstreams?.length ?? 0;
+                            const actCount =
+                              j.workstreams?.reduce(
+                                (n, w) => n + (w.activites?.length ?? 0),
+                                0
+                              ) ?? 0;
+                            const expanded = isExpanded(j.id);
                             return (
-                              <TableRow key={j.id}>
-                                <TableCell>
-                                  <div>
-                                    <span className="text-sm font-medium">{j.nom}</span>
-                                    {j.description && (
-                                      <p className="text-xs text-muted-foreground truncate max-w-[180px]">
-                                        {j.description}
-                                      </p>
-                                    )}
-                                    {pending && (
-                                      <Badge
-                                        variant="outline"
-                                        className="mt-1 text-[10px] border-amber-500/50 text-amber-700 dark:text-amber-300"
-                                      >
-                                        Demande {pending.operation} en attente
-                                      </Badge>
-                                    )}
-                                  </div>
-                                </TableCell>
-                                <TableCell className="text-xs">
-                                  {format(new Date(j.date_cible), "dd MMM yyyy", { locale: fr })}
-                                </TableCell>
-                                <TableCell className="text-xs">
-                                  {j.date_reelle
-                                    ? format(new Date(j.date_reelle), "dd MMM yyyy", { locale: fr })
-                                    : "—"}
-                                </TableCell>
-                                <TableCell className="text-center">
-                                  {e ? (
-                                    <span
-                                      className="text-xs font-semibold"
-                                      style={{ color: e.color }}
+                              <Fragment key={j.id}>
+                                <TableRow>
+                                  <TableCell className="px-1">
+                                    <Button
+                                      type="button"
+                                      size="icon"
+                                      variant="ghost"
+                                      className="size-7"
+                                      onClick={() => toggleJalon(j.id)}
+                                      title={
+                                        expanded
+                                          ? "Replier workstreams"
+                                          : "Déplier workstreams"
+                                      }
                                     >
-                                      {e.label}
-                                    </span>
-                                  ) : (
-                                    "—"
-                                  )}
-                                </TableCell>
-                                <TableCell>
-                                  <Badge
-                                    variant="secondary"
-                                    style={{
-                                      backgroundColor: (STATUT_JALON_COLORS[j.statut] ?? "#94a3b8") + "20",
-                                      color: STATUT_JALON_COLORS[j.statut] ?? "#94a3b8",
-                                    }}
-                                  >
-                                    {j.statut}
-                                  </Badge>
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex gap-1">
-                                    {canUpdate && !pending && (
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        className="h-7 w-7 p-0"
-                                        title={
-                                          workflowCaps.update === "VALIDATION"
-                                            ? "Demander une modification"
-                                            : "Modifier"
-                                        }
-                                        onClick={() => {
-                                          setEditJalon(j);
-                                          setDialogOpen(true);
-                                        }}
+                                      {expanded ? (
+                                        <ChevronDown className="size-3.5" />
+                                      ) : (
+                                        <ChevronRight className="size-3.5" />
+                                      )}
+                                    </Button>
+                                  </TableCell>
+                                  <TableCell>
+                                    <div>
+                                      <span className="text-sm font-medium">
+                                        {j.nom}
+                                      </span>
+                                      {j.description && (
+                                        <p className="max-w-[180px] truncate text-xs text-muted-foreground">
+                                          {j.description}
+                                        </p>
+                                      )}
+                                      {pending && (
+                                        <Badge
+                                          variant="outline"
+                                          className="mt-1 border-amber-500/50 text-[10px] text-amber-700 dark:text-amber-300"
+                                        >
+                                          Demande {pending.operation} en attente
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-xs">
+                                    {j.date_debut
+                                      ? format(
+                                          new Date(j.date_debut),
+                                          "dd MMM yyyy",
+                                          { locale: fr }
+                                        )
+                                      : "—"}
+                                  </TableCell>
+                                  <TableCell className="text-xs">
+                                    {format(new Date(j.date_cible), "dd MMM yyyy", {
+                                      locale: fr,
+                                    })}
+                                  </TableCell>
+                                  <TableCell className="text-xs">
+                                    {j.date_reelle
+                                      ? format(
+                                          new Date(j.date_reelle),
+                                          "dd MMM yyyy",
+                                          { locale: fr }
+                                        )
+                                      : "—"}
+                                  </TableCell>
+                                  <TableCell className="text-center">
+                                    {e ? (
+                                      <span
+                                        className="text-xs font-semibold"
+                                        style={{ color: e.color }}
                                       >
-                                        <Pencil className="size-3" />
-                                      </Button>
+                                        {e.label}
+                                      </span>
+                                    ) : (
+                                      "—"
                                     )}
-                                    {canDelete && !pending && (
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                                        title={
-                                          workflowCaps.delete === "VALIDATION"
-                                            ? "Demander une suppression"
-                                            : "Supprimer"
-                                        }
-                                        onClick={() => {
-                                          setDeleteError("");
-                                          setDeleteMotif("");
-                                          setDeleteTarget(j);
-                                        }}
-                                      >
-                                        <Trash2 className="size-3" />
-                                      </Button>
-                                    )}
-                                  </div>
-                                </TableCell>
-                              </TableRow>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge
+                                      variant="secondary"
+                                      style={{
+                                        backgroundColor:
+                                          (STATUT_JALON_COLORS[j.statut] ??
+                                            "#94a3b8") + "20",
+                                        color:
+                                          STATUT_JALON_COLORS[j.statut] ??
+                                          "#94a3b8",
+                                      }}
+                                    >
+                                      {j.statut}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="text-[11px] text-muted-foreground">
+                                    {wsCount} WS · {actCount} act.
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="flex gap-1">
+                                      {canUpdate && !pending && (
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          className="h-7 w-7 p-0"
+                                          title={
+                                            workflowCaps.update === "VALIDATION"
+                                              ? "Demander une modification"
+                                              : "Modifier"
+                                          }
+                                          onClick={() => {
+                                            setEditJalon(j);
+                                            setDialogOpen(true);
+                                          }}
+                                        >
+                                          <Pencil className="size-3" />
+                                        </Button>
+                                      )}
+                                      {canDelete && !pending && (
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                                          title={
+                                            workflowCaps.delete === "VALIDATION"
+                                              ? "Demander une suppression"
+                                              : "Supprimer"
+                                          }
+                                          onClick={() => {
+                                            setDeleteError("");
+                                            setDeleteMotif("");
+                                            setDeleteTarget(j);
+                                          }}
+                                        >
+                                          <Trash2 className="size-3" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                                {expanded && (
+                                  <TableRow className="hover:bg-transparent">
+                                    <TableCell colSpan={9} className="bg-muted/10 py-3">
+                                      <ChantierJalonPlanningTree
+                                        jalon={j}
+                                        workflowCaps={workflowCaps}
+                                        detailGouvernance={detailGouvernance}
+                                        pendingByEntityId={pendingByEntityId}
+                                        onToast={setToast}
+                                      />
+                                    </TableCell>
+                                  </TableRow>
+                                )}
+                              </Fragment>
                             );
                           })}
                         </TableBody>

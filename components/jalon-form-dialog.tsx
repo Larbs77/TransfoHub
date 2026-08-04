@@ -40,6 +40,7 @@ interface JalonData {
   nom: string;
   description: string;
   ordre: number;
+  date_debut: Date | null;
   date_cible: Date;
   date_reelle: Date | null;
   statut: string;
@@ -122,18 +123,21 @@ export function JalonFormDialog({
   const [nom, setNom] = useState(jalon?.nom ?? "");
   const [description, setDescription] = useState(jalon?.description ?? "");
   const [ordre, setOrdre] = useState(jalon?.ordre ?? 0);
+  const [dateDebut, setDateDebut] = useState(toDateInput(jalon?.date_debut));
   const [dateCible, setDateCible] = useState(toDateInput(jalon?.date_cible));
   const [dateReelle, setDateReelle] = useState(toDateInput(jalon?.date_reelle));
   const [statut, setStatut] = useState(jalon?.statut ?? "Planifié");
   const [livrables, setLivrables] = useState(jalon?.livrables ?? "");
   const [commentaire, setCommentaire] = useState(jalon?.commentaire ?? "");
 
+  const originalDateDebut = isEdit ? toDateInput(jalon?.date_debut) : "";
   const originalDateCible = isEdit ? toDateInput(jalon?.date_cible) : "";
-  /** Only a change of date_cible triggers validation on edit */
-  const dateCibleChanged = isEdit && dateCible !== originalDateCible;
+  const planningDatesChanged =
+    isEdit &&
+    (dateDebut !== originalDateDebut || dateCible !== originalDateCible);
   const validationTriggered =
     createNeedsValidation ||
-    (isEdit && workflowMode === "VALIDATION" && dateCibleChanged);
+    (isEdit && workflowMode === "VALIDATION" && planningDatesChanged);
   const needsMotif =
     validationTriggered || (isEdit && workflowMode === "DIRECT");
   const motifIsRequest = validationTriggered;
@@ -144,6 +148,7 @@ export function JalonFormDialog({
       setNom(jalon?.nom ?? "");
       setDescription(jalon?.description ?? "");
       setOrdre(jalon?.ordre ?? 0);
+      setDateDebut(toDateInput(jalon?.date_debut));
       setDateCible(toDateInput(jalon?.date_cible));
       setDateReelle(toDateInput(jalon?.date_reelle));
       setStatut(jalon?.statut ?? "Planifié");
@@ -164,11 +169,15 @@ export function JalonFormDialog({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (dateDebut && dateCible && dateDebut > dateCible) {
+      setError("La date de début doit être antérieure ou égale à la date cible.");
+      return;
+    }
     if (needsMotif && !motif.trim()) {
       setError(
         motifIsRequest
-          ? dateCibleChanged
-            ? "Le motif est obligatoire pour demander un changement de date cible."
+          ? planningDatesChanged
+            ? "Le motif est obligatoire pour demander un changement des dates du jalon."
             : "Le motif de la demande est obligatoire."
           : "Le commentaire est obligatoire pour modifier un jalon."
       );
@@ -182,6 +191,7 @@ export function JalonFormDialog({
       nom,
       description,
       ordre,
+      date_debut: dateDebut || null,
       date_cible: dateCible,
       date_reelle: dateReelle || null,
       statut,
@@ -203,27 +213,27 @@ export function JalonFormDialog({
   }
 
   const title = isEdit
-    ? dateCibleChanged && workflowMode === "VALIDATION"
-      ? "Demande de modification de date"
+    ? planningDatesChanged && workflowMode === "VALIDATION"
+      ? "Demande de modification du planning"
       : "Modifier le jalon"
     : createNeedsValidation
       ? "Demande de création de jalon"
       : "Nouveau jalon";
 
   const subtitle = isEdit
-    ? dateCibleChanged && workflowMode === "VALIDATION"
-      ? "Seul le changement de date cible est soumis à validation. Les autres champs sont enregistrés immédiatement."
+    ? planningDatesChanged && workflowMode === "VALIDATION"
+      ? "Les changements des dates du jalon sont soumis à validation. Les autres champs sont enregistrés immédiatement."
       : workflowMode === "DIRECT"
         ? "Modification directe — un commentaire de traçabilité est requis."
         : workflowMode === "VALIDATION"
-          ? "Vous pouvez modifier les informations librement. Seule la date cible nécessite une validation."
+          ? "Vous pouvez modifier les informations librement. Les dates du jalon nécessitent une validation."
           : "Mettez à jour les informations du jalon."
     : createNeedsValidation
       ? "La création sera soumise à validation."
       : "Renseignez les informations du nouveau jalon.";
 
   const HeaderIcon = isEdit
-    ? dateCibleChanged && workflowMode === "VALIDATION"
+    ? planningDatesChanged && workflowMode === "VALIDATION"
       ? ShieldAlert
       : Pencil
     : FilePlus2;
@@ -248,12 +258,12 @@ export function JalonFormDialog({
             </span>
             {motifIsRequest && (
               <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/35 bg-amber-500/15 px-2.5 py-1 text-[10px] font-semibold text-amber-800 dark:text-amber-200">
-                {dateCibleChanged
-                  ? "Validation date cible"
+                {planningDatesChanged
+                  ? "Validation des dates"
                   : "Soumis à validation"}
               </span>
             )}
-            {isEdit && workflowMode === "VALIDATION" && !dateCibleChanged && (
+            {isEdit && workflowMode === "VALIDATION" && !planningDatesChanged && (
               <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/35 bg-emerald-500/15 px-2.5 py-1 text-[10px] font-semibold text-emerald-800 dark:text-emerald-200">
                 Autres champs libres
               </span>
@@ -288,22 +298,22 @@ export function JalonFormDialog({
           className="flex min-h-0 flex-1 flex-col"
         >
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
-            {isEdit && workflowMode === "VALIDATION" && !dateCibleChanged && (
+            {isEdit && workflowMode === "VALIDATION" && !planningDatesChanged && (
               <div className="flex gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/8 px-3.5 py-3 text-sm">
                 <Info className="mt-0.5 size-4 shrink-0 text-emerald-600" />
                 <p className="leading-relaxed text-foreground/90">
-                  Les champs hors <strong>date cible</strong> sont enregistrés
-                  sans validation. Modifier la date cible déclenchera une
-                  demande de validation.
+                  Les champs hors <strong>dates du jalon</strong> sont enregistrés
+                  sans validation. Modifier la date de début ou la date cible
+                  déclenchera une demande de validation.
                 </p>
               </div>
             )}
-            {isEdit && workflowMode === "VALIDATION" && dateCibleChanged && (
+            {isEdit && workflowMode === "VALIDATION" && planningDatesChanged && (
               <div className="flex gap-3 rounded-xl border border-amber-500/30 bg-amber-500/8 px-3.5 py-3 text-sm text-amber-950 dark:text-amber-50">
                 <Info className="mt-0.5 size-4 shrink-0 text-amber-600" />
                 <p className="leading-relaxed">
-                  Vous avez modifié la <strong>date cible</strong> (
-                  {originalDateCible || "—"} → {dateCible || "—"}). Une{" "}
+                  Vous avez modifié la <strong>temporalité du jalon</strong> (
+                  {originalDateDebut || "—"} → {dateDebut || "—"} · {originalDateCible || "—"} → {dateCible || "—"}). Une{" "}
                   <strong>demande de validation</strong> sera créée pour cette
                   date. Les autres champs seront enregistrés tout de suite.
                 </p>
@@ -377,6 +387,23 @@ export function JalonFormDialog({
             <Section icon={CalendarRange} title="Planning & statut">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
+                  <FieldLabel>Date de début</FieldLabel>
+                  <Input
+                    type="date"
+                    value={dateDebut}
+                    max={dateCible || undefined}
+                    onChange={(e) => setDateDebut(e.target.value)}
+                    className={
+                      planningDatesChanged && workflowMode === "VALIDATION"
+                        ? "border-amber-500/50 ring-1 ring-amber-500/30"
+                        : undefined
+                    }
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Début de la période couverte par le jalon.
+                  </p>
+                </div>
+                <div className="grid gap-1.5">
                   <FieldLabel required>Date cible</FieldLabel>
                   <Input
                     type="date"
@@ -384,16 +411,16 @@ export function JalonFormDialog({
                     onChange={(e) => setDateCible(e.target.value)}
                     required
                     className={
-                      dateCibleChanged && workflowMode === "VALIDATION"
+                      planningDatesChanged && workflowMode === "VALIDATION"
                         ? "border-amber-500/50 ring-1 ring-amber-500/30"
                         : undefined
                     }
                   />
                   {isEdit && workflowMode === "VALIDATION" && (
                     <p className="text-[11px] text-muted-foreground">
-                      {dateCibleChanged
-                        ? "Changement de date → validation requise"
-                        : "Modifier cette date soumettra une demande de validation"}
+                      {planningDatesChanged
+                        ? "Changement du planning → validation requise"
+                        : "Modifier une date soumettra une demande de validation"}
                     </p>
                   )}
                 </div>
@@ -458,8 +485,8 @@ export function JalonFormDialog({
                 icon={MessageSquareText}
                 title={
                   motifIsRequest
-                    ? dateCibleChanged
-                      ? "Justification du changement de date"
+                    ? planningDatesChanged
+                      ? "Justification du changement de planning"
                       : "Justification de la demande"
                     : "Commentaire de traçabilité"
                 }
@@ -475,8 +502,8 @@ export function JalonFormDialog({
                     rows={3}
                     placeholder={
                       motifIsRequest
-                        ? dateCibleChanged
-                          ? "Expliquez pourquoi la date cible doit être modifiée..."
+                        ? planningDatesChanged
+                          ? "Expliquez pourquoi les dates du jalon doivent être modifiées..."
                           : "Expliquez pourquoi cette demande est nécessaire..."
                         : "Expliquez la modification apportée..."
                     }
@@ -500,8 +527,8 @@ export function JalonFormDialog({
 
           <DialogFooter className="gap-2 border-t bg-muted/20 px-6 py-4 sm:justify-between">
             <p className="hidden max-w-sm text-xs text-muted-foreground sm:block">
-              {isEdit && dateCibleChanged && workflowMode === "VALIDATION"
-                ? "Autres champs enregistrés tout de suite · date cible en attente de validation."
+              {isEdit && planningDatesChanged && workflowMode === "VALIDATION"
+                ? "Autres champs enregistrés tout de suite · dates en attente de validation."
                 : motifIsRequest
                   ? "La demande sera traitée par un validateur."
                   : "Vérifiez les informations avant d'enregistrer."}
@@ -526,8 +553,8 @@ export function JalonFormDialog({
               >
                 {loading && <Loader2 className="size-4 animate-spin" />}
                 {motifIsRequest
-                  ? dateCibleChanged
-                    ? "Enregistrer + demander validation date"
+                  ? planningDatesChanged
+                    ? "Enregistrer + demander validation des dates"
                     : "Soumettre la demande"
                   : isEdit
                     ? "Enregistrer"

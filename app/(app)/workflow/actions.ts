@@ -78,7 +78,13 @@ function asRecord(v: unknown): Record<string, unknown> | null {
   return null;
 }
 
-async function executeJalonFromRequest(request: {
+function optionalIsoDate(v: unknown): Date | null {
+  if (v === null || v === undefined || v === "") return null;
+  const d = new Date(String(v));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+async function executePlanningFromRequest(request: {
   entityType: string;
   operation: string;
   entityId: string | null;
@@ -86,91 +92,253 @@ async function executeJalonFromRequest(request: {
   newValues: unknown;
   oldValues: unknown;
 }): Promise<{ entityId?: string | null; entityLabel?: string }> {
-  if (request.entityType !== WORKFLOW_ENTITY.JALON) {
-    throw new Error("Type d'objet non supporté pour exécution.");
-  }
+  const {
+    buildWorkstreamEntityLabel,
+    buildActiviteEntityLabel,
+  } = await import("@/lib/workflow-shared");
 
-  if (request.operation === WORKFLOW_OPERATION.CREATE) {
-    const nv = asRecord(request.newValues);
-    if (!nv) throw new Error("Valeurs proposées manquantes.");
-    const chantierId = String(nv.chantierId ?? request.chantierId ?? "");
-    if (!chantierId) throw new Error("Chantier manquant.");
+  // ── Jalon ──────────────────────────────────────────
+  if (request.entityType === WORKFLOW_ENTITY.JALON) {
+    if (request.operation === WORKFLOW_OPERATION.CREATE) {
+      const nv = asRecord(request.newValues);
+      if (!nv) throw new Error("Valeurs proposées manquantes.");
+      const chantierId = String(nv.chantierId ?? request.chantierId ?? "");
+      if (!chantierId) throw new Error("Chantier manquant.");
 
-    const created = await prisma.jalon.create({
-      data: {
-        chantierId,
-        phase: String(nv.phase ?? "Exécution"),
-        nom: String(nv.nom ?? ""),
-        description: String(nv.description ?? ""),
-        ordre: Number(nv.ordre ?? 0),
-        date_cible: new Date(String(nv.date_cible)),
-        date_reelle: nv.date_reelle
-          ? new Date(String(nv.date_reelle))
-          : null,
-        statut: String(nv.statut ?? "Planifié"),
-        livrables: String(nv.livrables ?? ""),
-        commentaire: String(nv.commentaire ?? ""),
-      },
-    });
-    await recalculateChantierProgress(chantierId);
-    return {
-      entityId: created.id,
-      entityLabel: buildJalonEntityLabel(created.phase, created.nom),
-    };
-  }
-
-  if (request.operation === WORKFLOW_OPERATION.UPDATE) {
-    if (!request.entityId) throw new Error("Jalon cible manquant.");
-    const nv = asRecord(request.newValues);
-    if (!nv) throw new Error("Valeurs proposées manquantes.");
-    const updated = await prisma.jalon.update({
-      where: { id: request.entityId },
-      data: {
-        phase: String(nv.phase ?? "Exécution"),
-        nom: String(nv.nom ?? ""),
-        description: String(nv.description ?? ""),
-        ordre: Number(nv.ordre ?? 0),
-        date_cible: new Date(String(nv.date_cible)),
-        date_reelle: nv.date_reelle
-          ? new Date(String(nv.date_reelle))
-          : null,
-        statut: String(nv.statut ?? "Planifié"),
-        livrables: String(nv.livrables ?? ""),
-        commentaire: String(nv.commentaire ?? ""),
-      },
-    });
-    await recalculateChantierProgress(updated.chantierId);
-    return {
-      entityId: updated.id,
-      entityLabel: buildJalonEntityLabel(updated.phase, updated.nom),
-    };
-  }
-
-  if (request.operation === WORKFLOW_OPERATION.DELETE) {
-    if (!request.entityId) throw new Error("Jalon cible manquant.");
-    const existing = await prisma.jalon.findUnique({
-      where: { id: request.entityId },
-    });
-    if (!existing) {
-      // Already gone — still close the request
-      const ov = asRecord(request.oldValues);
+      const created = await prisma.jalon.create({
+        data: {
+          chantierId,
+          phase: String(nv.phase ?? "Exécution"),
+          nom: String(nv.nom ?? ""),
+          description: String(nv.description ?? ""),
+          ordre: Number(nv.ordre ?? 0),
+          date_debut: optionalIsoDate(nv.date_debut),
+          date_cible: new Date(String(nv.date_cible)),
+          date_reelle: nv.date_reelle
+            ? new Date(String(nv.date_reelle))
+            : null,
+          statut: String(nv.statut ?? "Planifié"),
+          livrables: String(nv.livrables ?? ""),
+          commentaire: String(nv.commentaire ?? ""),
+        },
+      });
+      await recalculateChantierProgress(chantierId);
       return {
-        entityId: request.entityId,
-        entityLabel: buildJalonEntityLabel(
-          String(ov?.phase ?? ""),
-          String(ov?.nom ?? "")
+        entityId: created.id,
+        entityLabel: buildJalonEntityLabel(created.phase, created.nom),
+      };
+    }
+
+    if (request.operation === WORKFLOW_OPERATION.UPDATE) {
+      if (!request.entityId) throw new Error("Jalon cible manquant.");
+      const nv = asRecord(request.newValues);
+      if (!nv) throw new Error("Valeurs proposées manquantes.");
+      const updated = await prisma.jalon.update({
+        where: { id: request.entityId },
+        data: {
+          phase: String(nv.phase ?? "Exécution"),
+          nom: String(nv.nom ?? ""),
+          description: String(nv.description ?? ""),
+          ordre: Number(nv.ordre ?? 0),
+          date_debut: optionalIsoDate(nv.date_debut),
+          date_cible: new Date(String(nv.date_cible)),
+          date_reelle: nv.date_reelle
+            ? new Date(String(nv.date_reelle))
+            : null,
+          statut: String(nv.statut ?? "Planifié"),
+          livrables: String(nv.livrables ?? ""),
+          commentaire: String(nv.commentaire ?? ""),
+        },
+      });
+      await recalculateChantierProgress(updated.chantierId);
+      return {
+        entityId: updated.id,
+        entityLabel: buildJalonEntityLabel(updated.phase, updated.nom),
+      };
+    }
+
+    if (request.operation === WORKFLOW_OPERATION.DELETE) {
+      if (!request.entityId) throw new Error("Jalon cible manquant.");
+      const existing = await prisma.jalon.findUnique({
+        where: { id: request.entityId },
+      });
+      if (!existing) {
+        const ov = asRecord(request.oldValues);
+        return {
+          entityId: request.entityId,
+          entityLabel: buildJalonEntityLabel(
+            String(ov?.phase ?? ""),
+            String(ov?.nom ?? "")
+          ),
+        };
+      }
+      await prisma.jalon.delete({ where: { id: request.entityId } });
+      await recalculateChantierProgress(existing.chantierId);
+      return {
+        entityId: existing.id,
+        entityLabel: buildJalonEntityLabel(existing.phase, existing.nom),
+      };
+    }
+  }
+
+  // ── Workstream ─────────────────────────────────────
+  if (request.entityType === WORKFLOW_ENTITY.WORKSTREAM) {
+    if (request.operation === WORKFLOW_OPERATION.CREATE) {
+      const nv = asRecord(request.newValues);
+      if (!nv) throw new Error("Valeurs proposées manquantes.");
+      const jalonId = String(nv.jalonId ?? "");
+      if (!jalonId) throw new Error("Jalon parent manquant.");
+      const jalon = await prisma.jalon.findUnique({
+        where: { id: jalonId },
+        select: { nom: true },
+      });
+      const created = await prisma.workstream.create({
+        data: {
+          jalonId,
+          nom: String(nv.nom ?? ""),
+          ordre: Number(nv.ordre ?? 0),
+          description: String(nv.description ?? ""),
+          date_debut: optionalIsoDate(nv.date_debut),
+          date_fin: optionalIsoDate(nv.date_fin),
+          statut: String(nv.statut ?? "Planifié"),
+          commentaire: String(nv.commentaire ?? ""),
+        },
+      });
+      return {
+        entityId: created.id,
+        entityLabel: buildWorkstreamEntityLabel(
+          jalon?.nom ?? "",
+          created.nom
         ),
       };
     }
-    await prisma.jalon.delete({ where: { id: request.entityId } });
-    await recalculateChantierProgress(existing.chantierId);
-    return {
-      entityId: existing.id,
-      entityLabel: buildJalonEntityLabel(existing.phase, existing.nom),
-    };
+    if (request.operation === WORKFLOW_OPERATION.UPDATE) {
+      if (!request.entityId) throw new Error("Workstream cible manquant.");
+      const nv = asRecord(request.newValues);
+      if (!nv) throw new Error("Valeurs proposées manquantes.");
+      const updated = await prisma.workstream.update({
+        where: { id: request.entityId },
+        data: {
+          nom: String(nv.nom ?? ""),
+          ordre: Number(nv.ordre ?? 0),
+          description: String(nv.description ?? ""),
+          date_debut: optionalIsoDate(nv.date_debut),
+          date_fin: optionalIsoDate(nv.date_fin),
+          statut: String(nv.statut ?? "Planifié"),
+          commentaire: String(nv.commentaire ?? ""),
+        },
+        include: { jalon: { select: { nom: true } } },
+      });
+      return {
+        entityId: updated.id,
+        entityLabel: buildWorkstreamEntityLabel(updated.jalon.nom, updated.nom),
+      };
+    }
+    if (request.operation === WORKFLOW_OPERATION.DELETE) {
+      if (!request.entityId) throw new Error("Workstream cible manquant.");
+      const existing = await prisma.workstream.findUnique({
+        where: { id: request.entityId },
+        include: { jalon: { select: { nom: true } } },
+      });
+      if (!existing) {
+        const ov = asRecord(request.oldValues);
+        return {
+          entityId: request.entityId,
+          entityLabel: buildWorkstreamEntityLabel(
+            "",
+            String(ov?.nom ?? "")
+          ),
+        };
+      }
+      await prisma.workstream.delete({ where: { id: request.entityId } });
+      return {
+        entityId: existing.id,
+        entityLabel: buildWorkstreamEntityLabel(
+          existing.jalon.nom,
+          existing.nom
+        ),
+      };
+    }
   }
 
-  throw new Error("Opération non supportée.");
+  // ── Activité ───────────────────────────────────────
+  if (request.entityType === WORKFLOW_ENTITY.ACTIVITE) {
+    if (request.operation === WORKFLOW_OPERATION.CREATE) {
+      const nv = asRecord(request.newValues);
+      if (!nv) throw new Error("Valeurs proposées manquantes.");
+      const workstreamId = String(nv.workstreamId ?? "");
+      if (!workstreamId) throw new Error("Workstream parent manquant.");
+      const ws = await prisma.workstream.findUnique({
+        where: { id: workstreamId },
+        select: { nom: true },
+      });
+      const created = await prisma.activite.create({
+        data: {
+          workstreamId,
+          nom: String(nv.nom ?? ""),
+          ordre: Number(nv.ordre ?? 0),
+          description: String(nv.description ?? ""),
+          date_debut: optionalIsoDate(nv.date_debut),
+          date_fin: optionalIsoDate(nv.date_fin),
+          statut: String(nv.statut ?? "Planifié"),
+          commentaire: String(nv.commentaire ?? ""),
+        },
+      });
+      return {
+        entityId: created.id,
+        entityLabel: buildActiviteEntityLabel(ws?.nom ?? "", created.nom),
+      };
+    }
+    if (request.operation === WORKFLOW_OPERATION.UPDATE) {
+      if (!request.entityId) throw new Error("Activité cible manquante.");
+      const nv = asRecord(request.newValues);
+      if (!nv) throw new Error("Valeurs proposées manquantes.");
+      const updated = await prisma.activite.update({
+        where: { id: request.entityId },
+        data: {
+          nom: String(nv.nom ?? ""),
+          ordre: Number(nv.ordre ?? 0),
+          description: String(nv.description ?? ""),
+          date_debut: optionalIsoDate(nv.date_debut),
+          date_fin: optionalIsoDate(nv.date_fin),
+          statut: String(nv.statut ?? "Planifié"),
+          commentaire: String(nv.commentaire ?? ""),
+        },
+        include: { workstream: { select: { nom: true } } },
+      });
+      return {
+        entityId: updated.id,
+        entityLabel: buildActiviteEntityLabel(
+          updated.workstream.nom,
+          updated.nom
+        ),
+      };
+    }
+    if (request.operation === WORKFLOW_OPERATION.DELETE) {
+      if (!request.entityId) throw new Error("Activité cible manquante.");
+      const existing = await prisma.activite.findUnique({
+        where: { id: request.entityId },
+        include: { workstream: { select: { nom: true } } },
+      });
+      if (!existing) {
+        const ov = asRecord(request.oldValues);
+        return {
+          entityId: request.entityId,
+          entityLabel: buildActiviteEntityLabel("", String(ov?.nom ?? "")),
+        };
+      }
+      await prisma.activite.delete({ where: { id: request.entityId } });
+      return {
+        entityId: existing.id,
+        entityLabel: buildActiviteEntityLabel(
+          existing.workstream.nom,
+          existing.nom
+        ),
+      };
+    }
+  }
+
+  throw new Error("Type d'objet ou opération non supporté pour exécution.");
 }
 
 function revalidateWorkflowPaths(chantierId?: string | null) {
@@ -210,14 +378,20 @@ export async function getWorkflowRequestsForUi(filters?: {
 
   // Non-validators only see their own requests
   const isValidator = caps.canApprove || caps.canReject;
-  const rows = await listWorkflowRequests({
-    entityType: WORKFLOW_ENTITY.JALON,
+  // Include jalon + workstream + activité planning requests
+  const rowsAll = await listWorkflowRequests({
     status: filters?.status,
     operation: filters?.operation,
     chantierId: filters?.chantierId,
     pendingOnly: filters?.pendingOnly,
     ...(isValidator ? {} : { requesterId: session.userId }),
   });
+  const planningTypes = new Set<string>([
+    WORKFLOW_ENTITY.JALON,
+    WORKFLOW_ENTITY.WORKSTREAM,
+    WORKFLOW_ENTITY.ACTIVITE,
+  ]);
+  const rows = rowsAll.filter((r) => planningTypes.has(r.entityType));
 
   const chantierIds = [
     ...new Set(rows.map((r) => r.chantierId).filter(Boolean) as string[]),
@@ -249,7 +423,7 @@ export async function approveWorkflowRequestAction(
   const updated = await approveWorkflowRequest(
     requestId,
     session,
-    executeJalonFromRequest,
+    executePlanningFromRequest,
     decisionComment
   );
   revalidateWorkflowPaths(updated.chantierId);

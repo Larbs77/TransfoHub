@@ -19,6 +19,7 @@ export const APP_PAGES: AppPage[] = [
   { path: "/adherences", label: "Adhérences", section: "Suivi Opérationnel" },
   { path: "/raid", label: "RAID", section: "Suivi Opérationnel" },
   { path: "/jalons", label: "Jalons", section: "Suivi Opérationnel" },
+  { path: "/gantt", label: "Gantt Portefeuille", section: "Suivi Opérationnel" },
   { path: "/saisie-temps", label: "Saisie Temps", section: "Suivi Opérationnel" },
   { path: "/consultation-backlog", label: "Backlog Q&A", section: "Suivi Opérationnel" },
   { path: "/favoris", label: "Favoris", section: "Suivi Opérationnel" },
@@ -70,6 +71,15 @@ export const APP_PAGES: AppPage[] = [
 ];
 
 export const ALL_PAGE_PATHS = APP_PAGES.map((p) => p.path);
+
+/** Most specific permission entry owning a route. */
+export function getOwningAppPagePath(path: string): string | null {
+  return (
+    ALL_PAGE_PATHS.filter(
+      (page) => page === path || (page !== "/" && path.startsWith(page + "/"))
+    ).sort((a, b) => b.length - a.length)[0] ?? null
+  );
+}
 
 export const CHANTIER_SCOPES = [
   {

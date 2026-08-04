@@ -430,13 +430,16 @@ model ComiteParametre {
 }
 
 model Settings {
-  id                       Int @id @default(autoincrement())
-  seuil_relance_jours      Int @default(3)
-  seuil_qa_critique_heures Int @default(48)
-  poids_precadrage         Int @default(10)
-  poids_cadrage            Int @default(20)
-  poids_execution          Int @default(50)
-  poids_cloture            Int @default(20)
+  id                       Int    @id @default(autoincrement())
+  seuil_relance_jours      Int    @default(3)
+  seuil_qa_critique_heures Int    @default(48)
+  poids_precadrage         Int    @default(10)
+  poids_cadrage            Int    @default(20)
+  poids_execution          Int    @default(50)
+  poids_cloture            Int    @default(20)
+  /// Gouvernance create/update/delete workstream & activité chantier:
+  /// "libre" | "alignee_jalon" (mêmes caps workflow que le jalon)
+  planning_detail_gouvernance String @default("libre")
 }
 
 model StatusConfig {
@@ -511,36 +514,107 @@ model Adherence {
 }
 
 model Jalon {
-  id          String    @id @default(uuid())
+  id          String       @id @default(uuid())
   chantierId  String
   phase       String
   nom         String
-  description String    @default("")
-  ordre       Int       @default(0)
+  description String       @default("")
+  ordre       Int          @default(0)
+  date_debut  DateTime?
   date_cible  DateTime
   date_reelle DateTime?
-  statut      String    @default("Planifié")
-  livrables   String    @default("")
-  commentaire String    @default("")
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  chantier    Chantier  @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+  statut      String       @default("Planifié")
+  livrables   String       @default("")
+  commentaire String       @default("")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  chantier    Chantier     @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+  workstreams Workstream[]
 
   @@index([chantierId])
   @@index([phase])
   @@index([statut])
 }
 
+/** Workstream instance under a chantier jalon (planning opérationnel). */
+model Workstream {
+  id          String     @id @default(uuid())
+  jalonId     String
+  nom         String
+  ordre       Int        @default(0)
+  description String     @default("")
+  date_debut  DateTime?
+  date_fin    DateTime?
+  statut      String     @default("Planifié")
+  commentaire String     @default("")
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  jalon       Jalon      @relation(fields: [jalonId], references: [id], onDelete: Cascade)
+  activites   Activite[]
+
+  @@index([jalonId])
+  @@index([statut])
+}
+
+/** Activité instance under a workstream (planning opérationnel). */
+model Activite {
+  id           String     @id @default(uuid())
+  workstreamId String
+  nom          String
+  ordre        Int        @default(0)
+  description  String     @default("")
+  date_debut   DateTime?
+  date_fin     DateTime?
+  statut       String     @default("Planifié")
+  commentaire  String     @default("")
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  workstream   Workstream @relation(fields: [workstreamId], references: [id], onDelete: Cascade)
+
+  @@index([workstreamId])
+  @@index([statut])
+}
+
 model JalonTemplate {
-  id        String   @id @default(uuid())
-  phase     String
-  nom       String
-  ordre     Int      @default(0)
-  offsetPct Float
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String               @id @default(uuid())
+  phase       String
+  nom         String
+  ordre       Int                  @default(0)
+  offsetPct   Float
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  workstreams WorkstreamTemplate[]
 
   @@index([phase])
+}
+
+/** Workstream type under a default jalon (settings template only). */
+model WorkstreamTemplate {
+  id              String             @id @default(uuid())
+  jalonTemplateId String
+  nom             String
+  ordre           Int                @default(0)
+  description     String             @default("")
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  jalonTemplate   JalonTemplate      @relation(fields: [jalonTemplateId], references: [id], onDelete: Cascade)
+  activites       ActiviteTemplate[]
+
+  @@index([jalonTemplateId])
+}
+
+/** Activity type under a workstream template (settings only). */
+model ActiviteTemplate {
+  id                   String             @id @default(uuid())
+  workstreamTemplateId String
+  nom                  String
+  ordre                Int                @default(0)
+  description          String             @default("")
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  workstreamTemplate   WorkstreamTemplate @relation(fields: [workstreamTemplateId], references: [id], onDelete: Cascade)
+
+  @@index([workstreamTemplateId])
 }
 
 model ConsultationQuestion {

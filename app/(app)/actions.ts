@@ -9,6 +9,7 @@ import {
   requireRole,
   requireChantierAccess,
   requireRaidCreateAccess,
+  requirePageAccess,
   getUserChantierIds,
   hashPassword,
   validatePasswordComplexity,
@@ -201,7 +202,17 @@ export async function getChantierById(id: string) {
         orderBy: [{ equipe: "asc" }, { role: "asc" }],
         include: membreEquipeInclude,
       },
-      jalons: { orderBy: [{ phase: "asc" }, { ordre: "asc" }] },
+      jalons: {
+        orderBy: [{ phase: "asc" }, { ordre: "asc" }],
+        include: {
+          workstreams: {
+            orderBy: { ordre: "asc" },
+            include: {
+              activites: { orderBy: { ordre: "asc" } },
+            },
+          },
+        },
+      },
       adherencesSource: {
         orderBy: { code: "asc" },
         include: {
@@ -2058,10 +2069,23 @@ export async function updateSettings(data: {
     throw new Error(`La somme des poids doit être 100% (actuellement ${weightSum}%)`);
   }
 
+  const payload = {
+    seuil_relance_jours: data.seuil_relance_jours,
+    seuil_qa_critique_heures: data.seuil_qa_critique_heures,
+    poids_precadrage: data.poids_precadrage,
+    poids_cadrage: data.poids_cadrage,
+    poids_execution: data.poids_execution,
+    poids_cloture: data.poids_cloture,
+  };
+
   await prisma.settings.upsert({
     where: { id: 1 },
-    update: data,
-    create: { id: 1, ...data },
+    update: payload,
+    create: {
+      id: 1,
+      ...payload,
+      planning_detail_gouvernance: "libre",
+    },
   });
 
   // Recalculate all active chantiers since weights changed
@@ -2075,6 +2099,33 @@ export async function updateSettings(data: {
 
   revalidatePath("/settings");
   revalidatePath("/");
+  revalidatePath("/chantiers");
+}
+
+/** Gouvernance Workstream / Activité (planning chantier) — bloc Paramètres dédié. */
+export async function updatePlanningDetailGouvernance(value: string) {
+  await requireRole("Admin");
+  const { normalizePlanningDetailGouvernance } = await import(
+    "@/lib/planning-coherence"
+  );
+  const gouvernance = normalizePlanningDetailGouvernance(value);
+
+  const existing = await prisma.settings.findFirst({ where: { id: 1 } });
+  if (existing) {
+    await prisma.settings.update({
+      where: { id: 1 },
+      data: { planning_detail_gouvernance: gouvernance },
+    });
+  } else {
+    await prisma.settings.create({
+      data: {
+        id: 1,
+        planning_detail_gouvernance: gouvernance,
+      },
+    });
+  }
+
+  revalidatePath("/settings");
   revalidatePath("/chantiers");
 }
 
@@ -3215,6 +3266,61 @@ export async function getAllJalons(filters?: {
   });
 }
 
+export async function getPortfolioGanttData() {
+  const session = await requirePageAccess("/gantt");
+  const chantierIds = await getUserChantierIds(session);
+
+  return prisma.chantier.findMany({
+    where: {
+      ...(chantierIds !== "all" ? { id: { in: chantierIds } } : {}),
+      jalons: { some: {} },
+    },
+    orderBy: [{ code: "asc" }],
+    select: {
+      id: true,
+      code: true,
+      nom: true,
+      domaine: true,
+      date_debut: true,
+      date_fin: true,
+      jalons: {
+        orderBy: [{ phase: "asc" }, { ordre: "asc" }],
+        select: {
+          id: true,
+          phase: true,
+          nom: true,
+          ordre: true,
+          date_debut: true,
+          date_cible: true,
+          statut: true,
+          workstreams: {
+            orderBy: { ordre: "asc" },
+            select: {
+              id: true,
+              nom: true,
+              ordre: true,
+              date_debut: true,
+              date_fin: true,
+              statut: true,
+              activites: {
+                orderBy: { ordre: "asc" },
+                select: {
+                  id: true,
+                  nom: true,
+                  ordre: true,
+                  date_debut: true,
+                  date_fin: true,
+                  statut: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
 export type JalonMutationResult =
   | { mode: "direct" }
   | { mode: "validation"; requestId: string };
@@ -3225,6 +3331,7 @@ function jalonPayloadForWorkflow(data: {
   nom: string;
   description?: string;
   ordre?: number;
+  date_debut?: string | null;
   date_cible: string;
   date_reelle?: string | null;
   statut?: string;
@@ -3237,6 +3344,7 @@ function jalonPayloadForWorkflow(data: {
     nom: data.nom,
     description: data.description ?? "",
     ordre: data.ordre ?? 0,
+    date_debut: data.date_debut ?? null,
     date_cible: data.date_cible,
     date_reelle: data.date_reelle ?? null,
     statut: data.statut ?? "Planifié",
@@ -3252,6 +3360,7 @@ function jalonSnapshot(j: {
   nom: string;
   description: string;
   ordre: number;
+  date_debut: Date | null;
   date_cible: Date;
   date_reelle: Date | null;
   statut: string;
@@ -3265,6 +3374,9 @@ function jalonSnapshot(j: {
     nom: j.nom,
     description: j.description,
     ordre: j.ordre,
+    date_debut: j.date_debut
+      ? j.date_debut.toISOString().slice(0, 10)
+      : null,
     date_cible: j.date_cible.toISOString().slice(0, 10),
     date_reelle: j.date_reelle
       ? j.date_reelle.toISOString().slice(0, 10)
@@ -3282,6 +3394,7 @@ export async function createJalon(
     nom: string;
     description?: string;
     ordre?: number;
+    date_debut?: string | null;
     date_cible: string;
     date_reelle?: string | null;
     statut?: string;
@@ -3292,6 +3405,14 @@ export async function createJalon(
 ): Promise<JalonMutationResult> {
   const session = await requireAuth();
   await requireChantierAccess(data.chantierId);
+  if (
+    data.date_debut &&
+    new Date(data.date_debut).getTime() > new Date(data.date_cible).getTime()
+  ) {
+    throw new Error(
+      "La date de début du jalon doit être antérieure ou égale à sa date cible."
+    );
+  }
 
   const {
     getSessionJalonWorkflowCaps,
@@ -3338,6 +3459,7 @@ export async function createJalon(
       nom: data.nom,
       description: data.description ?? "",
       ordre: data.ordre ?? 0,
+      date_debut: data.date_debut ? new Date(data.date_debut) : null,
       date_cible: new Date(data.date_cible),
       date_reelle: data.date_reelle ? new Date(data.date_reelle) : null,
       statut: data.statut ?? "Planifié",
@@ -3366,6 +3488,7 @@ export async function updateJalon(
     nom: string;
     description?: string;
     ordre?: number;
+    date_debut?: string | null;
     date_cible: string;
     date_reelle?: string | null;
     statut: string;
@@ -3375,6 +3498,14 @@ export async function updateJalon(
   options?: { motif?: string }
 ): Promise<JalonMutationResult> {
   const session = await requireAuth();
+  if (
+    data.date_debut &&
+    new Date(data.date_debut).getTime() > new Date(data.date_cible).getTime()
+  ) {
+    throw new Error(
+      "La date de début du jalon doit être antérieure ou égale à sa date cible."
+    );
+  }
   const existing = await prisma.jalon.findUnique({ where: { id } });
   if (!existing) throw new Error("Jalon introuvable.");
   await requireChantierAccess(existing.chantierId);
@@ -3399,6 +3530,7 @@ export async function updateJalon(
   // Phase is immutable on update
   const phase = existing.phase;
   const dateChanged =
+    jalonDateKey(existing.date_debut) !== jalonDateKey(data.date_debut) ||
     jalonDateKey(existing.date_cible) !== jalonDateKey(data.date_cible);
   /**
    * Validation workflow is only required when date_cible changes
@@ -3409,7 +3541,7 @@ export async function updateJalon(
 
   if (requiresValidation && !motif) {
     throw new Error(
-      "Le motif de la demande est obligatoire pour modifier la date cible."
+      "Le motif de la demande est obligatoire pour modifier les dates du jalon."
     );
   }
   if (mode === "DIRECT" && !motif) {
@@ -3427,13 +3559,14 @@ export async function updateJalon(
     commentaire: data.commentaire ?? "",
   };
 
-  // ── VALIDATION mode + date cible changed → request only for the date ──
+  // ── VALIDATION mode + planning dates changed → request only for the dates ──
   if (requiresValidation) {
     // Apply non-date fields immediately; keep current date_cible until approved
     const partial = await prisma.jalon.update({
       where: { id },
       data: {
         ...payloadBase,
+        date_debut: existing.date_debut,
         date_cible: existing.date_cible,
       },
     });
@@ -3441,6 +3574,7 @@ export async function updateJalon(
     const afterSnapshot = jalonSnapshot(partial);
     const proposed = {
       ...afterSnapshot,
+      date_debut: jalonDateKey(data.date_debut) || null,
       date_cible: jalonDateKey(data.date_cible),
     };
 
@@ -3477,6 +3611,7 @@ export async function updateJalon(
     where: { id },
     data: {
       ...payloadBase,
+      date_debut: data.date_debut ? new Date(data.date_debut) : null,
       date_cible: new Date(data.date_cible),
     },
   });
@@ -3584,7 +3719,7 @@ export async function deleteJalon(
   return { mode: "direct" };
 }
 
-/** Caps + pending requests for chantier jalons UI */
+/** Caps + pending requests for chantier jalons UI (+ workstreams / activités). */
 export async function getJalonWorkflowUiState(chantierId: string) {
   const session = await requireAuth();
   await requireChantierAccess(chantierId);
@@ -3593,20 +3728,44 @@ export async function getJalonWorkflowUiState(chantierId: string) {
     getPendingRequestsForEntities,
     WORKFLOW_ENTITY,
   } = await import("@/lib/workflow");
+  const { normalizePlanningDetailGouvernance } = await import(
+    "@/lib/planning-coherence"
+  );
 
   const caps = await getSessionJalonWorkflowCaps(session);
+  const settings = await prisma.settings.findFirst({ where: { id: 1 } });
+  const detailGouvernance = normalizePlanningDetailGouvernance(
+    settings?.planning_detail_gouvernance
+  );
+
   const jalons = await prisma.jalon.findMany({
     where: { chantierId },
-    select: { id: true },
+    select: {
+      id: true,
+      workstreams: { select: { id: true, activites: { select: { id: true } } } },
+    },
   });
-  const pending = await getPendingRequestsForEntities(
-    WORKFLOW_ENTITY.JALON,
-    jalons.map((j) => j.id)
+  const jalonIds = jalons.map((j) => j.id);
+  const wsIds = jalons.flatMap((j) => j.workstreams.map((w) => w.id));
+  const actIds = jalons.flatMap((j) =>
+    j.workstreams.flatMap((w) => w.activites.map((a) => a.id))
   );
-  // Pending creates on this chantier
+
+  const [pendingJ, pendingWs, pendingAct] = await Promise.all([
+    getPendingRequestsForEntities(WORKFLOW_ENTITY.JALON, jalonIds),
+    getPendingRequestsForEntities(WORKFLOW_ENTITY.WORKSTREAM, wsIds),
+    getPendingRequestsForEntities(WORKFLOW_ENTITY.ACTIVITE, actIds),
+  ]);
+
   const pendingCreates = await prisma.workflowRequest.findMany({
     where: {
-      entityType: WORKFLOW_ENTITY.JALON,
+      entityType: {
+        in: [
+          WORKFLOW_ENTITY.JALON,
+          WORKFLOW_ENTITY.WORKSTREAM,
+          WORKFLOW_ENTITY.ACTIVITE,
+        ],
+      },
       operation: "create",
       chantierId,
       status: "EN_ATTENTE",
@@ -3614,6 +3773,7 @@ export async function getJalonWorkflowUiState(chantierId: string) {
     select: {
       id: true,
       entityId: true,
+      entityType: true,
       operation: true,
       status: true,
       motif: true,
@@ -3622,13 +3782,16 @@ export async function getJalonWorkflowUiState(chantierId: string) {
     },
   });
 
+  const pendingByEntityId = Object.fromEntries(
+    [...pendingJ, ...pendingWs, ...pendingAct]
+      .filter((p) => p.entityId)
+      .map((p) => [p.entityId as string, p])
+  );
+
   return {
     caps,
-    pendingByEntityId: Object.fromEntries(
-      pending
-        .filter((p) => p.entityId)
-        .map((p) => [p.entityId as string, p])
-    ),
+    detailGouvernance,
+    pendingByEntityId,
     pendingCreates,
   };
 }
@@ -3654,37 +3817,94 @@ export async function applyJalonTemplate(chantierId: string) {
   if (!chantier) throw new Error("Chantier non trouvé");
   if (chantier._count.jalons > 0) throw new Error("Des jalons existent déjà pour ce chantier");
 
-  // Use DB templates if available, fall back to hardcoded
-  const dbTemplates = await prisma.jalonTemplate.findMany({ orderBy: [{ phase: "asc" }, { ordre: "asc" }] });
-  const templates = dbTemplates.length > 0
-    ? dbTemplates.map((t) => ({ phase: t.phase, nom: t.nom, ordre: t.ordre, offsetPct: t.offsetPct }))
-    : JALON_TEMPLATES;
+  // Use DB templates if available, fall back to hardcoded (jalons only)
+  const dbTemplates = await prisma.jalonTemplate.findMany({
+    orderBy: [{ phase: "asc" }, { ordre: "asc" }],
+    include: {
+      workstreams: {
+        orderBy: { ordre: "asc" },
+        include: { activites: { orderBy: { ordre: "asc" } } },
+      },
+    },
+  });
 
-  const jalonsData = templates.map((t) => ({
-    chantierId,
-    phase: t.phase,
-    nom: t.nom,
-    ordre: t.ordre,
-    date_cible: calculateDateCible(chantier.date_debut, chantier.date_fin, t.offsetPct),
-    statut: "Planifié",
-    description: "",
-    livrables: "",
-    commentaire: "",
-  }));
+  if (dbTemplates.length > 0) {
+    for (const t of dbTemplates) {
+      await prisma.jalon.create({
+        data: {
+          chantierId,
+          phase: t.phase,
+          nom: t.nom,
+          ordre: t.ordre,
+          date_cible: calculateDateCible(
+            chantier.date_debut,
+            chantier.date_fin,
+            t.offsetPct
+          ),
+          statut: "Planifié",
+          description: "",
+          livrables: "",
+          commentaire: "",
+          workstreams: {
+            create: t.workstreams.map((w) => ({
+              nom: w.nom,
+              ordre: w.ordre,
+              description: w.description ?? "",
+              statut: "Planifié",
+              activites: {
+                create: w.activites.map((a) => ({
+                  nom: a.nom,
+                  ordre: a.ordre,
+                  description: a.description ?? "",
+                  statut: "Planifié",
+                })),
+              },
+            })),
+          },
+        },
+      });
+    }
+  } else {
+    const jalonsData = JALON_TEMPLATES.map((t) => ({
+      chantierId,
+      phase: t.phase,
+      nom: t.nom,
+      ordre: t.ordre,
+      date_cible: calculateDateCible(
+        chantier.date_debut,
+        chantier.date_fin,
+        t.offsetPct
+      ),
+      statut: "Planifié",
+      description: "",
+      livrables: "",
+      commentaire: "",
+    }));
+    await prisma.jalon.createMany({ data: jalonsData });
+  }
 
-  await prisma.jalon.createMany({ data: jalonsData });
   await recalculateChantierProgress(chantierId);
   revalidatePath("/");
   revalidatePath("/jalons");
   revalidatePath(`/chantiers/${chantierId}`);
 }
 
-// ── Jalon Templates (Settings) ──────────────────────────
+// ── Jalon Templates (Settings) — Phase → Jalon → Workstream → Activité ──
+
+const jalonTemplateTreeInclude = {
+  workstreams: {
+    orderBy: { ordre: "asc" as const },
+    include: {
+      activites: { orderBy: { ordre: "asc" as const } },
+    },
+  },
+};
 
 export async function getJalonTemplates() {
   await requireRole("Admin");
   return prisma.jalonTemplate.findMany({
     orderBy: [{ phase: "asc" }, { ordre: "asc" }],
+    include: jalonTemplateTreeInclude,
   });
 }
 
@@ -3712,6 +3932,811 @@ export async function deleteJalonTemplate(id: string) {
   await requireRole("Admin");
   await prisma.jalonTemplate.delete({ where: { id } });
   revalidatePath("/settings");
+}
+
+export async function createWorkstreamTemplate(data: {
+  jalonTemplateId: string;
+  nom: string;
+  ordre: number;
+  description?: string;
+}) {
+  await requireRole("Admin");
+  const parent = await prisma.jalonTemplate.findUnique({
+    where: { id: data.jalonTemplateId },
+    select: { id: true },
+  });
+  if (!parent) throw new Error("Jalon template introuvable.");
+  await prisma.workstreamTemplate.create({
+    data: {
+      jalonTemplateId: data.jalonTemplateId,
+      nom: data.nom.trim(),
+      ordre: data.ordre,
+      description: data.description?.trim() ?? "",
+    },
+  });
+  revalidatePath("/settings");
+}
+
+export async function updateWorkstreamTemplate(
+  id: string,
+  data: { nom: string; ordre: number; description?: string }
+) {
+  await requireRole("Admin");
+  await prisma.workstreamTemplate.update({
+    where: { id },
+    data: {
+      nom: data.nom.trim(),
+      ordre: data.ordre,
+      description: data.description?.trim() ?? "",
+    },
+  });
+  revalidatePath("/settings");
+}
+
+export async function deleteWorkstreamTemplate(id: string) {
+  await requireRole("Admin");
+  await prisma.workstreamTemplate.delete({ where: { id } });
+  revalidatePath("/settings");
+}
+
+export async function createActiviteTemplate(data: {
+  workstreamTemplateId: string;
+  nom: string;
+  ordre: number;
+  description?: string;
+}) {
+  await requireRole("Admin");
+  const parent = await prisma.workstreamTemplate.findUnique({
+    where: { id: data.workstreamTemplateId },
+    select: { id: true },
+  });
+  if (!parent) throw new Error("Workstream template introuvable.");
+  await prisma.activiteTemplate.create({
+    data: {
+      workstreamTemplateId: data.workstreamTemplateId,
+      nom: data.nom.trim(),
+      ordre: data.ordre,
+      description: data.description?.trim() ?? "",
+    },
+  });
+  revalidatePath("/settings");
+}
+
+export async function updateActiviteTemplate(
+  id: string,
+  data: { nom: string; ordre: number; description?: string }
+) {
+  await requireRole("Admin");
+  await prisma.activiteTemplate.update({
+    where: { id },
+    data: {
+      nom: data.nom.trim(),
+      ordre: data.ordre,
+      description: data.description?.trim() ?? "",
+    },
+  });
+  revalidatePath("/settings");
+}
+
+export async function deleteActiviteTemplate(id: string) {
+  await requireRole("Admin");
+  await prisma.activiteTemplate.delete({ where: { id } });
+  revalidatePath("/settings");
+}
+
+/** Export référentiel template → Excel (.xlsx) base64. */
+export async function exportJalonTemplateExcel(): Promise<{
+  fileName: string;
+  base64: string;
+}> {
+  await requireRole("Admin");
+  const { buildTemplateExcelBase64 } = await import("@/lib/jalon-template-excel");
+
+  const rows = await prisma.jalonTemplate.findMany({
+    orderBy: [{ phase: "asc" }, { ordre: "asc" }],
+    include: jalonTemplateTreeInclude,
+  });
+
+  const tree = rows.map((j) => ({
+    id: j.id,
+    phase: j.phase,
+    nom: j.nom,
+    ordre: j.ordre,
+    offsetPct: j.offsetPct,
+    workstreams: j.workstreams.map((w) => ({
+      id: w.id,
+      nom: w.nom,
+      ordre: w.ordre,
+      description: w.description,
+      activites: w.activites.map((a) => ({
+        id: a.id,
+        nom: a.nom,
+        ordre: a.ordre,
+        description: a.description,
+      })),
+    })),
+  }));
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  return {
+    fileName: `template_planning_jalons_${stamp}.xlsx`,
+    base64: buildTemplateExcelBase64(tree),
+  };
+}
+
+/** Empty Excel model (example rows + instructions). */
+export async function downloadJalonTemplateExcelModel(): Promise<{
+  fileName: string;
+  base64: string;
+}> {
+  await requireRole("Admin");
+  const { buildEmptyTemplateExcelBase64 } = await import(
+    "@/lib/jalon-template-excel"
+  );
+  return {
+    fileName: "modele_template_planning_jalons.xlsx",
+    base64: buildEmptyTemplateExcelBase64(),
+  };
+}
+
+/** Dry-run parse of Excel template (no DB write). */
+export async function previewJalonTemplateExcel(base64: string): Promise<{
+  ok: boolean;
+  issues: { row: number; message: string }[];
+  stats: {
+    jalonCount: number;
+    workstreamCount: number;
+    activiteCount: number;
+    rowCount: number;
+  };
+  /** Fingerprint for confirm (re-parse on confirm). */
+  fingerprint: string;
+}> {
+  await requireRole("Admin");
+  const { parseTemplateExcelBuffer, base64ToUint8Array } = await import(
+    "@/lib/jalon-template-excel"
+  );
+  const bytes = base64ToUint8Array(base64);
+  const parsed = parseTemplateExcelBuffer(bytes);
+  // Simple fingerprint = stats + first/last jalon names
+  const fingerprint = [
+    parsed.stats.jalonCount,
+    parsed.stats.workstreamCount,
+    parsed.stats.activiteCount,
+    parsed.jalons[0]?.nom ?? "",
+    parsed.jalons[parsed.jalons.length - 1]?.nom ?? "",
+    parsed.issues.length,
+  ].join("|");
+
+  return {
+    ok: parsed.ok,
+    issues: parsed.issues.slice(0, 50),
+    stats: parsed.stats,
+    fingerprint,
+  };
+}
+
+/**
+ * Replace entire JalonTemplate référentiel from Excel.
+ * Cascade deletes previous workstreams / activités.
+ */
+export async function confirmImportJalonTemplateExcel(base64: string): Promise<{
+  ok: boolean;
+  message: string;
+  stats?: {
+    jalonCount: number;
+    workstreamCount: number;
+    activiteCount: number;
+  };
+}> {
+  await requireRole("Admin");
+  const { parseTemplateExcelBuffer, base64ToUint8Array } = await import(
+    "@/lib/jalon-template-excel"
+  );
+  const bytes = base64ToUint8Array(base64);
+  const parsed = parseTemplateExcelBuffer(bytes);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      message: `Import refusé : ${parsed.issues[0]?.message ?? "fichier invalide"} (${parsed.issues.length} problème(s)).`,
+    };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.jalonTemplate.deleteMany();
+    for (const j of parsed.jalons) {
+      await tx.jalonTemplate.create({
+        data: {
+          phase: j.phase,
+          nom: j.nom,
+          ordre: j.ordre,
+          offsetPct: j.offsetPct,
+          workstreams: {
+            create: j.workstreams.map((w) => ({
+              nom: w.nom,
+              ordre: w.ordre,
+              description: w.description ?? "",
+              activites: {
+                create: w.activites.map((a) => ({
+                  nom: a.nom,
+                  ordre: a.ordre,
+                  description: a.description ?? "",
+                })),
+              },
+            })),
+          },
+        },
+      });
+    }
+  });
+
+  revalidatePath("/settings");
+  return {
+    ok: true,
+    message: `Référentiel remplacé : ${parsed.stats.jalonCount} jalon(s), ${parsed.stats.workstreamCount} workstream(s), ${parsed.stats.activiteCount} activité(s).`,
+    stats: {
+      jalonCount: parsed.stats.jalonCount,
+      workstreamCount: parsed.stats.workstreamCount,
+      activiteCount: parsed.stats.activiteCount,
+    },
+  };
+}
+
+// ── Workstream / Activité (instances chantier) ────────
+
+export type PlanningDetailMutationResult =
+  | { mode: "direct" }
+  | { mode: "validation"; requestId: string };
+
+async function getPlanningDetailMode(
+  session: Awaited<ReturnType<typeof requireAuth>>,
+  operation: "create" | "update" | "delete"
+) {
+  const {
+    getSessionJalonWorkflowCaps,
+    modeForOperation,
+    WORKFLOW_OPERATION,
+  } = await import("@/lib/workflow");
+  const { normalizePlanningDetailGouvernance, PLANNING_DETAIL_GOUVERNANCE } =
+    await import("@/lib/planning-coherence");
+
+  const settings = await prisma.settings.findFirst({ where: { id: 1 } });
+  const gouv = normalizePlanningDetailGouvernance(
+    settings?.planning_detail_gouvernance
+  );
+  if (gouv === PLANNING_DETAIL_GOUVERNANCE.LIBRE) {
+    return { mode: "DIRECT" as const, gouv };
+  }
+  const caps = await getSessionJalonWorkflowCaps(session);
+  const op =
+    operation === "create"
+      ? WORKFLOW_OPERATION.CREATE
+      : operation === "update"
+        ? WORKFLOW_OPERATION.UPDATE
+        : WORKFLOW_OPERATION.DELETE;
+  return { mode: modeForOperation(caps, op), gouv };
+}
+
+function optionalDate(iso: string | null | undefined): Date | null {
+  if (!iso || !String(iso).trim()) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function dateKey(d: Date | null | undefined): string | null {
+  if (!d) return null;
+  return d.toISOString().slice(0, 10);
+}
+
+export async function createWorkstream(
+  data: {
+    jalonId: string;
+    nom: string;
+    ordre?: number;
+    description?: string;
+    date_debut?: string | null;
+    date_fin?: string | null;
+    statut?: string;
+    commentaire?: string;
+  },
+  options?: { motif?: string }
+): Promise<PlanningDetailMutationResult> {
+  const session = await requireAuth();
+  const jalon = await prisma.jalon.findUnique({
+    where: { id: data.jalonId },
+    select: { id: true, nom: true, chantierId: true },
+  });
+  if (!jalon) throw new Error("Jalon introuvable.");
+  await requireChantierAccess(jalon.chantierId);
+
+  const { mode } = await getPlanningDetailMode(session, "create");
+  if (mode === "INTERDIT") {
+    throw new Error("Vous n'êtes pas habilité à créer un workstream.");
+  }
+
+  const {
+    createWorkflowRequest,
+    WORKFLOW_ENTITY,
+    WORKFLOW_OPERATION,
+  } = await import("@/lib/workflow");
+  const { buildWorkstreamEntityLabel } = await import("@/lib/workflow-shared");
+
+  const payload = {
+    jalonId: data.jalonId,
+    nom: data.nom.trim(),
+    ordre: data.ordre ?? 0,
+    description: data.description ?? "",
+    date_debut: data.date_debut || null,
+    date_fin: data.date_fin || null,
+    statut: data.statut ?? "Planifié",
+    commentaire: data.commentaire ?? "",
+    chantierId: jalon.chantierId,
+  };
+
+  if (mode === "VALIDATION") {
+    const req = await createWorkflowRequest({
+      entityType: WORKFLOW_ENTITY.WORKSTREAM,
+      operation: WORKFLOW_OPERATION.CREATE,
+      entityId: null,
+      entityLabel: buildWorkstreamEntityLabel(jalon.nom, payload.nom),
+      chantierId: jalon.chantierId,
+      motif: options?.motif ?? "",
+      oldValues: null,
+      newValues: payload,
+      session,
+    });
+    revalidatePath("/workflow/demandes");
+    revalidatePath(`/chantiers/${jalon.chantierId}`);
+    return { mode: "validation", requestId: req.id };
+  }
+
+  await prisma.workstream.create({
+    data: {
+      jalonId: data.jalonId,
+      nom: payload.nom,
+      ordre: payload.ordre,
+      description: payload.description,
+      date_debut: optionalDate(payload.date_debut),
+      date_fin: optionalDate(payload.date_fin),
+      statut: payload.statut,
+      commentaire: payload.commentaire,
+    },
+  });
+  revalidatePath(`/chantiers/${jalon.chantierId}`);
+  return { mode: "direct" };
+}
+
+export async function updateWorkstream(
+  id: string,
+  data: {
+    nom: string;
+    ordre?: number;
+    description?: string;
+    date_debut?: string | null;
+    date_fin?: string | null;
+    statut?: string;
+    commentaire?: string;
+  },
+  options?: { motif?: string }
+): Promise<PlanningDetailMutationResult> {
+  const session = await requireAuth();
+  const existing = await prisma.workstream.findUnique({
+    where: { id },
+    include: { jalon: { select: { id: true, nom: true, chantierId: true } } },
+  });
+  if (!existing) throw new Error("Workstream introuvable.");
+  await requireChantierAccess(existing.jalon.chantierId);
+
+  const { mode } = await getPlanningDetailMode(session, "update");
+  if (mode === "INTERDIT") {
+    throw new Error("Vous n'êtes pas habilité à modifier un workstream.");
+  }
+
+  const {
+    createWorkflowRequest,
+    createDirectOperationAudit,
+    WORKFLOW_ENTITY,
+    WORKFLOW_OPERATION,
+  } = await import("@/lib/workflow");
+  const { buildWorkstreamEntityLabel } = await import("@/lib/workflow-shared");
+
+  const oldValues = {
+    nom: existing.nom,
+    ordre: existing.ordre,
+    description: existing.description,
+    date_debut: dateKey(existing.date_debut),
+    date_fin: dateKey(existing.date_fin),
+    statut: existing.statut,
+    commentaire: existing.commentaire,
+  };
+  const newValues = {
+    nom: data.nom.trim(),
+    ordre: data.ordre ?? existing.ordre,
+    description: data.description ?? "",
+    date_debut: data.date_debut || null,
+    date_fin: data.date_fin || null,
+    statut: data.statut ?? existing.statut,
+    commentaire: data.commentaire ?? "",
+  };
+
+  if (mode === "VALIDATION") {
+    const req = await createWorkflowRequest({
+      entityType: WORKFLOW_ENTITY.WORKSTREAM,
+      operation: WORKFLOW_OPERATION.UPDATE,
+      entityId: id,
+      entityLabel: buildWorkstreamEntityLabel(existing.jalon.nom, newValues.nom),
+      chantierId: existing.jalon.chantierId,
+      motif: options?.motif ?? "",
+      oldValues,
+      newValues,
+      session,
+    });
+    revalidatePath("/workflow/demandes");
+    revalidatePath(`/chantiers/${existing.jalon.chantierId}`);
+    return { mode: "validation", requestId: req.id };
+  }
+
+  if (options?.motif?.trim()) {
+    await createDirectOperationAudit({
+      entityType: WORKFLOW_ENTITY.WORKSTREAM,
+      operation: WORKFLOW_OPERATION.UPDATE,
+      entityId: id,
+      entityLabel: buildWorkstreamEntityLabel(existing.jalon.nom, newValues.nom),
+      chantierId: existing.jalon.chantierId,
+      motif: options.motif,
+      oldValues,
+      newValues,
+      session,
+    });
+  }
+
+  await prisma.workstream.update({
+    where: { id },
+    data: {
+      nom: newValues.nom,
+      ordre: newValues.ordre,
+      description: newValues.description,
+      date_debut: optionalDate(newValues.date_debut),
+      date_fin: optionalDate(newValues.date_fin),
+      statut: newValues.statut,
+      commentaire: newValues.commentaire,
+    },
+  });
+  revalidatePath(`/chantiers/${existing.jalon.chantierId}`);
+  return { mode: "direct" };
+}
+
+export async function deleteWorkstream(
+  id: string,
+  options?: { motif?: string }
+): Promise<PlanningDetailMutationResult> {
+  const session = await requireAuth();
+  const existing = await prisma.workstream.findUnique({
+    where: { id },
+    include: {
+      jalon: { select: { id: true, nom: true, chantierId: true } },
+      _count: { select: { activites: true } },
+    },
+  });
+  if (!existing) throw new Error("Workstream introuvable.");
+  await requireChantierAccess(existing.jalon.chantierId);
+
+  const { mode } = await getPlanningDetailMode(session, "delete");
+  if (mode === "INTERDIT") {
+    throw new Error("Vous n'êtes pas habilité à supprimer un workstream.");
+  }
+
+  const {
+    createWorkflowRequest,
+    createDirectOperationAudit,
+    WORKFLOW_ENTITY,
+    WORKFLOW_OPERATION,
+  } = await import("@/lib/workflow");
+  const { buildWorkstreamEntityLabel } = await import("@/lib/workflow-shared");
+
+  const label = buildWorkstreamEntityLabel(existing.jalon.nom, existing.nom);
+  const oldValues = {
+    nom: existing.nom,
+    jalonId: existing.jalonId,
+    activiteCount: existing._count.activites,
+  };
+
+  if (mode === "VALIDATION") {
+    if (!options?.motif?.trim()) {
+      throw new Error("Le motif de la demande est obligatoire.");
+    }
+    const req = await createWorkflowRequest({
+      entityType: WORKFLOW_ENTITY.WORKSTREAM,
+      operation: WORKFLOW_OPERATION.DELETE,
+      entityId: id,
+      entityLabel: label,
+      chantierId: existing.jalon.chantierId,
+      motif: options.motif,
+      oldValues,
+      newValues: null,
+      session,
+    });
+    revalidatePath("/workflow/demandes");
+    revalidatePath(`/chantiers/${existing.jalon.chantierId}`);
+    return { mode: "validation", requestId: req.id };
+  }
+
+  if (!options?.motif?.trim()) {
+    throw new Error("Le commentaire est obligatoire pour supprimer un workstream.");
+  }
+  await createDirectOperationAudit({
+    entityType: WORKFLOW_ENTITY.WORKSTREAM,
+    operation: WORKFLOW_OPERATION.DELETE,
+    entityId: id,
+    entityLabel: label,
+    chantierId: existing.jalon.chantierId,
+    motif: options.motif,
+    oldValues,
+    newValues: null,
+    session,
+  });
+  await prisma.workstream.delete({ where: { id } });
+  revalidatePath(`/chantiers/${existing.jalon.chantierId}`);
+  return { mode: "direct" };
+}
+
+export async function createActivite(
+  data: {
+    workstreamId: string;
+    nom: string;
+    ordre?: number;
+    description?: string;
+    date_debut?: string | null;
+    date_fin?: string | null;
+    statut?: string;
+    commentaire?: string;
+  },
+  options?: { motif?: string }
+): Promise<PlanningDetailMutationResult> {
+  const session = await requireAuth();
+  const ws = await prisma.workstream.findUnique({
+    where: { id: data.workstreamId },
+    include: {
+      jalon: { select: { chantierId: true, nom: true } },
+    },
+  });
+  if (!ws) throw new Error("Workstream introuvable.");
+  await requireChantierAccess(ws.jalon.chantierId);
+
+  const { mode } = await getPlanningDetailMode(session, "create");
+  if (mode === "INTERDIT") {
+    throw new Error("Vous n'êtes pas habilité à créer une activité.");
+  }
+
+  const {
+    createWorkflowRequest,
+    WORKFLOW_ENTITY,
+    WORKFLOW_OPERATION,
+  } = await import("@/lib/workflow");
+  const { buildActiviteEntityLabel } = await import("@/lib/workflow-shared");
+
+  const payload = {
+    workstreamId: data.workstreamId,
+    nom: data.nom.trim(),
+    ordre: data.ordre ?? 0,
+    description: data.description ?? "",
+    date_debut: data.date_debut || null,
+    date_fin: data.date_fin || null,
+    statut: data.statut ?? "Planifié",
+    commentaire: data.commentaire ?? "",
+    chantierId: ws.jalon.chantierId,
+  };
+
+  if (mode === "VALIDATION") {
+    const req = await createWorkflowRequest({
+      entityType: WORKFLOW_ENTITY.ACTIVITE,
+      operation: WORKFLOW_OPERATION.CREATE,
+      entityId: null,
+      entityLabel: buildActiviteEntityLabel(ws.nom, payload.nom),
+      chantierId: ws.jalon.chantierId,
+      motif: options?.motif ?? "",
+      oldValues: null,
+      newValues: payload,
+      session,
+    });
+    revalidatePath("/workflow/demandes");
+    revalidatePath(`/chantiers/${ws.jalon.chantierId}`);
+    return { mode: "validation", requestId: req.id };
+  }
+
+  await prisma.activite.create({
+    data: {
+      workstreamId: data.workstreamId,
+      nom: payload.nom,
+      ordre: payload.ordre,
+      description: payload.description,
+      date_debut: optionalDate(payload.date_debut),
+      date_fin: optionalDate(payload.date_fin),
+      statut: payload.statut,
+      commentaire: payload.commentaire,
+    },
+  });
+  revalidatePath(`/chantiers/${ws.jalon.chantierId}`);
+  return { mode: "direct" };
+}
+
+export async function updateActivite(
+  id: string,
+  data: {
+    nom: string;
+    ordre?: number;
+    description?: string;
+    date_debut?: string | null;
+    date_fin?: string | null;
+    statut?: string;
+    commentaire?: string;
+  },
+  options?: { motif?: string }
+): Promise<PlanningDetailMutationResult> {
+  const session = await requireAuth();
+  const existing = await prisma.activite.findUnique({
+    where: { id },
+    include: {
+      workstream: {
+        include: { jalon: { select: { chantierId: true, nom: true } } },
+      },
+    },
+  });
+  if (!existing) throw new Error("Activité introuvable.");
+  await requireChantierAccess(existing.workstream.jalon.chantierId);
+
+  const { mode } = await getPlanningDetailMode(session, "update");
+  if (mode === "INTERDIT") {
+    throw new Error("Vous n'êtes pas habilité à modifier une activité.");
+  }
+
+  const {
+    createWorkflowRequest,
+    createDirectOperationAudit,
+    WORKFLOW_ENTITY,
+    WORKFLOW_OPERATION,
+  } = await import("@/lib/workflow");
+  const { buildActiviteEntityLabel } = await import("@/lib/workflow-shared");
+
+  const oldValues = {
+    nom: existing.nom,
+    ordre: existing.ordre,
+    description: existing.description,
+    date_debut: dateKey(existing.date_debut),
+    date_fin: dateKey(existing.date_fin),
+    statut: existing.statut,
+    commentaire: existing.commentaire,
+  };
+  const newValues = {
+    nom: data.nom.trim(),
+    ordre: data.ordre ?? existing.ordre,
+    description: data.description ?? "",
+    date_debut: data.date_debut || null,
+    date_fin: data.date_fin || null,
+    statut: data.statut ?? existing.statut,
+    commentaire: data.commentaire ?? "",
+  };
+
+  if (mode === "VALIDATION") {
+    const req = await createWorkflowRequest({
+      entityType: WORKFLOW_ENTITY.ACTIVITE,
+      operation: WORKFLOW_OPERATION.UPDATE,
+      entityId: id,
+      entityLabel: buildActiviteEntityLabel(existing.workstream.nom, newValues.nom),
+      chantierId: existing.workstream.jalon.chantierId,
+      motif: options?.motif ?? "",
+      oldValues,
+      newValues,
+      session,
+    });
+    revalidatePath("/workflow/demandes");
+    revalidatePath(`/chantiers/${existing.workstream.jalon.chantierId}`);
+    return { mode: "validation", requestId: req.id };
+  }
+
+  if (options?.motif?.trim()) {
+    await createDirectOperationAudit({
+      entityType: WORKFLOW_ENTITY.ACTIVITE,
+      operation: WORKFLOW_OPERATION.UPDATE,
+      entityId: id,
+      entityLabel: buildActiviteEntityLabel(existing.workstream.nom, newValues.nom),
+      chantierId: existing.workstream.jalon.chantierId,
+      motif: options.motif,
+      oldValues,
+      newValues,
+      session,
+    });
+  }
+
+  await prisma.activite.update({
+    where: { id },
+    data: {
+      nom: newValues.nom,
+      ordre: newValues.ordre,
+      description: newValues.description,
+      date_debut: optionalDate(newValues.date_debut),
+      date_fin: optionalDate(newValues.date_fin),
+      statut: newValues.statut,
+      commentaire: newValues.commentaire,
+    },
+  });
+  revalidatePath(`/chantiers/${existing.workstream.jalon.chantierId}`);
+  return { mode: "direct" };
+}
+
+export async function deleteActivite(
+  id: string,
+  options?: { motif?: string }
+): Promise<PlanningDetailMutationResult> {
+  const session = await requireAuth();
+  const existing = await prisma.activite.findUnique({
+    where: { id },
+    include: {
+      workstream: {
+        include: { jalon: { select: { chantierId: true, nom: true } } },
+      },
+    },
+  });
+  if (!existing) throw new Error("Activité introuvable.");
+  await requireChantierAccess(existing.workstream.jalon.chantierId);
+
+  const { mode } = await getPlanningDetailMode(session, "delete");
+  if (mode === "INTERDIT") {
+    throw new Error("Vous n'êtes pas habilité à supprimer une activité.");
+  }
+
+  const {
+    createWorkflowRequest,
+    createDirectOperationAudit,
+    WORKFLOW_ENTITY,
+    WORKFLOW_OPERATION,
+  } = await import("@/lib/workflow");
+  const { buildActiviteEntityLabel } = await import("@/lib/workflow-shared");
+
+  const label = buildActiviteEntityLabel(existing.workstream.nom, existing.nom);
+  const oldValues = {
+    nom: existing.nom,
+    workstreamId: existing.workstreamId,
+  };
+
+  if (mode === "VALIDATION") {
+    if (!options?.motif?.trim()) {
+      throw new Error("Le motif de la demande est obligatoire.");
+    }
+    const req = await createWorkflowRequest({
+      entityType: WORKFLOW_ENTITY.ACTIVITE,
+      operation: WORKFLOW_OPERATION.DELETE,
+      entityId: id,
+      entityLabel: label,
+      chantierId: existing.workstream.jalon.chantierId,
+      motif: options.motif,
+      oldValues,
+      newValues: null,
+      session,
+    });
+    revalidatePath("/workflow/demandes");
+    revalidatePath(`/chantiers/${existing.workstream.jalon.chantierId}`);
+    return { mode: "validation", requestId: req.id };
+  }
+
+  if (!options?.motif?.trim()) {
+    throw new Error("Le commentaire est obligatoire pour supprimer une activité.");
+  }
+  await createDirectOperationAudit({
+    entityType: WORKFLOW_ENTITY.ACTIVITE,
+    operation: WORKFLOW_OPERATION.DELETE,
+    entityId: id,
+    entityLabel: label,
+    chantierId: existing.workstream.jalon.chantierId,
+    motif: options.motif,
+    oldValues,
+    newValues: null,
+    session,
+  });
+  await prisma.activite.delete({ where: { id } });
+  revalidatePath(`/chantiers/${existing.workstream.jalon.chantierId}`);
+  return { mode: "direct" };
 }
 
 // ── Adhérences (Dependencies) ────────────────────────

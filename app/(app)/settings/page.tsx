@@ -9,6 +9,7 @@ import { SettingsForm } from "@/components/settings-form";
 import { StatusWorkflowManager } from "@/components/status-workflow-manager";
 import { RaidFieldOptionsManager } from "@/components/raid-field-options-manager";
 import { JalonTemplateSettings } from "@/components/jalon-template-settings";
+import { PlanningDetailGouvernanceSettings } from "@/components/planning-detail-gouvernance-settings";
 
 export default async function SettingsPage() {
   const [settings, statusConfigs, jalonTemplates, fieldOptions] = await Promise.all([
@@ -35,9 +36,31 @@ export default async function SettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Jalons par défaut</CardTitle>
+            <CardDescription>
+              Référentiel de planning type (Phase → Jalon → Workstream →
+              Activité). Utilisé lors de l&apos;application du modèle sur un
+              chantier. Import / export Excel pour construction hors outil.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <JalonTemplateSettings templates={jalonTemplates} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Gouvernance Workstream / Activité (planning chantier)
+            </CardTitle>
+            <CardDescription>
+              Paramètre global : libre ou alignée sur le workflow des jalons
+              pour les workstreams et activités du planning opérationnel.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <PlanningDetailGouvernanceSettings
+              value={settings?.planning_detail_gouvernance}
+            />
           </CardContent>
         </Card>
 
