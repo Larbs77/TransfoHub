@@ -456,7 +456,8 @@ function jalonStart(jalon: JalonSeed) {
 
 function statusFor(start: string, end: string, level: "jalon" | "detail") {
   const today = localIso(new Date());
-  if (end < today) return level === "jalon" ? "Atteint" : "Terminé";
+  // Même catalogue que les jalons (pas de statut « Terminé » en base)
+  if (end < today) return "Atteint";
   if (start <= today) return "En cours";
   return "Planifié";
 }

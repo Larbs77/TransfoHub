@@ -30,8 +30,10 @@ import {
   getStatutsForType,
   getStatutColor,
   RAID_TYPE_COLORS,
+  isRaidOverdue,
+  raidEffectiveEcheance,
+  canMoveRaidKanbanClient,
 } from "@/lib/raid-labels";
-import { canMoveRaidKanbanClient } from "@/lib/raid-labels";
 import {
   changeRaidKanbanStatus,
   fetchKanbanMoveContext,
@@ -53,6 +55,8 @@ interface ActionItem {
   responsable: string;
   domaine: string;
   date_echeance: Date | null;
+  date_echeance_actualisee?: Date | null;
+  date_fin_reelle?: Date | null;
   statut: string;
   categorie: string;
   description: string;
@@ -99,10 +103,16 @@ function KanbanCard({
   now: Date;
   locked?: boolean;
 }) {
-  const isOverdue =
-    item.date_echeance &&
-    new Date(item.date_echeance) < now &&
-    !["Clôturé", "Abandonné"].includes(item.statut);
+  const effectiveEcheance = raidEffectiveEcheance(
+    item.date_echeance_actualisee,
+    item.date_echeance
+  );
+  const isOverdue = isRaidOverdue(
+    item.statut,
+    item.date_echeance_actualisee,
+    item.date_echeance,
+    now
+  );
 
   const typeColor = RAID_TYPE_COLORS[item.type] ?? "#6b7280";
 
@@ -198,17 +208,18 @@ function KanbanCard({
             )}
           </div>
 
-          {item.date_echeance && (
+          {effectiveEcheance && (
             <div
               className={`flex items-center gap-1 shrink-0 text-[11px] ${
                 isOverdue
                   ? "text-destructive font-semibold"
                   : "text-muted-foreground"
               }`}
+              title="Échéance actualisée"
             >
               <CalendarDays className="size-3" />
               <span>
-                {format(new Date(item.date_echeance), "dd MMM yy", {
+                {format(effectiveEcheance, "dd MMM yy", {
                   locale: fr,
                 })}
               </span>

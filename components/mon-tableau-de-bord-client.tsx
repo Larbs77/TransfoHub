@@ -53,6 +53,8 @@ import {
   RAID_TYPE_LABELS,
   RAID_TYPE_COLORS,
   getStatutColor,
+  isRaidOverdue,
+  raidEffectiveEcheance,
   type StatusConfigItem,
 } from "@/lib/raid-labels";
 
@@ -172,32 +174,42 @@ export function MonTableauDeBordClient({
   const raidCalendarEvents: CalendarEvent[] = useMemo(() => {
     return filteredRaids
       .filter(
-        (r) => r.date_echeance || r.date_revision || r.date_identification
+        (r) =>
+          r.date_echeance_actualisee ||
+          r.date_echeance ||
+          r.date_revision ||
+          r.date_identification
       )
-      .map((r) => ({
-        id: r.id,
-        date: new Date(
-          (r.date_echeance ?? r.date_revision ?? r.date_identification)!
-        ),
-        label: r.intitule,
-        color: RAID_TYPE_COLORS[r.type] ?? "#6b7280",
-        type: r.type,
-        sublabel: r.chantierCode ?? undefined,
-        details: {
-          Type: RAID_TYPE_LABELS[r.type] ?? r.type,
-          Statut: r.statut || "",
-          Catégorie: r.categorie || "",
-          Domaine: r.domaine || "",
-          Responsable: r.responsable || "",
-          Chantier: r.chantierCode
-            ? `${r.chantierCode}${r.chantierNom ? ` — ${r.chantierNom}` : ""}`
-            : "",
-          Échéance: r.date_echeance
-            ? format(new Date(r.date_echeance), "dd MMM yyyy", { locale: fr })
-            : "",
-          Périmètre: r.isMine ? "M'est assigné" : "Chantier",
-        },
-      }));
+      .map((r) => {
+        const ech = raidEffectiveEcheance(
+          r.date_echeance_actualisee,
+          r.date_echeance
+        );
+        return {
+          id: r.id,
+          date: new Date(
+            (ech ?? r.date_revision ?? r.date_identification)!
+          ),
+          label: r.intitule,
+          color: RAID_TYPE_COLORS[r.type] ?? "#6b7280",
+          type: r.type,
+          sublabel: r.chantierCode ?? undefined,
+          details: {
+            Type: RAID_TYPE_LABELS[r.type] ?? r.type,
+            Statut: r.statut || "",
+            Catégorie: r.categorie || "",
+            Domaine: r.domaine || "",
+            Responsable: r.responsable || "",
+            Chantier: r.chantierCode
+              ? `${r.chantierCode}${r.chantierNom ? ` — ${r.chantierNom}` : ""}`
+              : "",
+            "Échéance act.": ech
+              ? format(ech, "dd MMM yyyy", { locale: fr })
+              : "",
+            Périmètre: r.isMine ? "M'est assigné" : "Chantier",
+          },
+        };
+      });
   }, [filteredRaids]);
 
   const firstRaidType =
@@ -228,8 +240,13 @@ export function MonTableauDeBordClient({
       (a) => a.statut !== "Clôturé" && a.statut !== "Abandonné"
     );
     const now = new Date();
-    const overdue = open.filter(
-      (a) => a.date_echeance && new Date(a.date_echeance) < now
+    const overdue = open.filter((a) =>
+      isRaidOverdue(
+        a.statut,
+        a.date_echeance_actualisee,
+        a.date_echeance,
+        now
+      )
     );
     const risks = mine.filter(
       (r) => r.type === "Risque" && r.statut !== "Clos"
@@ -746,13 +763,17 @@ export function MonTableauDeBordClient({
                                           {r.chantierCode ?? "—"}
                                         </td>
                                         <td className="px-3 py-2 tabular-nums text-muted-foreground">
-                                          {r.date_echeance
-                                            ? format(
-                                                new Date(r.date_echeance),
-                                                "dd MMM yyyy",
-                                                { locale: fr }
-                                              )
-                                            : "—"}
+                                          {(() => {
+                                            const ech = raidEffectiveEcheance(
+                                              r.date_echeance_actualisee,
+                                              r.date_echeance
+                                            );
+                                            return ech
+                                              ? format(ech, "dd MMM yyyy", {
+                                                  locale: fr,
+                                                })
+                                              : "—";
+                                          })()}
                                         </td>
                                         <td className="px-3 py-2">
                                           {r.isMine ? (
@@ -789,6 +810,9 @@ export function MonTableauDeBordClient({
                                     responsable: r.responsable ?? "",
                                     domaine: r.domaine ?? "",
                                     date_echeance: r.date_echeance,
+                                    date_echeance_actualisee:
+                                      r.date_echeance_actualisee,
+                                    date_fin_reelle: r.date_fin_reelle,
                                     statut: r.statut,
                                     categorie: r.categorie ?? "",
                                     chantierId: r.chantierId,

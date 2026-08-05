@@ -190,6 +190,10 @@ model AppRole {
   jalon_create_mode String @default("DIRECT")
   jalon_update_mode String @default("DIRECT")
   jalon_delete_mode String @default("DIRECT")
+  /// Q&A Consultation workflow mode per operation: DIRECT | VALIDATION | INTERDIT
+  qa_create_mode String @default("DIRECT")
+  qa_update_mode String @default("DIRECT")
+  qa_delete_mode String @default("DIRECT")
   /// Workflow governance capabilities (not tied to role names)
   workflow_can_approve       Boolean @default(false)
   workflow_can_reject        Boolean @default(false)
@@ -284,7 +288,12 @@ model Raid {
   statut                 String     @default("")
   date_identification    DateTime?
   date_revision          DateTime?
+  /// Échéance initiale (engagement) — figée après création.
   date_echeance          DateTime?
+  /// Échéance actualisée — seule date d'échéance modifiable en suivi (pas de workflow).
+  date_echeance_actualisee DateTime?
+  /// Date de clôture effective (statuts terminaux).
+  date_fin_reelle        DateTime?
   commentaires           String     @default("")
   comiteId               String?
   /// Creator (app user) for audit / circulation.
@@ -303,6 +312,7 @@ model Raid {
   @@index([responsableRessourceId])
   @@index([equipeId])
   @@index([chantierId])
+  @@index([date_echeance_actualisee])
 }
 
 /// Per-type autoincrement for Raid.code (Action→A_, Risque→R_, …).
@@ -545,6 +555,8 @@ model Workstream {
   description String     @default("")
   date_debut  DateTime?
   date_fin    DateTime?
+  /// Date de finalisation réelle (passage au statut Atteint)
+  date_reelle DateTime?
   statut      String     @default("Planifié")
   commentaire String     @default("")
   createdAt   DateTime   @default(now())
@@ -565,6 +577,8 @@ model Activite {
   description  String     @default("")
   date_debut   DateTime?
   date_fin     DateTime?
+  /// Date de finalisation réelle (passage au statut Atteint)
+  date_reelle  DateTime?
   statut       String     @default("Planifié")
   commentaire  String     @default("")
   createdAt    DateTime   @default(now())
@@ -627,7 +641,12 @@ model ConsultationQuestion {
   statut       String    @default("Ouverte")
   remontee_par String    @default("")
   affectee_a   String    @default("")
+  /// Échéance initiale — figée après création
   echeance     DateTime?
+  /// Échéance actualisée — seule échéance modifiable (KPI En retard)
+  echeance_actualisee DateTime?
+  /// Date de passage au statut Résolue ou Abandonnée
+  date_fin_reelle DateTime?
   resolution   String    @default("")
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -636,6 +655,7 @@ model ConsultationQuestion {
   @@index([chantierId])
   @@index([statut])
   @@index([priorite])
+  @@index([echeance_actualisee])
 }
 
 model FavoriChantier {

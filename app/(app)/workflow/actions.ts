@@ -133,6 +133,13 @@ async function executePlanningFromRequest(request: {
       if (!request.entityId) throw new Error("Jalon cible manquant.");
       const nv = asRecord(request.newValues);
       if (!nv) throw new Error("Valeurs proposées manquantes.");
+      const jalonStatut = String(nv.statut ?? "Planifié");
+      if (jalonStatut === "Atteint") {
+        const { assertJalonCanBeAtteint } = await import(
+          "@/lib/planning-status-assert"
+        );
+        await assertJalonCanBeAtteint(request.entityId);
+      }
       const updated = await prisma.jalon.update({
         where: { id: request.entityId },
         data: {
@@ -145,7 +152,7 @@ async function executePlanningFromRequest(request: {
           date_reelle: nv.date_reelle
             ? new Date(String(nv.date_reelle))
             : null,
-          statut: String(nv.statut ?? "Planifié"),
+          statut: jalonStatut,
           livrables: String(nv.livrables ?? ""),
           commentaire: String(nv.commentaire ?? ""),
         },
@@ -192,6 +199,13 @@ async function executePlanningFromRequest(request: {
         where: { id: jalonId },
         select: { nom: true },
       });
+      const wsStatut = String(nv.statut ?? "Planifié");
+      const { resolvePlanningDateReelle } = await import("@/lib/jalon-labels");
+      const wsDateReelle = resolvePlanningDateReelle({
+        statut: wsStatut,
+        dateReelle:
+          nv.date_reelle != null ? String(nv.date_reelle) : null,
+      });
       const created = await prisma.workstream.create({
         data: {
           jalonId,
@@ -200,7 +214,8 @@ async function executePlanningFromRequest(request: {
           description: String(nv.description ?? ""),
           date_debut: optionalIsoDate(nv.date_debut),
           date_fin: optionalIsoDate(nv.date_fin),
-          statut: String(nv.statut ?? "Planifié"),
+          date_reelle: optionalIsoDate(wsDateReelle),
+          statut: wsStatut,
           commentaire: String(nv.commentaire ?? ""),
         },
       });
@@ -216,6 +231,24 @@ async function executePlanningFromRequest(request: {
       if (!request.entityId) throw new Error("Workstream cible manquant.");
       const nv = asRecord(request.newValues);
       if (!nv) throw new Error("Valeurs proposées manquantes.");
+      const existingWs = await prisma.workstream.findUnique({
+        where: { id: request.entityId },
+        select: { date_reelle: true },
+      });
+      const wsStatutUp = String(nv.statut ?? "Planifié");
+      if (wsStatutUp === "Atteint") {
+        const { assertWorkstreamCanBeAtteint } = await import(
+          "@/lib/planning-status-assert"
+        );
+        await assertWorkstreamCanBeAtteint(request.entityId);
+      }
+      const { resolvePlanningDateReelle } = await import("@/lib/jalon-labels");
+      const wsDateReelleUp = resolvePlanningDateReelle({
+        statut: wsStatutUp,
+        dateReelle:
+          nv.date_reelle != null ? String(nv.date_reelle) : null,
+        previousDateReelle: existingWs?.date_reelle,
+      });
       const updated = await prisma.workstream.update({
         where: { id: request.entityId },
         data: {
@@ -224,7 +257,8 @@ async function executePlanningFromRequest(request: {
           description: String(nv.description ?? ""),
           date_debut: optionalIsoDate(nv.date_debut),
           date_fin: optionalIsoDate(nv.date_fin),
-          statut: String(nv.statut ?? "Planifié"),
+          date_reelle: optionalIsoDate(wsDateReelleUp),
+          statut: wsStatutUp,
           commentaire: String(nv.commentaire ?? ""),
         },
         include: { jalon: { select: { nom: true } } },
@@ -272,6 +306,13 @@ async function executePlanningFromRequest(request: {
         where: { id: workstreamId },
         select: { nom: true },
       });
+      const actStatut = String(nv.statut ?? "Planifié");
+      const { resolvePlanningDateReelle } = await import("@/lib/jalon-labels");
+      const actDateReelle = resolvePlanningDateReelle({
+        statut: actStatut,
+        dateReelle:
+          nv.date_reelle != null ? String(nv.date_reelle) : null,
+      });
       const created = await prisma.activite.create({
         data: {
           workstreamId,
@@ -280,7 +321,8 @@ async function executePlanningFromRequest(request: {
           description: String(nv.description ?? ""),
           date_debut: optionalIsoDate(nv.date_debut),
           date_fin: optionalIsoDate(nv.date_fin),
-          statut: String(nv.statut ?? "Planifié"),
+          date_reelle: optionalIsoDate(actDateReelle),
+          statut: actStatut,
           commentaire: String(nv.commentaire ?? ""),
         },
       });
@@ -293,6 +335,18 @@ async function executePlanningFromRequest(request: {
       if (!request.entityId) throw new Error("Activité cible manquante.");
       const nv = asRecord(request.newValues);
       if (!nv) throw new Error("Valeurs proposées manquantes.");
+      const existingAct = await prisma.activite.findUnique({
+        where: { id: request.entityId },
+        select: { date_reelle: true },
+      });
+      const actStatutUp = String(nv.statut ?? "Planifié");
+      const { resolvePlanningDateReelle } = await import("@/lib/jalon-labels");
+      const actDateReelleUp = resolvePlanningDateReelle({
+        statut: actStatutUp,
+        dateReelle:
+          nv.date_reelle != null ? String(nv.date_reelle) : null,
+        previousDateReelle: existingAct?.date_reelle,
+      });
       const updated = await prisma.activite.update({
         where: { id: request.entityId },
         data: {
@@ -301,7 +355,8 @@ async function executePlanningFromRequest(request: {
           description: String(nv.description ?? ""),
           date_debut: optionalIsoDate(nv.date_debut),
           date_fin: optionalIsoDate(nv.date_fin),
-          statut: String(nv.statut ?? "Planifié"),
+          date_reelle: optionalIsoDate(actDateReelleUp),
+          statut: actStatutUp,
           commentaire: String(nv.commentaire ?? ""),
         },
         include: { workstream: { select: { nom: true } } },
@@ -338,6 +393,131 @@ async function executePlanningFromRequest(request: {
     }
   }
 
+  // ── Question Q&A (consultation) ────────────────────
+  if (request.entityType === WORKFLOW_ENTITY.CONSULTATION_QUESTION) {
+    const { formatQaWorkflowLabel } = await import("@/lib/workflow-shared");
+    if (request.operation === WORKFLOW_OPERATION.CREATE) {
+      const nv = asRecord(request.newValues);
+      if (!nv) throw new Error("Valeurs proposées manquantes.");
+      const chantierId = String(nv.chantierId ?? request.chantierId ?? "");
+      if (!chantierId) throw new Error("Chantier manquant.");
+      const echeance = optionalIsoDate(nv.echeance);
+      const echeanceActu =
+        optionalIsoDate(nv.echeance_actualisee) ?? echeance;
+      const statut = String(nv.statut ?? "Ouverte");
+      const closed = statut === "Résolue" || statut === "Abandonnée";
+      const resolution = String(nv.resolution ?? "").trim();
+      if (closed && !resolution) {
+        throw new Error(
+          "La réponse est obligatoire pour un statut Résolue ou Abandonnée."
+        );
+      }
+      const created = await prisma.consultationQuestion.create({
+        data: {
+          chantierId,
+          dossier_ref: String(nv.dossier_ref ?? ""),
+          question: String(nv.question ?? ""),
+          categorie: String(nv.categorie ?? "Générale"),
+          priorite: String(nv.priorite ?? "Moyenne"),
+          statut,
+          remontee_par: String(nv.remontee_par ?? ""),
+          affectee_a: String(nv.affectee_a ?? ""),
+          echeance,
+          echeance_actualisee: echeanceActu,
+          date_fin_reelle: closed
+            ? optionalIsoDate(nv.date_fin_reelle) ?? new Date()
+            : null,
+          resolution,
+        },
+      });
+      return {
+        entityId: created.id,
+        entityLabel: formatQaWorkflowLabel({
+          newValues: nv,
+          entityLabel: created.question,
+        }),
+      };
+    }
+    if (request.operation === WORKFLOW_OPERATION.UPDATE) {
+      if (!request.entityId) throw new Error("Question cible manquante.");
+      const nv = asRecord(request.newValues);
+      if (!nv) throw new Error("Valeurs proposées manquantes.");
+      const existingQa = await prisma.consultationQuestion.findUnique({
+        where: { id: request.entityId },
+      });
+      if (!existingQa) throw new Error("Question cible introuvable.");
+      const statut = String(nv.statut ?? "Ouverte");
+      const closed = statut === "Résolue" || statut === "Abandonnée";
+      const resolution = String(nv.resolution ?? "").trim();
+      if (closed && !resolution) {
+        throw new Error(
+          "La réponse est obligatoire pour un statut Résolue ou Abandonnée."
+        );
+      }
+      const wasClosed =
+        existingQa.statut === "Résolue" || existingQa.statut === "Abandonnée";
+      const dateFin = !closed
+        ? null
+        : wasClosed && existingQa.date_fin_reelle
+          ? existingQa.date_fin_reelle
+          : optionalIsoDate(nv.date_fin_reelle) ?? new Date();
+      // Texte de la question non modifiable via workflow : conserver l'existant
+      const updated = await prisma.consultationQuestion.update({
+        where: { id: request.entityId },
+        data: {
+          chantierId: String(nv.chantierId ?? request.chantierId ?? ""),
+          dossier_ref: String(nv.dossier_ref ?? ""),
+          question: existingQa.question,
+          categorie: String(nv.categorie ?? "Générale"),
+          priorite: String(nv.priorite ?? "Moyenne"),
+          statut,
+          remontee_par: String(nv.remontee_par ?? ""),
+          affectee_a: String(nv.affectee_a ?? ""),
+          // échéance initiale immuable
+          echeance_actualisee:
+            optionalIsoDate(nv.echeance_actualisee) ??
+            existingQa.echeance_actualisee ??
+            existingQa.echeance,
+          date_fin_reelle: dateFin,
+          resolution,
+        },
+      });
+      return {
+        entityId: updated.id,
+        entityLabel: formatQaWorkflowLabel({
+          newValues: nv,
+          entityLabel: updated.question,
+        }),
+      };
+    }
+    if (request.operation === WORKFLOW_OPERATION.DELETE) {
+      if (!request.entityId) throw new Error("Question cible manquante.");
+      const existing = await prisma.consultationQuestion.findUnique({
+        where: { id: request.entityId },
+      });
+      if (!existing) {
+        return {
+          entityId: request.entityId,
+          entityLabel: formatQaWorkflowLabel({
+            oldValues: request.oldValues,
+          }),
+        };
+      }
+      await prisma.consultationQuestion.delete({
+        where: { id: request.entityId },
+      });
+      return {
+        entityId: existing.id,
+        entityLabel: formatQaWorkflowLabel({
+          oldValues: {
+            dossier_ref: existing.dossier_ref,
+            question: existing.question,
+          },
+        }),
+      };
+    }
+  }
+
   throw new Error("Type d'objet ou opération non supporté pour exécution.");
 }
 
@@ -346,6 +526,7 @@ function revalidateWorkflowPaths(chantierId?: string | null) {
   revalidatePath("/workflow/historique");
   revalidatePath("/workflow/dashboard");
   revalidatePath("/jalons");
+  revalidatePath("/consultation-backlog");
   revalidatePath("/");
   if (chantierId) revalidatePath(`/chantiers/${chantierId}`);
 }
@@ -378,7 +559,7 @@ export async function getWorkflowRequestsForUi(filters?: {
 
   // Non-validators only see their own requests
   const isValidator = caps.canApprove || caps.canReject;
-  // Include jalon + workstream + activité planning requests
+  // Include jalon / workstream / activité + Q&A consultation requests
   const rowsAll = await listWorkflowRequests({
     status: filters?.status,
     operation: filters?.operation,
@@ -386,12 +567,13 @@ export async function getWorkflowRequestsForUi(filters?: {
     pendingOnly: filters?.pendingOnly,
     ...(isValidator ? {} : { requesterId: session.userId }),
   });
-  const planningTypes = new Set<string>([
+  const supportedTypes = new Set<string>([
     WORKFLOW_ENTITY.JALON,
     WORKFLOW_ENTITY.WORKSTREAM,
     WORKFLOW_ENTITY.ACTIVITE,
+    WORKFLOW_ENTITY.CONSULTATION_QUESTION,
   ]);
-  const rows = rowsAll.filter((r) => planningTypes.has(r.entityType));
+  const rows = rowsAll.filter((r) => supportedTypes.has(r.entityType));
 
   const chantierIds = [
     ...new Set(rows.map((r) => r.chantierId).filter(Boolean) as string[]),

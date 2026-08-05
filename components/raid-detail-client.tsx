@@ -105,6 +105,8 @@ type RaidDetail = {
   date_identification: Date | string | null;
   date_revision: Date | string | null;
   date_echeance: Date | string | null;
+  date_echeance_actualisee?: Date | string | null;
+  date_fin_reelle?: Date | string | null;
   commentaires: string;
   createdByName: string;
   createdAt: Date | string;
@@ -715,9 +717,21 @@ export function RaidDetailClient({
                   value={fmtDate(raid.date_revision)}
                 />
                 <MetaRow
-                  label="Échéance"
+                  label="Échéance initiale"
                   value={fmtDate(raid.date_echeance)}
                 />
+                <MetaRow
+                  label="Échéance actualisée"
+                  value={fmtDate(
+                    raid.date_echeance_actualisee ?? raid.date_echeance
+                  )}
+                />
+                {raid.date_fin_reelle && (
+                  <MetaRow
+                    label="Fin réelle"
+                    value={fmtDate(raid.date_fin_reelle)}
+                  />
+                )}
                 <MetaRow
                   label="Dernière MAJ"
                   value={fmt(raid.updatedAt)}

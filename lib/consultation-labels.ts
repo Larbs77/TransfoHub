@@ -28,3 +28,37 @@ export const QA_STATUT_COLORS: Record<string, string> = {
   "Résolue": "#22c55e",
   "Abandonnée": "#94a3b8",
 };
+
+/**
+ * Question overdue: based on **échéance actualisée** (fallback: échéance initiale),
+ * still open (not Résolue / Abandonnée).
+ */
+export function isQuestionEnRetard(
+  echeanceActualisee: Date | string | null | undefined,
+  statut: string,
+  now: Date = new Date(),
+  /** fallback if actualisée empty (legacy rows) */
+  echeanceInitiale?: Date | string | null
+): boolean {
+  const s = (statut || "").trim();
+  if (s === "Résolue" || s === "Abandonnée") return false;
+  const raw = echeanceActualisee ?? echeanceInitiale;
+  if (!raw) return false;
+  const d = raw instanceof Date ? raw : new Date(raw);
+  if (Number.isNaN(d.getTime())) return false;
+  const endOfDueDay = new Date(
+    d.getFullYear(),
+    d.getMonth(),
+    d.getDate(),
+    23,
+    59,
+    59,
+    999
+  );
+  return endOfDueDay.getTime() < now.getTime();
+}
+
+export function isQaClosedStatus(statut: string): boolean {
+  const s = (statut || "").trim();
+  return s === "Résolue" || s === "Abandonnée";
+}

@@ -46,6 +46,9 @@ export async function getRolesForAdmin() {
     jalon_create_mode: r.jalon_create_mode ?? "DIRECT",
     jalon_update_mode: r.jalon_update_mode ?? "DIRECT",
     jalon_delete_mode: r.jalon_delete_mode ?? "DIRECT",
+    qa_create_mode: r.qa_create_mode ?? "DIRECT",
+    qa_update_mode: r.qa_update_mode ?? "DIRECT",
+    qa_delete_mode: r.qa_delete_mode ?? "DIRECT",
     workflow_can_approve: !!r.workflow_can_approve,
     workflow_can_reject: !!r.workflow_can_reject,
     workflow_can_view_requests: !!r.workflow_can_view_requests,
@@ -106,6 +109,9 @@ export async function createRole(data: {
   jalon_create_mode?: string;
   jalon_update_mode?: string;
   jalon_delete_mode?: string;
+  qa_create_mode?: string;
+  qa_update_mode?: string;
+  qa_delete_mode?: string;
   workflow_can_approve?: boolean;
   workflow_can_reject?: boolean;
   workflow_can_view_requests?: boolean;
@@ -160,6 +166,18 @@ export async function createRole(data: {
         data.jalon_delete_mode ?? "DIRECT",
         "suppression jalon"
       ),
+      qa_create_mode: validateWorkflowMode(
+        data.qa_create_mode ?? "DIRECT",
+        "création Q&A"
+      ),
+      qa_update_mode: validateWorkflowMode(
+        data.qa_update_mode ?? "DIRECT",
+        "modification Q&A"
+      ),
+      qa_delete_mode: validateWorkflowMode(
+        data.qa_delete_mode ?? "DIRECT",
+        "suppression Q&A"
+      ),
       workflow_can_approve: !!data.workflow_can_approve,
       workflow_can_reject: !!data.workflow_can_reject,
       workflow_can_view_requests: !!data.workflow_can_view_requests,
@@ -184,6 +202,9 @@ export async function updateRole(
     jalon_create_mode?: string;
     jalon_update_mode?: string;
     jalon_delete_mode?: string;
+    qa_create_mode?: string;
+    qa_update_mode?: string;
+    qa_delete_mode?: string;
     workflow_can_approve?: boolean;
     workflow_can_reject?: boolean;
     workflow_can_view_requests?: boolean;
@@ -239,6 +260,21 @@ export async function updateRole(
         : validateWorkflowMode(
             data.jalon_delete_mode ?? "DIRECT",
             "suppression jalon"
+          ),
+      qa_create_mode: isAdmin
+        ? "DIRECT"
+        : validateWorkflowMode(data.qa_create_mode ?? "DIRECT", "création Q&A"),
+      qa_update_mode: isAdmin
+        ? "DIRECT"
+        : validateWorkflowMode(
+            data.qa_update_mode ?? "DIRECT",
+            "modification Q&A"
+          ),
+      qa_delete_mode: isAdmin
+        ? "DIRECT"
+        : validateWorkflowMode(
+            data.qa_delete_mode ?? "DIRECT",
+            "suppression Q&A"
           ),
       workflow_can_approve: isAdmin ? true : !!data.workflow_can_approve,
       workflow_can_reject: isAdmin ? true : !!data.workflow_can_reject,

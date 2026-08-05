@@ -184,6 +184,7 @@ async function main() {
     date_identification: Date | null;
     date_revision: Date | null;
     date_echeance: Date | null;
+    date_echeance_actualisee: Date | null;
     commentaires: string;
     comiteId: string | null;
     equipeId: string | null;
@@ -240,6 +241,9 @@ async function main() {
       date_identification: parseDate(row.date_identification ?? ""),
       date_revision: parseDate(row.date_revision ?? ""),
       date_echeance: parseDate(row.date_echeance ?? ""),
+      date_echeance_actualisee:
+        parseDate(row.date_echeance_actualisee ?? "") ??
+        parseDate(row.date_echeance ?? ""),
       commentaires: row.commentaires ?? "",
       // comiteId from export may not exist in current DB
       comiteId: null,
@@ -311,6 +315,8 @@ async function main() {
         date_identification: p.date_identification,
         date_revision: p.date_revision,
         date_echeance: p.date_echeance,
+        date_echeance_actualisee:
+          p.date_echeance_actualisee ?? p.date_echeance,
         commentaires: p.commentaires,
         comiteId: p.comiteId,
         createdByName: "Import CSV",

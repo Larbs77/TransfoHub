@@ -463,8 +463,8 @@ async function loadExcelPlanningContext(chantierId: string) {
   for (const j of chantier.jalons) {
     nodes.push({ id:j.id,level:"JALON",parentId:null,phase:j.phase,jalon:j.nom,workstream:"",activite:"",ordre:j.ordre,dateDebut:j.date_debut,dateFin:j.date_cible,dateReelle:j.date_reelle,statut:j.statut,description:j.description,livrables:j.livrables,commentaire:j.commentaire,updatedAt:j.updatedAt });
     for (const w of j.workstreams) {
-      nodes.push({ id:w.id,level:"WORKSTREAM",parentId:j.id,phase:j.phase,jalon:j.nom,workstream:w.nom,activite:"",ordre:w.ordre,dateDebut:w.date_debut,dateFin:w.date_fin,dateReelle:null,statut:w.statut,description:w.description,livrables:"",commentaire:w.commentaire,updatedAt:w.updatedAt });
-      for (const a of w.activites) nodes.push({ id:a.id,level:"ACTIVITE",parentId:w.id,phase:j.phase,jalon:j.nom,workstream:w.nom,activite:a.nom,ordre:a.ordre,dateDebut:a.date_debut,dateFin:a.date_fin,dateReelle:null,statut:a.statut,description:a.description,livrables:"",commentaire:a.commentaire,updatedAt:a.updatedAt });
+      nodes.push({ id:w.id,level:"WORKSTREAM",parentId:j.id,phase:j.phase,jalon:j.nom,workstream:w.nom,activite:"",ordre:w.ordre,dateDebut:w.date_debut,dateFin:w.date_fin,dateReelle:w.date_reelle,statut:w.statut,description:w.description,livrables:"",commentaire:w.commentaire,updatedAt:w.updatedAt });
+      for (const a of w.activites) nodes.push({ id:a.id,level:"ACTIVITE",parentId:w.id,phase:j.phase,jalon:j.nom,workstream:w.nom,activite:a.nom,ordre:a.ordre,dateDebut:a.date_debut,dateFin:a.date_fin,dateReelle:a.date_reelle,statut:a.statut,description:a.description,livrables:"",commentaire:a.commentaire,updatedAt:a.updatedAt });
     }
   }
   return { chantier, nodes };
@@ -573,25 +573,41 @@ export async function confirmJalonPlanningExcel(chantierId:string,base64:string,
   const report=buildExcelPlanningPreview({chantierId,chantierCode:chantier.code,chantierNom:chantier.nom,chantierStart:chantier.date_debut,chantierEnd:chantier.date_fin,base64,existing:nodes});
   if(report.formatErrors.length||report.errorCount) throw new Error("Import refusé : le fichier contient des erreurs.");
   const ops=report.rows.flatMap(r=>r.apply?[r.apply]:[]); let created=0,updated=0;
+  const { isAtteintStatut } = await import("@/lib/planning-status-rules");
   await prisma.$transaction(async tx=>{
     const refs=new Map<string,string>(); for(const n of nodes) refs.set(n.id,n.id);
     const date=(v:unknown)=>typeof v==="string"&&v?ymdToUtcDate(v):null;
-    for(const op of ops){
+    // Appliquer d'abord les niveaux bas (ACTIVITE → WORKSTREAM → JALON) pour la règle Atteint
+    const ordered=[...ops].sort((a,b)=>{
+      const rank=(l:string)=>l==="ACTIVITE"?0:l==="WORKSTREAM"?1:2;
+      return rank(a.level)-rank(b.level);
+    });
+    for(const op of ordered){
       const d=op.data;
       if(op.kind==="UPDATE"&&op.id){
-        if(op.level==="JALON") await tx.jalon.update({where:{id:op.id},data:{phase:String(d.phase),nom:String(d.jalon),ordre:Number(d.ordre),date_debut:date(d.date_debut),date_cible:date(d.date_fin)!,date_reelle:date(d.date_reelle),statut:String(d.statut),description:String(d.description??""),livrables:String(d.livrables??""),commentaire:String(d.commentaire??"")}});
+        if(op.level==="JALON") {
+          if(isAtteintStatut(String(d.statut))) {
+            const { assertJalonCanBeAtteint } = await import("@/lib/planning-status-assert");
+            await assertJalonCanBeAtteint(op.id, tx as never);
+          }
+          await tx.jalon.update({where:{id:op.id},data:{phase:String(d.phase),nom:String(d.jalon),ordre:Number(d.ordre),date_debut:date(d.date_debut),date_cible:date(d.date_fin)!,date_reelle:date(d.date_reelle),statut:String(d.statut),description:String(d.description??""),livrables:String(d.livrables??""),commentaire:String(d.commentaire??"")}});
+        }
         else if(op.level==="WORKSTREAM") {
           const parent=refs.get(op.parentRef??""); if(!parent) throw new Error("Parent jalon introuvable pendant le déplacement");
-          await tx.workstream.update({where:{id:op.id},data:{jalonId:parent,nom:String(d.workstream),ordre:Number(d.ordre),date_debut:date(d.date_debut),date_fin:date(d.date_fin),statut:String(d.statut),description:String(d.description??""),commentaire:String(d.commentaire??"")}});
+          if(isAtteintStatut(String(d.statut))) {
+            const { assertWorkstreamCanBeAtteint } = await import("@/lib/planning-status-assert");
+            await assertWorkstreamCanBeAtteint(op.id, tx as never);
+          }
+          await tx.workstream.update({where:{id:op.id},data:{jalonId:parent,nom:String(d.workstream),ordre:Number(d.ordre),date_debut:date(d.date_debut),date_fin:date(d.date_fin),date_reelle:date(d.date_reelle),statut:String(d.statut),description:String(d.description??""),commentaire:String(d.commentaire??"")}});
         } else {
           const parent=refs.get(op.parentRef??""); if(!parent) throw new Error("Parent workstream introuvable pendant le déplacement");
-          await tx.activite.update({where:{id:op.id},data:{workstreamId:parent,nom:String(d.activite),ordre:Number(d.ordre),date_debut:date(d.date_debut),date_fin:date(d.date_fin),statut:String(d.statut),description:String(d.description??""),commentaire:String(d.commentaire??"")}});
+          await tx.activite.update({where:{id:op.id},data:{workstreamId:parent,nom:String(d.activite),ordre:Number(d.ordre),date_debut:date(d.date_debut),date_fin:date(d.date_fin),date_reelle:date(d.date_reelle),statut:String(d.statut),description:String(d.description??""),commentaire:String(d.commentaire??"")}});
         }
         refs.set(op.ref,op.id); updated++; continue;
       }
       if(op.level==="JALON") { const x=await tx.jalon.create({data:{chantierId,phase:String(d.phase),nom:String(d.jalon),ordre:Number(d.ordre),date_debut:date(d.date_debut),date_cible:date(d.date_fin)!,date_reelle:date(d.date_reelle),statut:String(d.statut),description:String(d.description??""),livrables:String(d.livrables??""),commentaire:String(d.commentaire??"")}}); refs.set(op.ref,x.id); }
-      else if(op.level==="WORKSTREAM") { const parent=refs.get(op.parentRef??""); if(!parent) throw new Error("Parent jalon introuvable pendant l'import"); const x=await tx.workstream.create({data:{jalonId:parent,nom:String(d.workstream),ordre:Number(d.ordre),date_debut:date(d.date_debut),date_fin:date(d.date_fin),statut:String(d.statut),description:String(d.description??""),commentaire:String(d.commentaire??"")}}); refs.set(op.ref,x.id); }
-      else { const parent=refs.get(op.parentRef??""); if(!parent) throw new Error("Parent workstream introuvable pendant l'import"); const x=await tx.activite.create({data:{workstreamId:parent,nom:String(d.activite),ordre:Number(d.ordre),date_debut:date(d.date_debut),date_fin:date(d.date_fin),statut:String(d.statut),description:String(d.description??""),commentaire:String(d.commentaire??"")}}); refs.set(op.ref,x.id); }
+      else if(op.level==="WORKSTREAM") { const parent=refs.get(op.parentRef??""); if(!parent) throw new Error("Parent jalon introuvable pendant l'import"); const x=await tx.workstream.create({data:{jalonId:parent,nom:String(d.workstream),ordre:Number(d.ordre),date_debut:date(d.date_debut),date_fin:date(d.date_fin),date_reelle:date(d.date_reelle),statut:String(d.statut),description:String(d.description??""),commentaire:String(d.commentaire??"")}}); refs.set(op.ref,x.id); }
+      else { const parent=refs.get(op.parentRef??""); if(!parent) throw new Error("Parent workstream introuvable pendant l'import"); const x=await tx.activite.create({data:{workstreamId:parent,nom:String(d.activite),ordre:Number(d.ordre),date_debut:date(d.date_debut),date_fin:date(d.date_fin),date_reelle:date(d.date_reelle),statut:String(d.statut),description:String(d.description??""),commentaire:String(d.commentaire??"")}}); refs.set(op.ref,x.id); }
       created++;
     }
   });

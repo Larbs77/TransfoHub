@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Calendar, Search, Clock, ShieldAlert, Columns3, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
+import { Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Calendar, Search, Clock, ShieldAlert, Columns3, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,6 +47,9 @@ import {
   getLabelsForKind,
   mergeFieldLabelsWithData,
   canEditRaidFormClient,
+  isRaidOverdue,
+  isRaidInitialEcheancePast,
+  raidEffectiveEcheance,
   type StatusConfigItem,
   type RaidFieldOptionItem,
 } from "@/lib/raid-labels";
@@ -80,6 +83,8 @@ interface RaidRow {
   date_identification: Date | null;
   date_revision: Date | null;
   date_echeance: Date | null;
+  date_echeance_actualisee?: Date | null;
+  date_fin_reelle?: Date | null;
   commentaires: string;
   comiteId: string | null;
   comite?: { id: string; instance: string; numero: number } | null;
@@ -110,23 +115,27 @@ function SortHeader({
   current,
   dir,
   onSort,
+  title,
 }: {
   label: string;
   field: SortField;
   current: SortField | null;
   dir: SortDir;
   onSort: (f: SortField) => void;
+  title?: string;
 }) {
   return (
     <button
-      className="flex items-center gap-1 hover:text-foreground transition-colors -ml-2 px-2 py-1 rounded"
+      type="button"
+      title={title ?? label}
+      className="inline-flex max-w-full items-center gap-0.5 rounded px-0.5 py-0.5 text-left text-xs font-medium hover:text-foreground transition-colors"
       onClick={() => onSort(field)}
     >
-      {label}
+      <span className="truncate">{label}</span>
       {current === field ? (
-        dir === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />
+        dir === "asc" ? <ArrowUp className="size-3 shrink-0" /> : <ArrowDown className="size-3 shrink-0" />
       ) : (
-        <ArrowUpDown className="size-3.5 opacity-40" />
+        <ArrowUpDown className="size-3 shrink-0 opacity-40" />
       )}
     </button>
   );
@@ -315,10 +324,15 @@ function RaidTable({
     } else if (filterStatut !== "__all__") {
       result = result.filter((r) => r.statut === filterStatut);
     }
-    // Overdue filter (actions with date_echeance in the past)
+    // Overdue filter (échéance actualisée, fallback initiale)
     if (filterOverdue) {
-      result = result.filter(
-        (r) => r.date_echeance && new Date(r.date_echeance) < now && !["Clôturé", "Abandonné"].includes(r.statut)
+      result = result.filter((r) =>
+        isRaidOverdue(
+          r.statut,
+          r.date_echeance_actualisee,
+          r.date_echeance,
+          now
+        )
       );
     }
     // Critical filter (risks with score >= 12)
@@ -352,8 +366,16 @@ function RaidTable({
           break;
         }
         case "date_echeance": {
-          const da = a.date_echeance ? new Date(a.date_echeance).getTime() : 0;
-          const db = b.date_echeance ? new Date(b.date_echeance).getTime() : 0;
+          const ea = raidEffectiveEcheance(
+            a.date_echeance_actualisee,
+            a.date_echeance
+          );
+          const eb = raidEffectiveEcheance(
+            b.date_echeance_actualisee,
+            b.date_echeance
+          );
+          const da = ea ? ea.getTime() : 0;
+          const db = eb ? eb.getTime() : 0;
           cmp = da - db;
           break;
         }
@@ -527,38 +549,52 @@ function RaidTable({
         </p>
       ) : (
         <>
-        <Table>
+        <Table className="table-fixed w-full min-w-0">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[88px]">Code</TableHead>
-              {showType && <TableHead className="w-[90px]">Type</TableHead>}
-              <TableHead>
+              <TableHead className="w-[4.5rem]">Code</TableHead>
+              {showType && <TableHead className="w-[5.5rem]">Type</TableHead>}
+              <TableHead className={isActionView || isRisqueView ? "w-[28%]" : "w-[32%]"}>
                 <SortHeader label="Intitulé" field="intitule" current={sortField} dir={sortDir} onSort={handleSort} />
               </TableHead>
-              <TableHead>
+              <TableHead className="w-[9%]">
                 <SortHeader label="Catégorie" field="categorie" current={sortField} dir={sortDir} onSort={handleSort} />
               </TableHead>
-              <TableHead>Chantier</TableHead>
-              <TableHead>
+              <TableHead className="w-[4.5rem]">Chantier</TableHead>
+              <TableHead className="w-[12%]">
                 <SortHeader label="Responsable" field="responsable" current={sortField} dir={sortDir} onSort={handleSort} />
               </TableHead>
               {isRisqueView && (
-                <TableHead>
+                <TableHead className="w-[6.5rem]">
                   <SortHeader label="Criticité" field="criticite" current={sortField} dir={sortDir} onSort={handleSort} />
                 </TableHead>
               )}
-              <TableHead>
+              <TableHead className="w-[7rem]">
                 <SortHeader label="Statut" field="statut" current={sortField} dir={sortDir} onSort={handleSort} />
               </TableHead>
-              <TableHead>
-                <SortHeader label="Date" field="date_identification" current={sortField} dir={sortDir} onSort={handleSort} />
+              <TableHead className="w-[5.25rem]">
+                <SortHeader
+                  label="Identification"
+                  title="Date d'identification"
+                  field="date_identification"
+                  current={sortField}
+                  dir={sortDir}
+                  onSort={handleSort}
+                />
               </TableHead>
               {isActionView && (
-                <TableHead>
-                  <SortHeader label="Échéance" field="date_echeance" current={sortField} dir={sortDir} onSort={handleSort} />
+                <TableHead className="w-[5.25rem]">
+                  <SortHeader
+                    label="Échéance"
+                    title="Échéance actualisée"
+                    field="date_echeance"
+                    current={sortField}
+                    dir={sortDir}
+                    onSort={handleSort}
+                  />
                 </TableHead>
               )}
-              <TableHead className="w-[80px]">Actions</TableHead>
+              <TableHead className="w-[5.5rem] text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -572,70 +608,117 @@ function RaidTable({
                   className="cursor-pointer hover:bg-muted/50 transition-colors"
                   onClick={() => router.push(`/raid/${r.id}`)}
                 >
-                  <TableCell className="text-xs font-mono font-semibold text-[#0A3C74] dark:text-foreground whitespace-nowrap">
+                  <TableCell className="max-w-0 truncate p-1.5 text-[11px] font-mono font-semibold text-[#0A3C74] dark:text-foreground" title={r.code || undefined}>
                     {r.code || "—"}
                   </TableCell>
                   {showType && (
-                    <TableCell>
+                    <TableCell className="p-1.5">
                       <Badge
-                        className="text-[10px]"
+                        className="max-w-full truncate text-[10px]"
                         style={{ backgroundColor: RAID_TYPE_COLORS[r.type] ?? "#6b7280", color: "white" }}
                       >
                         {RAID_TYPE_LABELS[r.type] ?? r.type}
                       </Badge>
                     </TableCell>
                   )}
-                  <TableCell className="text-sm max-w-[250px]">
-                    <div className="truncate font-medium text-primary hover:underline">
+                  <TableCell className="max-w-0 p-1.5 text-sm">
+                    <div className="truncate font-medium text-primary hover:underline" title={r.intitule}>
                       {r.intitule}
                     </div>
                     {r.domaine && (
-                      <div className="text-[10px] text-muted-foreground truncate">{r.domaine}</div>
+                      <div className="truncate text-[10px] text-muted-foreground" title={r.domaine}>{r.domaine}</div>
                     )}
+                    {isRaidInitialEcheancePast(
+                      r.statut,
+                      r.date_echeance,
+                      now
+                    ) &&
+                      r.date_echeance && (
+                        <div
+                          className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+                          title={`Échéance initiale dépassée : ${format(new Date(r.date_echeance), "dd/MM/yyyy")}`}
+                        >
+                          <AlertTriangle className="size-3 shrink-0 text-amber-500" />
+                          <span className="truncate">
+                            Échéance initiale{" "}
+                            {format(new Date(r.date_echeance), "dd/MM/yy")}{" "}
+                            · dépassée
+                          </span>
+                        </div>
+                      )}
                   </TableCell>
-                  <TableCell className="text-sm">{r.categorie || "—"}</TableCell>
-                  <TableCell className="text-sm">
-                    {r.chantier ? (
-                      <span className="text-xs">{r.chantier.code}</span>
-                    ) : "—"}
+                  <TableCell className="max-w-0 truncate p-1.5 text-xs" title={r.categorie || undefined}>
+                    {r.categorie || "—"}
                   </TableCell>
-                  <TableCell className="text-sm">{r.responsable || "—"}</TableCell>
+                  <TableCell className="max-w-0 truncate p-1.5 text-xs font-medium" title={r.chantier ? `${r.chantier.code} — ${r.chantier.nom}` : undefined}>
+                    {r.chantier ? r.chantier.code : "—"}
+                  </TableCell>
+                  <TableCell className="max-w-0 truncate p-1.5 text-xs" title={r.responsable || undefined}>
+                    {r.responsable || "—"}
+                  </TableCell>
                   {isRisqueView && (
-                    <TableCell>
+                    <TableCell className="p-1.5">
                       {score ? (
                         <Badge
                           className="text-[10px]"
                           style={{ backgroundColor: CRITICITE_COLORS[critLabel!] ?? "#6b7280", color: "white" }}
+                          title={`${score}/25 ${critLabel}`}
                         >
-                          {score}/25 {critLabel}
+                          {score}
                         </Badge>
                       ) : "—"}
                     </TableCell>
                   )}
-                  <TableCell>
+                  <TableCell className="p-1.5">
                     <Badge
-                      className="text-[10px]"
+                      className="max-w-full truncate text-[10px]"
                       style={{ backgroundColor: statusConfigs?.length ? getStatutColorFromConfig(r.type, r.statut, statusConfigs) : getStatutColor(r.type, r.statut), color: "white" }}
+                      title={r.statut || undefined}
                     >
                       {r.statut || "—"}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-sm whitespace-nowrap">
+                  <TableCell className="p-1.5 text-xs tabular-nums text-muted-foreground">
                     {r.date_identification
-                      ? format(new Date(r.date_identification), "dd MMM yyyy", { locale: fr })
+                      ? format(new Date(r.date_identification), "dd/MM/yy")
                       : "—"}
                   </TableCell>
                   {isActionView && (
-                    <TableCell className="text-sm whitespace-nowrap">
-                      {r.date_echeance ? (
-                        <span className={new Date(r.date_echeance) < now && !["Clôturé", "Abandonné"].includes(r.statut) ? "text-destructive font-medium" : ""}>
-                          {format(new Date(r.date_echeance), "dd MMM yyyy", { locale: fr })}
-                        </span>
-                      ) : "—"}
+                    <TableCell className="p-1.5 text-xs tabular-nums">
+                      {(() => {
+                        const ech = raidEffectiveEcheance(
+                          r.date_echeance_actualisee,
+                          r.date_echeance
+                        );
+                        if (!ech) return "—";
+                        const overdue = isRaidOverdue(
+                          r.statut,
+                          r.date_echeance_actualisee,
+                          r.date_echeance,
+                          now
+                        );
+                        const initiale = r.date_echeance
+                          ? format(new Date(r.date_echeance), "dd/MM/yy")
+                          : null;
+                        return (
+                          <span
+                            className={
+                              overdue ? "text-destructive font-medium" : ""
+                            }
+                            title={
+                              initiale
+                                ? `Initiale : ${initiale} · Actualisée (pilotage)`
+                                : "Échéance actualisée"
+                            }
+                          >
+                            {format(ech, "dd/MM/yy")}
+                          </span>
+                        );
+                      })()}
                     </TableCell>
                   )}
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    <div className="flex gap-1">
+                  <TableCell className="p-1.5" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex justify-end gap-0.5">
                       <Button
                         variant="ghost"
                         size="icon-xs"
@@ -820,25 +903,44 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
   // Calendar events
   const calendarEvents: CalendarEvent[] = useMemo(() => {
     return scopedItems
-      .filter((r) => r.date_echeance || r.date_revision || r.date_identification)
-      .map((r) => ({
-        id: r.id,
-        date: new Date((r.date_echeance ?? r.date_revision ?? r.date_identification)!),
-        label: r.intitule,
-        color: RAID_TYPE_COLORS[r.type] ?? "#6b7280",
-        type: r.type,
-        details: {
-          "Type": RAID_TYPE_LABELS[r.type] ?? r.type,
-          "Statut": r.statut || "",
-          "Catégorie": r.categorie || "",
-          "Domaine": r.domaine || "",
-          "Responsable": r.responsable || "",
-          "Chantier": r.chantier ? `${r.chantier.code} - ${r.chantier.nom}` : "",
-          "Échéance": r.date_echeance
-            ? format(new Date(r.date_echeance), "dd MMM yyyy", { locale: fr })
-            : "",
-        },
-      }));
+      .filter(
+        (r) =>
+          r.date_echeance_actualisee ||
+          r.date_echeance ||
+          r.date_revision ||
+          r.date_identification
+      )
+      .map((r) => {
+        const ech = raidEffectiveEcheance(
+          r.date_echeance_actualisee,
+          r.date_echeance
+        );
+        return {
+          id: r.id,
+          date: new Date(
+            (ech ?? r.date_revision ?? r.date_identification)!
+          ),
+          label: r.intitule,
+          color: RAID_TYPE_COLORS[r.type] ?? "#6b7280",
+          type: r.type,
+          details: {
+            Type: RAID_TYPE_LABELS[r.type] ?? r.type,
+            Statut: r.statut || "",
+            Catégorie: r.categorie || "",
+            Domaine: r.domaine || "",
+            Responsable: r.responsable || "",
+            Chantier: r.chantier
+              ? `${r.chantier.code} - ${r.chantier.nom}`
+              : "",
+            "Échéance act.": ech
+              ? format(ech, "dd MMM yyyy", { locale: fr })
+              : "",
+            "Échéance init.": r.date_echeance
+              ? format(new Date(r.date_echeance), "dd MMM yyyy", { locale: fr })
+              : "",
+          },
+        };
+      });
   }, [scopedItems]);
 
   const typeOrder = ["Action", "Risque", "Information", "Décision"] as const;

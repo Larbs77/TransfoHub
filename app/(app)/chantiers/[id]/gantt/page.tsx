@@ -8,10 +8,20 @@ interface Props {
   searchParams: Promise<{ from?: string }>;
 }
 
+function resolveGanttBackNav(from: string | undefined, chantierId: string) {
+  if (from === "jalons") {
+    return { href: "/jalons", label: "Retour aux jalons" };
+  }
+  if (from === "portefeuille") {
+    return { href: "/gantt", label: "Retour au Gantt portefeuille" };
+  }
+  return { href: `/chantiers/${chantierId}`, label: "Fiche chantier" };
+}
+
 export default async function ChantierGanttPage({ params, searchParams }: Props) {
   const { id } = await params;
   const { from } = await searchParams;
-  const openedFromJalons = from === "jalons";
+  const back = resolveGanttBackNav(from, id);
 
   let chantier;
   try {
@@ -30,12 +40,13 @@ export default async function ChantierGanttPage({ params, searchParams }: Props)
   return (
     <ChantierGanttView
       nowMs={Date.now()}
-      backHref={openedFromJalons ? "/jalons" : `/chantiers/${id}`}
-      backLabel={openedFromJalons ? "Retour aux jalons" : "Fiche chantier"}
+      backHref={back.href}
+      backLabel={back.label}
       chantier={{
         id: chantier.id,
         code: chantier.code,
         nom: chantier.nom,
+        domaine: chantier.domaine,
         date_debut: chantier.date_debut,
         date_fin: chantier.date_fin,
         jalons: chantier.jalons.map((j) => ({

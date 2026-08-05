@@ -32,6 +32,7 @@ interface RaidItem {
   impact: number | null;
   mitigation: string;
   date_echeance: Date | null;
+  date_echeance_actualisee?: Date | null;
 }
 
 interface MembreItem {
@@ -144,7 +145,24 @@ export function ChantierKpiTab({ data }: { data: KpiData }) {
     ? Math.round((closedActions.length / actions.length) * 100)
     : 0;
   const overdueActions = activeActions.filter(
-    (a) => a.date_echeance && new Date(a.date_echeance) < now
+    (a) => {
+      // échéance actualisée (fallback initiale)
+      const raw = a.date_echeance_actualisee ?? a.date_echeance;
+      if (!raw) return false;
+      if (["Clôturé", "Abandonné", "NA", "Doublon"].includes(a.statut))
+        return false;
+      const d = new Date(raw);
+      const end = new Date(
+        d.getFullYear(),
+        d.getMonth(),
+        d.getDate(),
+        23,
+        59,
+        59,
+        999
+      );
+      return end < now;
+    }
   );
 
   // --- Risks ---

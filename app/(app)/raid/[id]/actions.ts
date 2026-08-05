@@ -251,9 +251,21 @@ async function applyRaidStatusChange(
 
   const actor = await getActorDisplay(session);
 
+  const { isRaidClosed } = await import("@/lib/raid-labels");
+  const becomingClosed =
+    isRaidClosed(statut) && !isRaidClosed(raid.statut);
+  const reopening = !isRaidClosed(statut) && isRaidClosed(raid.statut);
+
   await prisma.raid.update({
     where: { id: raid.id },
-    data: { statut },
+    data: {
+      statut,
+      ...(becomingClosed
+        ? { date_fin_reelle: new Date() }
+        : reopening
+          ? { date_fin_reelle: null }
+          : {}),
+    },
   });
 
   await prisma.raidComment.create({

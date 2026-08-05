@@ -19,6 +19,10 @@ export type RoleRecord = {
   jalon_create_mode: string;
   jalon_update_mode: string;
   jalon_delete_mode: string;
+  /** Q&A Consultation workflow: DIRECT | VALIDATION | INTERDIT */
+  qa_create_mode: string;
+  qa_update_mode: string;
+  qa_delete_mode: string;
   workflow_can_approve: boolean;
   workflow_can_reject: boolean;
   workflow_can_view_requests: boolean;
@@ -78,6 +82,9 @@ function mapRole(row: {
   jalon_create_mode?: string | null;
   jalon_update_mode?: string | null;
   jalon_delete_mode?: string | null;
+  qa_create_mode?: string | null;
+  qa_update_mode?: string | null;
+  qa_delete_mode?: string | null;
   workflow_can_approve?: boolean | null;
   workflow_can_reject?: boolean | null;
   workflow_can_view_requests?: boolean | null;
@@ -100,6 +107,9 @@ function mapRole(row: {
     jalon_create_mode: row.jalon_create_mode ?? "DIRECT",
     jalon_update_mode: row.jalon_update_mode ?? "DIRECT",
     jalon_delete_mode: row.jalon_delete_mode ?? "DIRECT",
+    qa_create_mode: row.qa_create_mode ?? "DIRECT",
+    qa_update_mode: row.qa_update_mode ?? "DIRECT",
+    qa_delete_mode: row.qa_delete_mode ?? "DIRECT",
     workflow_can_approve: !!row.workflow_can_approve,
     workflow_can_reject: !!row.workflow_can_reject,
     workflow_can_view_requests: !!row.workflow_can_view_requests,

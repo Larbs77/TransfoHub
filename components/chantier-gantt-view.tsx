@@ -12,6 +12,8 @@ import {
   endOfWeek,
   startOfMonth,
   endOfMonth,
+  startOfQuarter,
+  endOfQuarter,
   eachWeekOfInterval,
   eachMonthOfInterval,
   min as minDate,
@@ -19,13 +21,14 @@ import {
   isValid,
   isAfter,
   getISOWeek,
-  getISOWeekYear,
 } from "date-fns";
 import { fr } from "date-fns/locale";
 import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   FileCode2,
   GanttChart,
   Loader2,
@@ -89,6 +92,7 @@ export type GanttChantier = {
   id: string;
   code: string;
   nom: string;
+  domaine?: string | null;
   date_debut: Date | string;
   date_fin: Date | string;
   jalons: GanttJalon[];
@@ -178,7 +182,9 @@ export function ChantierGanttView({
   const [timelineScope, setTimelineScope] =
     useState<"period" | "trajectories">("period");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const [exporting, setExporting] = useState(false);
+  const [exportingMode, setExportingMode] = useState<
+    null | "static" | "interactive"
+  >(null);
   const [toast, setToast] = useState("");
   const now = useMemo(() => startOfDay(new Date(nowMs)), [nowMs]);
   const generatedAt = useMemo(() => new Date(nowMs), [nowMs]);
@@ -202,6 +208,7 @@ export function ChantierGanttView({
         id: j.id,
         nom: j.nom,
         date_cible: j.date_cible,
+        statut: j.statut,
         workstreams: j.workstreams,
       })) {
         set.add(issue.entityId);
@@ -478,8 +485,9 @@ export function ChantierGanttView({
       let primary: string;
       let secondary: string;
       if (scale === "week") {
-        primary = `S${getISOWeek(d)}`;
-        secondary = String(getISOWeekYear(d));
+        // Haut : lundi de la semaine · Bas : n° de semaine (petit)
+        primary = format(d, "dd/MM", { locale: fr });
+        secondary = `S${getISOWeek(d)}`;
       } else if (scale === "month") {
         const m = format(d, "MMM", { locale: fr });
         primary = m.charAt(0).toUpperCase() + m.slice(1);
@@ -531,44 +539,126 @@ export function ChantierGanttView({
     setFilterDu("");
     setFilterAu("");
     setPeriodContentMode("all");
+    setTimelineScope("period");
     setToast("");
   }, []);
 
+  const applyCurrentQuarter = useCallback(() => {
+    const qStart = startOfQuarter(now);
+    const qEnd = endOfQuarter(now);
+    setFilterDu(format(qStart, "yyyy-MM-dd"));
+    setFilterAu(format(qEnd, "yyyy-MM-dd"));
+    setPeriodContentMode("intersect");
+    setTimelineScope("period");
+    setToast("");
+  }, [now]);
+
+  const currentQuarterLabel = `T${Math.floor(now.getMonth() / 3) + 1} ${now.getFullYear()}`;
+
   const toggle = (key: string) =>
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  /** Toutes les clés repliables de l’arbre (phases, jalons, workstreams). */
+  const collapsibleKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const phase of PHASES) {
+      if (jalons.some((j) => j.phase === phase)) {
+        keys.push(`phase:${phase}`);
+      }
+    }
+    for (const j of jalons) {
+      if ((j.workstreams?.length ?? 0) > 0) {
+        keys.push(`jalon:${j.id}`);
+      }
+      for (const ws of j.workstreams ?? []) {
+        if ((ws.activites?.length ?? 0) > 0) {
+          keys.push(`ws:${ws.id}`);
+        }
+      }
+    }
+    return keys;
+  }, [jalons]);
+
+  const expandAll = useCallback(() => {
+    setCollapsed({});
+  }, []);
+
+  const collapseAll = useCallback(() => {
+    const next: Record<string, boolean> = {};
+    for (const key of collapsibleKeys) {
+      next[key] = true;
+    }
+    setCollapsed(next);
+  }, [collapsibleKeys]);
 
   const stamp = format(new Date(), "yyyy-MM-dd");
   const baseName = `GANTT_${chantier.code}_${stamp}`;
 
   const runExport = useCallback(
-    async () => {
-      setExporting(true);
+    async (mode: "static" | "interactive") => {
+      setExportingMode(mode);
       setToast("");
       try {
-        const { buildGanttStandaloneHtml, downloadTextFile } = await import(
-          "@/lib/gantt-export-html"
-        );
-        const html = buildGanttStandaloneHtml(
-          {
-            code: chantier.code,
-            nom: chantier.nom,
-            date_debut: chantier.date_debut,
-            date_fin: chantier.date_fin,
-            jalons,
-          },
-          {
+        const payload = {
+          code: chantier.code,
+          nom: chantier.nom,
+          domaine: chantier.domaine,
+          date_debut: chantier.date_debut,
+          date_fin: chantier.date_fin,
+          jalons,
+        };
+        const opts = {
+          scale,
+          showJalons,
+          showWorkstreams: showWs,
+          showActivites: showAct,
+          filterDu: filterDu || undefined,
+          filterAu: filterAu || undefined,
+          periodContentMode,
+        };
+
+        if (mode === "static") {
+          const { buildGanttStandaloneHtml, downloadTextFile } = await import(
+            "@/lib/gantt-export-html"
+          );
+          // WYSIWYG : exactement les lignes visibles à l’écran (période, niveaux, repli)
+          const html = buildGanttStandaloneHtml(payload, {
+            ...opts,
+            visibleRows: rows.map((r) => ({
+              key: r.key,
+              kind: r.kind,
+              label: r.label,
+              depth: r.depth,
+              phase: r.phase,
+              statut: r.statut,
+              start: r.start,
+              end: r.end,
+              milestone: r.milestone ?? null,
+            })),
+          });
+          downloadTextFile(html, `${baseName}_FIGE.html`);
+          setToast(
+            "HTML figé téléchargé — capture de la vue affichée (filtres / période / arbre)."
+          );
+        } else {
+          const [{ downloadTextFile }, { buildGanttInteractiveHtml }] =
+            await Promise.all([
+              import("@/lib/gantt-export-html"),
+              import("@/lib/gantt-export-interactive"),
+            ]);
+          // Interactif = planning complet (pas les filtres de la vue écran)
+          const html = buildGanttInteractiveHtml(payload, {
             scale,
-            showJalons,
-            showWorkstreams: showWs,
-            showActivites: showAct,
-            filterDu: filterDu || undefined,
-            filterAu: filterAu || undefined,
-          }
-        );
-        downloadTextFile(html, `${baseName}.html`);
-        setToast(
-          "Fichier HTML téléchargé — ouvrez-le dans un navigateur (comité / hors ligne)."
-        );
+            showJalons: true,
+            showWorkstreams: true,
+            showActivites: true,
+            // Pas de filterDu/Au : tout le planning, l’utilisateur filtre hors ligne
+          });
+          downloadTextFile(html, `${baseName}_INTERACTIF.html`);
+          setToast(
+            "HTML interactif téléchargé — planning complet, filtres et échelle modifiables hors ligne."
+          );
+        }
       } catch (e) {
         setToast(
           e instanceof Error
@@ -576,22 +666,25 @@ export function ChantierGanttView({
             : "Échec de l'export HTML. Réessayez."
         );
       } finally {
-        setExporting(false);
+        setExportingMode(null);
       }
     },
     [
       baseName,
       chantier.code,
       chantier.nom,
+      chantier.domaine,
       chantier.date_debut,
       chantier.date_fin,
       jalons,
+      rows,
       scale,
       showJalons,
       showWs,
       showAct,
       filterDu,
       filterAu,
+      periodContentMode,
     ]
   );
 
@@ -679,45 +772,24 @@ export function ChantierGanttView({
               </span>
             </div>
 
-            <div className="relative flex flex-wrap items-center gap-2 border-t pt-4">
-              <div className="flex rounded-md border p-0.5">
-                {(
-                  [
-                    ["week", "Semaine"],
-                    ["month", "Mois"],
-                    ["quarter", "Trimestre"],
-                  ] as const
-                ).map(([k, lab]) => (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => setScale(k)}
-                    aria-pressed={scale === k}
-                    className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
-                      scale === k
-                        ? "bg-primary text-primary-foreground shadow-sm"
-                        : "bg-transparent text-muted-foreground hover:bg-muted"
-                    }`}
-                  >
-                    {lab}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                <span className="text-muted-foreground font-medium">Du</span>
+            <div className="space-y-2.5 border-t pt-4 text-xs">
+              {/* Ligne 1 — période, échelle, contenu, navigation */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium text-muted-foreground">Du</span>
                 <Input
                   type="date"
                   value={filterDu}
                   onChange={(e) => {
                     const value = e.target.value;
                     setFilterDu(value);
-                    setPeriodContentMode(value || filterAu ? "intersect" : "all");
+                    setPeriodContentMode(
+                      value || filterAu ? "intersect" : "all"
+                    );
                   }}
                   className="h-8 w-[9.5rem] text-xs"
                   title="Date de début du filtre"
                 />
-                <span className="text-muted-foreground font-medium">Au</span>
+                <span className="font-medium text-muted-foreground">au</span>
                 <Input
                   type="date"
                   value={filterAu}
@@ -725,147 +797,226 @@ export function ChantierGanttView({
                   onChange={(e) => {
                     const value = e.target.value;
                     setFilterAu(value);
-                    setPeriodContentMode(value || filterDu ? "intersect" : "all");
+                    setPeriodContentMode(
+                      value || filterDu ? "intersect" : "all"
+                    );
                   }}
                   className="h-8 w-[9.5rem] text-xs"
                   title="Date de fin du filtre"
                 />
-                {(filterDu || filterAu) && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-8 px-2 text-xs"
-                    onClick={() => {
-                      setFilterDu("");
-                      setFilterAu("");
-                      setPeriodContentMode("all");
-                      setTimelineScope("period");
-                    }}
-                  >
-                    Réinit.
-                  </Button>
-                )}
-              </div>
 
-              <div
-                className="flex rounded-md border p-0.5"
-                aria-label="Contenu affiché pour la période"
-              >
-                {(
-                  [
-                    ["all", "Tous les éléments"],
-                    ["intersect", "Planifiés sur la période"],
-                  ] as const
-                ).map(([mode, label]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setPeriodContentMode(mode)}
-                    aria-pressed={periodContentMode === mode}
-                    disabled={mode === "intersect" && !filterDu && !filterAu}
-                    className={`rounded px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                      periodContentMode === mode
-                        ? "bg-primary text-primary-foreground shadow-sm"
-                        : "bg-transparent text-muted-foreground hover:bg-muted"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 border-[#0A3C74]/25 px-2.5 text-xs font-semibold text-[#0A3C74] hover:bg-[#0A3C74]/5"
+                  onClick={applyCurrentQuarter}
+                  title={`Filtrer sur le trimestre en cours (${currentQuarterLabel})`}
+                >
+                  Trimestre en cours
+                </Button>
 
-              {(filterDu || filterAu) && periodContentMode === "intersect" && (
                 <div
-                  className="flex rounded-md border border-[#00BDBB]/30 bg-[#00BDBB]/5 p-0.5"
-                  aria-label="Étendue de la frise"
+                  className="flex rounded-md border p-0.5"
+                  role="group"
+                  aria-label="Échelle de la frise"
                 >
                   {(
                     [
-                      ["period", "Fenêtre filtrée"],
-                      ["trajectories", "Trajectoires complètes"],
+                      ["week", "Semaine"],
+                      ["month", "Mois"],
+                      ["quarter", "Trimestre"],
                     ] as const
-                  ).map(([scope, label]) => (
+                  ).map(([k, lab]) => (
                     <button
-                      key={scope}
+                      key={k}
                       type="button"
-                      onClick={() => setTimelineScope(scope)}
-                      aria-pressed={timelineScope === scope}
-                      className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
-                        timelineScope === scope
-                          ? "bg-[#0A3C74] text-white shadow-sm"
-                          : "text-[#0A3C74] hover:bg-white"
+                      onClick={() => setScale(k)}
+                      aria-pressed={scale === k}
+                      className={`rounded px-2.5 py-1 font-medium transition-colors ${
+                        scale === k
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "bg-transparent text-muted-foreground hover:bg-muted"
+                      }`}
+                    >
+                      {lab}
+                    </button>
+                  ))}
+                </div>
+
+                <div
+                  className="flex rounded-md border p-0.5"
+                  aria-label="Contenu affiché pour la période"
+                >
+                  {(
+                    [
+                      ["all", "Tous les éléments"],
+                      ["intersect", "Planifiés sur la période"],
+                    ] as const
+                  ).map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setPeriodContentMode(mode)}
+                      aria-pressed={periodContentMode === mode}
+                      disabled={
+                        mode === "intersect" && !filterDu && !filterAu
+                      }
+                      className={`rounded px-2.5 py-1 font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                        periodContentMode === mode
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "bg-transparent text-muted-foreground hover:bg-muted"
                       }`}
                     >
                       {label}
                     </button>
                   ))}
                 </div>
-              )}
 
-              <label className="flex items-center gap-1.5 text-xs">
-                <input
-                  type="checkbox"
-                  checked={showJalons}
-                  onChange={(e) => setShowJalons(e.target.checked)}
-                />
-                Jalons
-              </label>
-              <label className="flex items-center gap-1.5 text-xs">
-                <input
-                  type="checkbox"
-                  checked={showWs}
-                  onChange={(e) => setShowWs(e.target.checked)}
-                />
-                Workstreams
-              </label>
-              <label className="flex items-center gap-1.5 text-xs">
-                <input
-                  type="checkbox"
-                  checked={showAct}
-                  onChange={(e) => setShowAct(e.target.checked)}
-                />
-                Activités
-              </label>
+                {(filterDu || filterAu) &&
+                  periodContentMode === "intersect" && (
+                    <div
+                      className="flex rounded-md border border-[#00BDBB]/30 bg-[#00BDBB]/5 p-0.5"
+                      aria-label="Étendue de la frise"
+                    >
+                      {(
+                        [
+                          ["period", "Fenêtre filtrée"],
+                          ["trajectories", "Trajectoires complètes"],
+                        ] as const
+                      ).map(([scope, label]) => (
+                        <button
+                          key={scope}
+                          type="button"
+                          onClick={() => setTimelineScope(scope)}
+                          aria-pressed={timelineScope === scope}
+                          className={`rounded px-2.5 py-1 font-medium transition-colors ${
+                            timelineScope === scope
+                              ? "bg-[#0A3C74] text-white shadow-sm"
+                              : "text-[#0A3C74] hover:bg-white"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-8 px-2 text-xs"
-                onClick={scrollToToday}
-                disabled={todayPct == null}
-                title="Centrer le planning sur aujourd'hui"
-              >
-                <MapPin className="size-3.5 text-rose-500" />
-                Aujourd&apos;hui
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-8 px-2 text-xs"
-                onClick={fitPlanning}
-                title="Afficher l'ensemble de la période du chantier"
-              >
-                <ScanLine className="size-3.5" />
-                Ajuster
-              </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 px-2 text-xs"
+                  onClick={scrollToToday}
+                  disabled={todayPct == null}
+                  title="Centrer le planning sur aujourd'hui"
+                >
+                  <MapPin className="size-3.5 text-rose-500" />
+                  Aujourd&apos;hui
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 px-2 text-xs"
+                  onClick={fitPlanning}
+                  title="Afficher l'ensemble de la période du chantier"
+                >
+                  <ScanLine className="size-3.5" />
+                  Ajuster
+                </Button>
+              </div>
 
-              <Button
-                size="sm"
-                variant="outline"
-                className="ml-auto"
-                disabled={exporting || jalons.length === 0}
-                onClick={runExport}
-              >
-                {exporting ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <FileCode2 className="size-4" />
-                )}
-                Exporter HTML
-              </Button>
+              {/* Ligne 2 — niveaux, repli, exports */}
+              <div className="flex flex-wrap items-center gap-2 border-t border-dashed pt-2.5">
+                <label className="flex items-center gap-1.5 font-medium">
+                  <input
+                    type="checkbox"
+                    checked={showJalons}
+                    onChange={(e) => setShowJalons(e.target.checked)}
+                  />
+                  Jalons
+                </label>
+                <label className="flex items-center gap-1.5 font-medium">
+                  <input
+                    type="checkbox"
+                    checked={showWs}
+                    onChange={(e) => setShowWs(e.target.checked)}
+                  />
+                  Workstreams
+                </label>
+                <label className="flex items-center gap-1.5 font-medium">
+                  <input
+                    type="checkbox"
+                    checked={showAct}
+                    onChange={(e) => setShowAct(e.target.checked)}
+                  />
+                  Activités
+                </label>
+
+                <div
+                  className="flex items-center gap-0.5 rounded-md border border-[#0A3C74]/15 bg-[#0A3C74]/[0.03] p-0.5"
+                  role="group"
+                  aria-label="Déplier ou replier l'arborescence"
+                >
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs text-[#0A3C74] hover:bg-white"
+                    onClick={expandAll}
+                    disabled={jalons.length === 0}
+                    title="Déplier toutes les phases, jalons et workstreams"
+                  >
+                    <ChevronsUpDown className="size-3.5" />
+                    Tout déplier
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs text-[#0A3C74] hover:bg-white"
+                    onClick={collapseAll}
+                    disabled={jalons.length === 0}
+                    title="Replier toutes les phases, jalons et workstreams"
+                  >
+                    <ChevronsDownUp className="size-3.5" />
+                    Tout replier
+                  </Button>
+                </div>
+
+                <div className="ml-auto flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={exportingMode !== null || jalons.length === 0}
+                    onClick={() => runExport("static")}
+                    title="Export HTML figé : uniquement ce qui est affiché (période, niveaux, arbre replié) — idéal impression / comité"
+                  >
+                    {exportingMode === "static" ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <FileCode2 className="size-4" />
+                    )}
+                    HTML figé
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    className="bg-[#0A3C74] hover:bg-[#0A3C74]/90"
+                    disabled={exportingMode !== null || jalons.length === 0}
+                    onClick={() => runExport("interactive")}
+                    title="Export HTML interactif : planning complet + toolbar hors ligne (échelle, période, niveaux, replier/déplier)"
+                  >
+                    {exportingMode === "interactive" ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <FileCode2 className="size-4" />
+                    )}
+                    HTML interactif
+                  </Button>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -1042,14 +1193,24 @@ export function ChantierGanttView({
                         }}
                         title={
                           scale === "week"
-                            ? `Semaine ${t.primary.replace("S", "")} · ${t.secondary}`
+                            ? `Lundi ${t.primary} · ${t.secondary}`
                             : `${t.primary} ${t.secondary}`
                         }
                       >
-                        <span className="text-[11px] font-semibold leading-tight text-slate-700">
+                        <span
+                          className={`font-semibold leading-tight text-slate-700 ${
+                            scale === "week"
+                              ? "text-[9px] tracking-tight"
+                              : "text-[11px]"
+                          }`}
+                        >
                           {t.primary}
                         </span>
-                        <span className="text-[10px] font-medium leading-tight text-slate-400">
+                        <span
+                          className={`font-medium leading-tight text-slate-400 ${
+                            scale === "week" ? "text-[8px] font-semibold" : "text-[10px]"
+                          }`}
+                        >
                           {t.secondary}
                         </span>
                       </div>
@@ -1079,14 +1240,18 @@ export function ChantierGanttView({
                     let barWidth = 0;
                     let hasBar = false;
                     if (row.start && row.end) {
-                      const l = dayPct(row.start);
-                      const r = dayPct(addDays(row.end, 1));
-                      barLeft = Math.max(0, Math.min(100, l));
-                      barWidth = Math.max(
-                        0.4,
-                        Math.min(100 - barLeft, r - l)
-                      );
-                      hasBar = true;
+                      // Clipper la barre à la fenêtre visible :
+                      // left/right bornés AVANT le calcul de largeur
+                      // (sinon un début hors écran allonge faussement la barre à droite)
+                      const lRaw = dayPct(row.start);
+                      const rRaw = dayPct(addDays(row.end, 1));
+                      const left = Math.max(0, Math.min(100, lRaw));
+                      const right = Math.max(0, Math.min(100, rRaw));
+                      if (right > left) {
+                        barLeft = left;
+                        barWidth = Math.max(0.4, right - left);
+                        hasBar = true;
+                      }
                     }
                     let msLeft: number | null = null;
                     if (row.milestone) {
@@ -1107,14 +1272,21 @@ export function ChantierGanttView({
                         {chantierStart &&
                           chantierEnd &&
                           (() => {
-                            const l = dayPct(chantierStart);
-                            const r = dayPct(chantierEnd);
+                            const left = Math.max(
+                              0,
+                              Math.min(100, dayPct(chantierStart))
+                            );
+                            const right = Math.max(
+                              0,
+                              Math.min(100, dayPct(chantierEnd))
+                            );
+                            if (right <= left) return null;
                             return (
                               <div
                                 className="pointer-events-none absolute inset-y-1 rounded-sm border border-dashed border-sky-400/40 bg-sky-50/50"
                                 style={{
-                                  left: `${Math.max(0, l)}%`,
-                                  width: `${Math.max(1, r - l)}%`,
+                                  left: `${left}%`,
+                                  width: `${Math.max(1, right - left)}%`,
                                 }}
                               />
                             );

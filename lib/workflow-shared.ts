@@ -9,6 +9,8 @@ export const WORKFLOW_ENTITY = {
   JALON: "jalon",
   WORKSTREAM: "workstream",
   ACTIVITE: "activite",
+  /** Backlog Q&A ConsultationQuestion */
+  CONSULTATION_QUESTION: "consultation_question",
 } as const;
 
 export type WorkflowEntityType =
@@ -101,6 +103,9 @@ export type JalonWorkflowCaps = {
   canViewKpi: boolean;
 };
 
+/** Q&A Consultation create/update/delete modes (+ shared workflow caps). */
+export type QaWorkflowCaps = JalonWorkflowCaps;
+
 /** Minimal role shape — avoid importing server RoleRecord / prisma. */
 export type WorkflowRoleLike = {
   code: string;
@@ -108,6 +113,9 @@ export type WorkflowRoleLike = {
   jalon_create_mode?: string | null;
   jalon_update_mode?: string | null;
   jalon_delete_mode?: string | null;
+  qa_create_mode?: string | null;
+  qa_update_mode?: string | null;
+  qa_delete_mode?: string | null;
   workflow_can_approve?: boolean | null;
   workflow_can_reject?: boolean | null;
   workflow_can_view_requests?: boolean | null;
@@ -115,35 +123,34 @@ export type WorkflowRoleLike = {
   workflow_can_view_kpi?: boolean | null;
 };
 
+const DENIED_CAPS: JalonWorkflowCaps = {
+  create: "INTERDIT",
+  update: "INTERDIT",
+  delete: "INTERDIT",
+  canApprove: false,
+  canReject: false,
+  canViewRequests: false,
+  canViewHistory: false,
+  canViewKpi: false,
+};
+
+const ADMIN_CAPS: JalonWorkflowCaps = {
+  create: "DIRECT",
+  update: "DIRECT",
+  delete: "DIRECT",
+  canApprove: true,
+  canReject: true,
+  canViewRequests: true,
+  canViewHistory: true,
+  canViewKpi: true,
+};
+
 /** Admin always has full direct rights + all workflow capabilities. */
 export function resolveJalonWorkflowCaps(
   role: WorkflowRoleLike | null | undefined
 ): JalonWorkflowCaps {
-  if (!role || !role.is_active) {
-    return {
-      create: "INTERDIT",
-      update: "INTERDIT",
-      delete: "INTERDIT",
-      canApprove: false,
-      canReject: false,
-      canViewRequests: false,
-      canViewHistory: false,
-      canViewKpi: false,
-    };
-  }
-
-  if (role.code === "Admin") {
-    return {
-      create: "DIRECT",
-      update: "DIRECT",
-      delete: "DIRECT",
-      canApprove: true,
-      canReject: true,
-      canViewRequests: true,
-      canViewHistory: true,
-      canViewKpi: true,
-    };
-  }
+  if (!role || !role.is_active) return { ...DENIED_CAPS };
+  if (role.code === "Admin") return { ...ADMIN_CAPS };
 
   return {
     create: normalizeWorkflowMode(role.jalon_create_mode),
@@ -157,13 +164,62 @@ export function resolveJalonWorkflowCaps(
   };
 }
 
+/** Q&A Consultation: Admin full DIRECT; else role qa_* modes. */
+export function resolveQaWorkflowCaps(
+  role: WorkflowRoleLike | null | undefined
+): QaWorkflowCaps {
+  if (!role || !role.is_active) return { ...DENIED_CAPS };
+  if (role.code === "Admin") return { ...ADMIN_CAPS };
+
+  return {
+    create: normalizeWorkflowMode(role.qa_create_mode),
+    update: normalizeWorkflowMode(role.qa_update_mode),
+    delete: normalizeWorkflowMode(role.qa_delete_mode),
+    canApprove: !!role.workflow_can_approve,
+    canReject: !!role.workflow_can_reject,
+    canViewRequests: !!role.workflow_can_view_requests,
+    canViewHistory: !!role.workflow_can_view_history,
+    canViewKpi: !!role.workflow_can_view_kpi,
+  };
+}
+
 export function modeForOperation(
-  caps: JalonWorkflowCaps,
+  caps: Pick<JalonWorkflowCaps, "create" | "update" | "delete">,
   operation: WorkflowOperation
 ): WorkflowMode {
   if (operation === "create") return caps.create;
   if (operation === "update") return caps.update;
   return caps.delete;
+}
+
+export const WORKFLOW_ENTITY_LABELS: Record<string, string> = {
+  jalon: "Jalon",
+  workstream: "Workstream",
+  activite: "Activité",
+  consultation_question: "Question Q&A",
+};
+
+export function formatQaWorkflowLabel(params: {
+  entityLabel?: string | null;
+  oldValues?: unknown;
+  newValues?: unknown;
+}): string {
+  const fromObj = (v: unknown): string => {
+    if (!v || typeof v !== "object" || Array.isArray(v)) return "";
+    const o = v as Record<string, unknown>;
+    const q = typeof o.question === "string" ? o.question.trim() : "";
+    const ref = typeof o.dossier_ref === "string" ? o.dossier_ref.trim() : "";
+    if (ref && q) return `${ref} · ${q.slice(0, 80)}${q.length > 80 ? "…" : ""}`;
+    if (q) return q.length > 100 ? `${q.slice(0, 97)}…` : q;
+    if (ref) return ref;
+    return "";
+  };
+  return (
+    fromObj(params.newValues) ||
+    fromObj(params.oldValues) ||
+    params.entityLabel?.trim() ||
+    "Question Q&A"
+  );
 }
 
 export type DecisionEvent = {

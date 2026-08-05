@@ -21,6 +21,7 @@ export {
   normalizeWorkflowMode,
   isWorkflowMode,
   resolveJalonWorkflowCaps,
+  resolveQaWorkflowCaps,
   modeForOperation,
   parseDecisionHistory,
   type WorkflowEntityType,
@@ -28,17 +29,21 @@ export {
   type WorkflowMode,
   type WorkflowStatus,
   type JalonWorkflowCaps,
+  type QaWorkflowCaps,
   type DecisionEvent,
 } from "@/lib/workflow-shared";
 
 import {
   WORKFLOW_STATUS,
+  WORKFLOW_ENTITY,
   resolveJalonWorkflowCaps,
+  resolveQaWorkflowCaps,
   parseDecisionHistory,
   resolveWorkflowOrigin,
   type WorkflowEntityType,
   type WorkflowOperation,
   type JalonWorkflowCaps,
+  type QaWorkflowCaps,
   type DecisionEvent,
 } from "@/lib/workflow-shared";
 
@@ -47,6 +52,13 @@ export async function getSessionJalonWorkflowCaps(
 ): Promise<JalonWorkflowCaps> {
   const role = await getRoleByCode(session.role);
   return resolveJalonWorkflowCaps(role);
+}
+
+export async function getSessionQaWorkflowCaps(
+  session: SessionData
+): Promise<QaWorkflowCaps> {
+  const role = await getRoleByCode(session.role);
+  return resolveQaWorkflowCaps(role);
 }
 
 // ── Request creation ───────────────────────────────────
@@ -84,8 +96,12 @@ export async function assertNoPendingRequest(params: {
 
   if (params.entityId) {
     where.entityId = params.entityId;
-  } else if (params.chantierId && params.operation === "create") {
-    // One pending create per chantier (no entity yet)
+  } else if (
+    params.chantierId &&
+    params.operation === "create" &&
+    // Only planning jalons use one-pending-create-per-chantier lock
+    params.entityType === WORKFLOW_ENTITY.JALON
+  ) {
     where.chantierId = params.chantierId;
   } else {
     return;
@@ -160,6 +176,59 @@ export async function createWorkflowRequest(input: CreateWorkflowRequestInput) {
       decisionHistory: history as unknown as Prisma.InputJsonValue,
       // Mark as validation-path request (filter / history UI)
       priority: input.priority?.trim() || "VALIDATION",
+    },
+  });
+}
+
+/**
+ * Audit trail for DIRECT operations (auto-approved, no pending state).
+ * Used by Q&A consultation history and workflow historique filters.
+ */
+export async function writeDirectWorkflowAudit(input: {
+  entityType: WorkflowEntityType | string;
+  operation: WorkflowOperation;
+  entityId?: string | null;
+  entityLabel?: string;
+  chantierId?: string | null;
+  motif?: string;
+  oldValues?: Record<string, unknown> | null;
+  newValues?: Record<string, unknown> | null;
+  session: SessionData;
+}) {
+  const actor = await getActorDisplay(input.session);
+  const now = new Date().toISOString();
+  const history: DecisionEvent[] = [
+    {
+      at: now,
+      status: WORKFLOW_STATUS.APPROVED,
+      actorId: actor.actorUserId,
+      actorName: actor.actorName,
+      note: input.motif?.trim() || "Application directe",
+    },
+  ];
+
+  return prisma.workflowRequest.create({
+    data: {
+      entityType: input.entityType,
+      operation: input.operation,
+      status: WORKFLOW_STATUS.APPROVED,
+      entityId: input.entityId ?? null,
+      entityLabel: input.entityLabel?.trim() ?? "",
+      chantierId: input.chantierId ?? null,
+      requesterId: actor.actorUserId,
+      requesterName: actor.actorName,
+      approverId: actor.actorUserId,
+      approverName: actor.actorName,
+      motif: input.motif?.trim() || "Application directe",
+      processedAt: new Date(),
+      oldValues: (input.oldValues ?? undefined) as
+        | Prisma.InputJsonValue
+        | undefined,
+      newValues: (input.newValues ?? undefined) as
+        | Prisma.InputJsonValue
+        | undefined,
+      decisionHistory: history as unknown as Prisma.InputJsonValue,
+      priority: "DIRECT",
     },
   });
 }

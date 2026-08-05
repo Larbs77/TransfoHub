@@ -31,6 +31,7 @@ import {
   MessageSquareText,
 } from "lucide-react";
 import { PHASES, STATUT_JALON_LIST } from "@/lib/jalon-labels";
+import { allChildrenAtteint } from "@/lib/planning-status-rules";
 import type { WorkflowMode } from "@/lib/workflow-shared";
 
 interface JalonData {
@@ -46,6 +47,7 @@ interface JalonData {
   statut: string;
   livrables: string;
   commentaire: string;
+  workstreams?: { nom: string; statut: string }[];
 }
 
 interface Props {
@@ -135,9 +137,16 @@ export function JalonFormDialog({
   const planningDatesChanged =
     isEdit &&
     (dateDebut !== originalDateDebut || dateCible !== originalDateCible);
+  /** Passage à Atteint sous mode Validation → demande workflow */
+  const statutToAtteint =
+    isEdit &&
+    statut === "Atteint" &&
+    (jalon?.statut ?? "") !== "Atteint";
   const validationTriggered =
     createNeedsValidation ||
-    (isEdit && workflowMode === "VALIDATION" && planningDatesChanged);
+    (isEdit &&
+      workflowMode === "VALIDATION" &&
+      (planningDatesChanged || statutToAtteint));
   const needsMotif =
     validationTriggered || (isEdit && workflowMode === "DIRECT");
   const motifIsRequest = validationTriggered;
@@ -159,16 +168,43 @@ export function JalonFormDialog({
     }
   }, [open, jalon, defaultPhase]);
 
+  const wsCheck = allChildrenAtteint(jalon?.workstreams ?? []);
+  /** Nouveau jalon sans WS : Atteint OK. Édition : tous les WS doivent être Atteint. */
+  const canSetAtteint = !isEdit || wsCheck.ok;
+  const canSetAtteintHint = canSetAtteint
+    ? undefined
+    : `Atteint impossible : ${wsCheck.pending.length} workstream(s) non atteint(s).`;
+
   function handleStatutChange(newStatut: string) {
+    if (newStatut === "Atteint" && !canSetAtteint) {
+      setError(
+        canSetAtteintHint ??
+          "Tous les workstreams doivent être au statut Atteint."
+      );
+      return;
+    }
+    setError("");
     setStatut(newStatut);
-    if (newStatut === "Atteint" && !dateReelle) {
-      setDateReelle(new Date().toISOString().slice(0, 10));
+    if (newStatut === "Atteint") {
+      if (!dateReelle) {
+        setDateReelle(new Date().toISOString().slice(0, 10));
+      }
+    } else {
+      // Quitter Atteint → vider la date de fin réelle
+      setDateReelle("");
     }
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (statut === "Atteint" && !canSetAtteint) {
+      setError(
+        canSetAtteintHint ??
+          "Tous les workstreams doivent être au statut Atteint."
+      );
+      return;
+    }
     if (dateDebut && dateCible && dateDebut > dateCible) {
       setError("La date de début doit être antérieure ou égale à la date cible.");
       return;
@@ -176,9 +212,11 @@ export function JalonFormDialog({
     if (needsMotif && !motif.trim()) {
       setError(
         motifIsRequest
-          ? planningDatesChanged
-            ? "Le motif est obligatoire pour demander un changement des dates du jalon."
-            : "Le motif de la demande est obligatoire."
+          ? statutToAtteint && !planningDatesChanged
+            ? "Le motif est obligatoire pour demander le passage du jalon à « Atteint »."
+            : planningDatesChanged && !statutToAtteint
+              ? "Le motif est obligatoire pour demander un changement des dates du jalon."
+              : "Le motif de la demande est obligatoire (dates et/ou statut Atteint)."
           : "Le commentaire est obligatoire pour modifier un jalon."
       );
       return;
@@ -213,34 +251,42 @@ export function JalonFormDialog({
   }
 
   const title = isEdit
-    ? planningDatesChanged && workflowMode === "VALIDATION"
-      ? "Demande de modification du planning"
+    ? validationTriggered && workflowMode === "VALIDATION"
+      ? statutToAtteint && !planningDatesChanged
+        ? "Demande de clôture du jalon"
+        : planningDatesChanged && !statutToAtteint
+          ? "Demande de modification du planning"
+          : "Demande de modification (validation)"
       : "Modifier le jalon"
     : createNeedsValidation
       ? "Demande de création de jalon"
       : "Nouveau jalon";
 
   const subtitle = isEdit
-    ? planningDatesChanged && workflowMode === "VALIDATION"
-      ? "Les changements des dates du jalon sont soumis à validation. Les autres champs sont enregistrés immédiatement."
+    ? validationTriggered && workflowMode === "VALIDATION"
+      ? statutToAtteint && !planningDatesChanged
+        ? "Le passage à « Atteint » est soumis à validation. Les autres champs sont enregistrés immédiatement ; le statut restera inchangé jusqu'à approbation."
+        : planningDatesChanged && !statutToAtteint
+          ? "Les changements des dates du jalon sont soumis à validation. Les autres champs sont enregistrés immédiatement."
+          : "Dates et/ou passage à « Atteint » soumis à validation. Les autres champs sont enregistrés immédiatement."
       : workflowMode === "DIRECT"
         ? "Modification directe — un commentaire de traçabilité est requis."
         : workflowMode === "VALIDATION"
-          ? "Vous pouvez modifier les informations librement. Les dates du jalon nécessitent une validation."
+          ? "Informations librement modifiables. Les dates et le passage à « Atteint » nécessitent une validation."
           : "Mettez à jour les informations du jalon."
     : createNeedsValidation
       ? "La création sera soumise à validation."
       : "Renseignez les informations du nouveau jalon.";
 
   const HeaderIcon = isEdit
-    ? planningDatesChanged && workflowMode === "VALIDATION"
+    ? validationTriggered && workflowMode === "VALIDATION"
       ? ShieldAlert
       : Pencil
     : FilePlus2;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[min(92vh,840px)] w-[min(100vw-1.5rem,44rem)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
+      <DialogContent className="flex max-h-[min(92vh,900px)] w-[min(100vw-1.5rem,58rem)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
         {/* Header */}
         <div
           className={`border-b px-6 pb-5 pt-6 ${
@@ -258,12 +304,19 @@ export function JalonFormDialog({
             </span>
             {motifIsRequest && (
               <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/35 bg-amber-500/15 px-2.5 py-1 text-[10px] font-semibold text-amber-800 dark:text-amber-200">
-                {planningDatesChanged
-                  ? "Validation des dates"
-                  : "Soumis à validation"}
+                {statutToAtteint && !planningDatesChanged
+                  ? "Validation clôture (Atteint)"
+                  : planningDatesChanged && !statutToAtteint
+                    ? "Validation des dates"
+                    : planningDatesChanged && statutToAtteint
+                      ? "Validation dates + Atteint"
+                      : "Soumis à validation"}
               </span>
             )}
-            {isEdit && workflowMode === "VALIDATION" && !planningDatesChanged && (
+            {isEdit &&
+              workflowMode === "VALIDATION" &&
+              !planningDatesChanged &&
+              !statutToAtteint && (
               <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/35 bg-emerald-500/15 px-2.5 py-1 text-[10px] font-semibold text-emerald-800 dark:text-emerald-200">
                 Autres champs libres
               </span>
@@ -298,13 +351,33 @@ export function JalonFormDialog({
           className="flex min-h-0 flex-1 flex-col"
         >
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
-            {isEdit && workflowMode === "VALIDATION" && !planningDatesChanged && (
+            {isEdit &&
+              workflowMode === "VALIDATION" &&
+              !planningDatesChanged &&
+              !statutToAtteint && (
               <div className="flex gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/8 px-3.5 py-3 text-sm">
                 <Info className="mt-0.5 size-4 shrink-0 text-emerald-600" />
                 <p className="leading-relaxed text-foreground/90">
-                  Les champs hors <strong>dates du jalon</strong> sont enregistrés
-                  sans validation. Modifier la date de début ou la date cible
-                  déclenchera une demande de validation.
+                  Les champs hors <strong>dates du jalon</strong> et hors{" "}
+                  <strong>passage à « Atteint »</strong> sont enregistrés sans
+                  validation. Modifier la date de début, la date cible, ou
+                  passer le statut à <strong>Atteint</strong> déclenchera une
+                  demande de validation.
+                </p>
+              </div>
+            )}
+            {isEdit &&
+              workflowMode === "VALIDATION" &&
+              statutToAtteint &&
+              !planningDatesChanged && (
+              <div className="flex gap-3 rounded-xl border border-amber-500/30 bg-amber-500/8 px-3.5 py-3 text-sm text-amber-950 dark:text-amber-50">
+                <Info className="mt-0.5 size-4 shrink-0 text-amber-600" />
+                <p className="leading-relaxed">
+                  Vous demandez le passage du jalon à{" "}
+                  <strong>« Atteint »</strong>. Une{" "}
+                  <strong>demande de validation</strong> sera créée : le statut
+                  (et la date réelle) ne changeront qu&apos;après approbation.
+                  Les autres champs seront enregistrés tout de suite.
                 </p>
               </div>
             )}
@@ -313,9 +386,16 @@ export function JalonFormDialog({
                 <Info className="mt-0.5 size-4 shrink-0 text-amber-600" />
                 <p className="leading-relaxed">
                   Vous avez modifié la <strong>temporalité du jalon</strong> (
-                  {originalDateDebut || "—"} → {dateDebut || "—"} · {originalDateCible || "—"} → {dateCible || "—"}). Une{" "}
-                  <strong>demande de validation</strong> sera créée pour cette
-                  date. Les autres champs seront enregistrés tout de suite.
+                  {originalDateDebut || "—"} → {dateDebut || "—"} ·{" "}
+                  {originalDateCible || "—"} → {dateCible || "—"})
+                  {statutToAtteint
+                    ? " et le passage à « Atteint »"
+                    : ""}
+                  . Une <strong>demande de validation</strong> sera créée pour
+                  {statutToAtteint
+                    ? " ces éléments"
+                    : " ces dates"}
+                  . Les autres champs seront enregistrés tout de suite.
                 </p>
               </div>
             )}
@@ -435,17 +515,51 @@ export function JalonFormDialog({
                 <div className="grid gap-1.5">
                   <FieldLabel required>Statut</FieldLabel>
                   <Select value={statut} onValueChange={handleStatutChange}>
-                    <SelectTrigger className="w-full">
+                    <SelectTrigger
+                      className={
+                        statutToAtteint && workflowMode === "VALIDATION"
+                          ? "w-full border-amber-500/50 ring-1 ring-amber-500/30"
+                          : "w-full"
+                      }
+                    >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       {STATUT_JALON_LIST.map((s) => (
-                        <SelectItem key={s} value={s}>
+                        <SelectItem
+                          key={s}
+                          value={s}
+                          disabled={
+                            s === "Atteint" &&
+                            !canSetAtteint &&
+                            statut !== "Atteint"
+                          }
+                        >
                           {s}
+                          {s === "Atteint" &&
+                          !canSetAtteint &&
+                          statut !== "Atteint"
+                            ? " (bloqué)"
+                            : ""}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  {!canSetAtteint && (
+                    <p className="text-[11px] leading-snug text-amber-800 dark:text-amber-200">
+                      {canSetAtteintHint} Passez d&apos;abord tous les
+                      workstreams à Atteint.
+                    </p>
+                  )}
+                  {canSetAtteint &&
+                    statutToAtteint &&
+                    workflowMode === "VALIDATION" && (
+                      <p className="text-[11px] leading-snug text-amber-800 dark:text-amber-200">
+                        Passage à « Atteint » → demande de validation
+                        obligatoire (le statut ne change qu&apos;après
+                        approbation).
+                      </p>
+                    )}
                 </div>
                 <div className="grid gap-1.5">
                   <FieldLabel>Ordre</FieldLabel>
@@ -485,9 +599,11 @@ export function JalonFormDialog({
                 icon={MessageSquareText}
                 title={
                   motifIsRequest
-                    ? planningDatesChanged
-                      ? "Justification du changement de planning"
-                      : "Justification de la demande"
+                    ? statutToAtteint && !planningDatesChanged
+                      ? "Justification du passage à Atteint"
+                      : planningDatesChanged
+                        ? "Justification du changement de planning"
+                        : "Justification de la demande"
                     : "Commentaire de traçabilité"
                 }
               >
@@ -502,9 +618,11 @@ export function JalonFormDialog({
                     rows={3}
                     placeholder={
                       motifIsRequest
-                        ? planningDatesChanged
-                          ? "Expliquez pourquoi les dates du jalon doivent être modifiées..."
-                          : "Expliquez pourquoi cette demande est nécessaire..."
+                        ? statutToAtteint && !planningDatesChanged
+                          ? "Expliquez pourquoi ce jalon peut être clôturé (Atteint)..."
+                          : planningDatesChanged && !statutToAtteint
+                            ? "Expliquez pourquoi les dates du jalon doivent être modifiées..."
+                            : "Expliquez la modification (dates et/ou clôture Atteint)..."
                         : "Expliquez la modification apportée..."
                     }
                     className="border-input bg-background placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 flex min-h-[88px] w-full rounded-lg border px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50"

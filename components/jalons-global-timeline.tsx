@@ -45,6 +45,7 @@ import {
   STATUT_JALON_LIST,
 } from "@/lib/jalon-labels";
 import { DOMAINE_LABELS } from "@/lib/chantier-labels";
+import { useCanAccessPage } from "@/components/user-provider";
 
 interface JalonWithChantier {
   id: string;
@@ -123,6 +124,7 @@ function KpiCard({
 
 export function JalonsGlobalTimeline({ jalons, stats }: Props) {
   const router = useRouter();
+  const canAccessPortfolioGantt = useCanAccessPage("/gantt");
   const [view, setView] = useState<ViewMode>("timeline");
   const [zoom, setZoom] = useState<ZoomLevel>("quarter");
   const [phaseFilter, setPhaseFilter] = useState<string>("all");
@@ -328,15 +330,17 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
           </div>
           <CardAction>
             <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                className="h-8 bg-[#0A3C74] text-white hover:bg-[#0A3C74]/90"
-                onClick={() => router.push("/gantt")}
-              >
-                <GanttChart className="size-3.5 text-[#00BDBB]" />
-                Gantt portefeuille
-              </Button>
+              {canAccessPortfolioGantt && (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 bg-[#0A3C74] text-white hover:bg-[#0A3C74]/90"
+                  onClick={() => router.push("/gantt")}
+                >
+                  <GanttChart className="size-3.5 text-[#00BDBB]" />
+                  Gantt portefeuille
+                </Button>
+              )}
               {view === "timeline" && (
                 <Select
                   value={zoom}

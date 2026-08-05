@@ -18,6 +18,65 @@ export function isRaidClosed(statut: string): boolean {
 }
 
 /**
+ * Échéance de pilotage RAID : **actualisée** en priorité, sinon initiale (legacy).
+ */
+export function raidEffectiveEcheance(
+  dateEcheanceActualisee: Date | string | null | undefined,
+  dateEcheanceInitiale?: Date | string | null
+): Date | null {
+  const raw = dateEcheanceActualisee ?? dateEcheanceInitiale;
+  if (raw == null || raw === "") return null;
+  const d = raw instanceof Date ? raw : new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function endOfDay(d: Date): Date {
+  return new Date(
+    d.getFullYear(),
+    d.getMonth(),
+    d.getDate(),
+    23,
+    59,
+    59,
+    999
+  );
+}
+
+/**
+ * En retard : échéance effective dépassée (fin de journée), statut non terminal.
+ */
+export function isRaidOverdue(
+  statut: string,
+  dateEcheanceActualisee: Date | string | null | undefined,
+  dateEcheanceInitiale?: Date | string | null,
+  now: Date = new Date()
+): boolean {
+  if (isRaidClosed(statut)) return false;
+  const d = raidEffectiveEcheance(dateEcheanceActualisee, dateEcheanceInitiale);
+  if (!d) return false;
+  return endOfDay(d).getTime() < now.getTime();
+}
+
+/**
+ * Échéance **initiale** dépassée (engagement d'origine) — hors statuts terminaux.
+ * Sert à démarquer les écarts vs la date d'engagement, indépendamment de l'actualisée.
+ */
+export function isRaidInitialEcheancePast(
+  statut: string,
+  dateEcheanceInitiale: Date | string | null | undefined,
+  now: Date = new Date()
+): boolean {
+  if (isRaidClosed(statut)) return false;
+  if (dateEcheanceInitiale == null || dateEcheanceInitiale === "") return false;
+  const d =
+    dateEcheanceInitiale instanceof Date
+      ? dateEcheanceInitiale
+      : new Date(dateEcheanceInitiale);
+  if (Number.isNaN(d.getTime())) return false;
+  return endOfDay(d).getTime() < now.getTime();
+}
+
+/**
  * Leadership roles on a chantier team that may move RAID cards on Kanban
  * even when not the personal assignee (RAID linked to that chantier).
  */

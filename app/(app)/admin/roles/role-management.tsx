@@ -16,6 +16,7 @@ import {
   KeyRound,
   Info,
   GitBranch,
+  HelpCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,6 +64,9 @@ type RoleRow = {
   jalon_create_mode: string;
   jalon_update_mode: string;
   jalon_delete_mode: string;
+  qa_create_mode: string;
+  qa_update_mode: string;
+  qa_delete_mode: string;
   workflow_can_approve: boolean;
   workflow_can_reject: boolean;
   workflow_can_view_requests: boolean;
@@ -95,6 +99,9 @@ const emptyForm = {
   jalon_create_mode: "DIRECT",
   jalon_update_mode: "DIRECT",
   jalon_delete_mode: "DIRECT",
+  qa_create_mode: "DIRECT",
+  qa_update_mode: "DIRECT",
+  qa_delete_mode: "DIRECT",
   workflow_can_approve: false,
   workflow_can_reject: false,
   workflow_can_view_requests: false,
@@ -177,6 +184,12 @@ export function RoleManagement({
         role.code === "Admin" ? "DIRECT" : role.jalon_update_mode || "DIRECT",
       jalon_delete_mode:
         role.code === "Admin" ? "DIRECT" : role.jalon_delete_mode || "DIRECT",
+      qa_create_mode:
+        role.code === "Admin" ? "DIRECT" : role.qa_create_mode || "DIRECT",
+      qa_update_mode:
+        role.code === "Admin" ? "DIRECT" : role.qa_update_mode || "DIRECT",
+      qa_delete_mode:
+        role.code === "Admin" ? "DIRECT" : role.qa_delete_mode || "DIRECT",
       workflow_can_approve:
         role.code === "Admin" ? true : !!role.workflow_can_approve,
       workflow_can_reject:
@@ -469,7 +482,7 @@ export function RoleManagement({
       </Card>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="flex max-h-[min(92vh,900px)] w-[min(100vw-1.5rem,52rem)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
+        <DialogContent className="flex max-h-[min(94vh,960px)] w-[min(100vw-1rem,80rem)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
           {/* Header */}
           <div className="border-b bg-gradient-to-br from-[#0A3C74]/10 via-background to-background px-6 pb-4 pt-6">
             <div className="mb-3 flex flex-wrap items-center gap-2 pr-8">
@@ -819,6 +832,84 @@ export function RoleManagement({
                         </p>
                       </div>
                     ))}
+                  </div>
+                </section>
+
+                <section className="rounded-xl border border-sky-500/20 bg-card/60 p-4 shadow-sm">
+                  <div className="mb-4 flex items-start gap-2">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/15 text-sky-700 dark:text-sky-300">
+                      <HelpCircle className="size-4" />
+                    </span>
+                    <div>
+                      <h3 className="text-sm font-semibold tracking-tight">
+                        Workflow Questions Q&amp;A
+                      </h3>
+                      <p className="text-xs text-muted-foreground">
+                        Création, modification et suppression des questions du
+                        backlog consultation — Direct, Validation ou Interdit
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mb-1 grid gap-3 sm:grid-cols-3">
+                    {(
+                      [
+                        ["qa_create_mode", "Création"],
+                        ["qa_update_mode", "Modification"],
+                        ["qa_delete_mode", "Suppression"],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <div
+                        key={key}
+                        className="space-y-1.5 rounded-lg border bg-muted/20 p-3"
+                      >
+                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          {label}
+                        </label>
+                        <Select
+                          value={form[key]}
+                          onValueChange={(v) =>
+                            setForm((f) => ({ ...f, [key]: v }))
+                          }
+                          disabled={isAdminRole}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {WORKFLOW_MODE_OPTIONS.map((m) => (
+                              <SelectItem key={m.value} value={m.value}>
+                                {m.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-[10px] leading-snug text-muted-foreground">
+                          {
+                            WORKFLOW_MODE_OPTIONS.find(
+                              (m) => m.value === form[key]
+                            )?.description
+                          }
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="rounded-xl border border-violet-500/20 bg-card/60 p-4 shadow-sm">
+                  <div className="mb-4 flex items-start gap-2">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/15 text-violet-700 dark:text-violet-300">
+                      <GitBranch className="size-4" />
+                    </span>
+                    <div>
+                      <h3 className="text-sm font-semibold tracking-tight">
+                        Capacités de validation (workflow)
+                      </h3>
+                      <p className="text-xs text-muted-foreground">
+                        Approuver / rejeter / consulter les demandes (jalons et
+                        Q&amp;A)
+                      </p>
+                    </div>
                   </div>
 
                   <div>

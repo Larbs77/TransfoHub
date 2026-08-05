@@ -41,7 +41,14 @@ import {
   type PlanningDetailGouvernance,
 } from "@/lib/planning-coherence";
 import type { JalonWorkflowCaps, WorkflowMode } from "@/lib/workflow-shared";
-import { STATUT_JALON_LIST, STATUT_JALON_COLORS } from "@/lib/jalon-labels";
+import {
+  STATUT_JALON_LIST,
+  STATUT_JALON_COLORS,
+  planningRetardDays,
+  planningClotureEcartDays,
+  toYmdLocal,
+} from "@/lib/jalon-labels";
+import { allChildrenAtteint } from "@/lib/planning-status-rules";
 
 export interface ActiviteData {
   id: string;
@@ -50,6 +57,7 @@ export interface ActiviteData {
   description: string;
   date_debut: Date | string | null;
   date_fin: Date | string | null;
+  date_reelle?: Date | string | null;
   statut: string;
   commentaire: string;
 }
@@ -61,6 +69,7 @@ export interface WorkstreamData {
   description: string;
   date_debut: Date | string | null;
   date_fin: Date | string | null;
+  date_reelle?: Date | string | null;
   statut: string;
   commentaire: string;
   activites: ActiviteData[];
@@ -70,6 +79,7 @@ export interface JalonForTree {
   id: string;
   nom: string;
   date_cible: Date | string;
+  statut?: string;
   workstreams?: WorkstreamData[];
 }
 
@@ -86,6 +96,10 @@ type Props = {
   detailGouvernance: PlanningDetailGouvernance;
   pendingByEntityId: Record<string, PendingInfo>;
   onToast: (msg: string) => void;
+  /** Ouverture workstreams (true par défaut si clé absente). */
+  workstreamOpen?: Record<string, boolean>;
+  onToggleWorkstream?: (workstreamId: string) => void;
+  onEnsureWorkstreamOpen?: (workstreamId: string) => void;
 };
 
 type DetailPayload = {
@@ -93,6 +107,7 @@ type DetailPayload = {
   ordre: number;
   date_debut?: string | null;
   date_fin?: string | null;
+  date_reelle?: string | null;
   statut?: string;
 };
 
@@ -108,6 +123,53 @@ function fmtDate(v: Date | string | null | undefined): string {
   const d = typeof v === "string" ? new Date(v) : v;
   if (Number.isNaN(d.getTime())) return "—";
   return format(d, "dd MMM yyyy", { locale: fr });
+}
+
+function RetardBadge({ days, tone }: { days: number; tone: "ws" | "act" }) {
+  const cls =
+    tone === "ws"
+      ? "border-red-400/60 bg-red-400/10 text-red-700 dark:text-red-300"
+      : "border-red-300/70 bg-red-300/15 text-red-600 dark:text-red-300";
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${cls}`}
+      title={`En retard de ${days} jour(s)`}
+    >
+      +{days}j
+    </span>
+  );
+}
+
+/** Écart de clôture (date réelle − fin planifiée) : + après, − avant. */
+function ClotureEcartBadge({ days }: { days: number }) {
+  if (days === 0) {
+    return (
+      <span
+        className="inline-flex items-center rounded-full border border-emerald-500/35 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-emerald-700 dark:text-emerald-300"
+        title="Finalisé à la date planifiée"
+      >
+        0j
+      </span>
+    );
+  }
+  if (days > 0) {
+    return (
+      <span
+        className="inline-flex items-center rounded-full border border-slate-400/40 bg-slate-500/10 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-slate-700 dark:text-slate-300"
+        title={`Finalisé ${days} j après la fin planifiée`}
+      >
+        +{days}j
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex items-center rounded-full border border-emerald-500/35 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-emerald-700 dark:text-emerald-300"
+      title={`Finalisé ${Math.abs(days)} j avant la fin planifiée`}
+    >
+      {days}j
+    </span>
+  );
 }
 
 function resolveDetailCaps(
@@ -126,11 +188,39 @@ export function ChantierJalonPlanningTree({
   detailGouvernance,
   pendingByEntityId,
   onToast,
+  workstreamOpen,
+  onToggleWorkstream,
+  onEnsureWorkstreamOpen,
 }: Props) {
   const router = useRouter();
   const caps = resolveDetailCaps(detailGouvernance, workflowCaps);
   const workstreams = jalon.workstreams ?? [];
   const [addingWs, setAddingWs] = useState(false);
+  /** État local si le parent ne pilote pas l’ouverture (rétrocompat). */
+  const [localWsOpen, setLocalWsOpen] = useState<Record<string, boolean>>({});
+
+  /** Défaut : workstreams repliés (aligné onglet Jalons). */
+  function isWsOpen(id: string) {
+    if (workstreamOpen) return workstreamOpen[id] ?? false;
+    return localWsOpen[id] ?? false;
+  }
+  function toggleWs(id: string) {
+    if (onToggleWorkstream) {
+      onToggleWorkstream(id);
+      return;
+    }
+    setLocalWsOpen((prev) => ({
+      ...prev,
+      [id]: !(prev[id] ?? false),
+    }));
+  }
+  function ensureWsOpen(id: string) {
+    if (onEnsureWorkstreamOpen) {
+      onEnsureWorkstreamOpen(id);
+      return;
+    }
+    setLocalWsOpen((prev) => ({ ...prev, [id]: true }));
+  }
 
   const issues = useMemo(
     () =>
@@ -138,6 +228,7 @@ export function ChantierJalonPlanningTree({
         id: jalon.id,
         nom: jalon.nom,
         date_cible: jalon.date_cible,
+        statut: jalon.statut,
         workstreams,
       }),
     [jalon, workstreams]
@@ -217,6 +308,9 @@ export function ChantierJalonPlanningTree({
             <WorkstreamCard
               key={ws.id}
               ws={ws}
+              open={isWsOpen(ws.id)}
+              onToggleOpen={() => toggleWs(ws.id)}
+              onEnsureOpen={() => ensureWsOpen(ws.id)}
               caps={caps}
               canUpdate={canUpdate}
               canDelete={canDelete}
@@ -258,6 +352,9 @@ export function ChantierJalonPlanningTree({
 
 function WorkstreamCard({
   ws,
+  open,
+  onToggleOpen,
+  onEnsureOpen,
   caps,
   canUpdate,
   canDelete,
@@ -269,6 +366,9 @@ function WorkstreamCard({
   onRefresh,
 }: {
   ws: WorkstreamData;
+  open: boolean;
+  onToggleOpen: () => void;
+  onEnsureOpen: () => void;
   caps: Pick<JalonWorkflowCaps, "create" | "update" | "delete">;
   canUpdate: boolean;
   canDelete: boolean;
@@ -279,15 +379,21 @@ function WorkstreamCard({
   onToast: (m: string) => void;
   onRefresh: () => void;
 }) {
-  const [open, setOpen] = useState(true);
   const [editing, setEditing] = useState(false);
   const [addingAct, setAddingAct] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteMotif, setDeleteMotif] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
+  /** Stable "now" (évite mismatch hydratation). */
+  const [now] = useState(() => new Date());
   const activites = ws.activites ?? [];
   const alerts = issueById.get(ws.id) ?? [];
+  const retardJours = planningRetardDays(ws.date_fin, ws.statut, now, {
+    dateReelle: ws.date_reelle,
+  });
+  const enRetard = retardJours != null;
+  const clotureEcart = planningClotureEcartDays(ws.date_fin, ws.date_reelle);
 
   async function handleDelete() {
     setDeleteError("");
@@ -310,17 +416,26 @@ function WorkstreamCard({
     }
   }
 
+  const hasAnomaly = alerts.length > 0;
+
   return (
     <div
-      className={`rounded-lg border bg-card/90 ${alerts.length ? "border-amber-500/40" : ""}`}
+      className={`rounded-lg border bg-card/90 ${
+        hasAnomaly
+          ? "border-amber-500/45 bg-amber-500/10 shadow-[inset_3px_0_0_0_rgb(245_158_11)] dark:bg-amber-950/30"
+          : enRetard
+            ? "border-red-400/55 bg-red-50/40 dark:bg-red-950/20"
+            : ""
+      }`}
     >
-      <div className="flex flex-wrap items-center gap-2 px-2 py-1.5">
+      <div className="flex items-center gap-2 px-2 py-1.5">
         <Button
           type="button"
           size="icon"
           variant="ghost"
-          className="size-7"
-          onClick={() => setOpen((v) => !v)}
+          className="size-7 shrink-0"
+          onClick={onToggleOpen}
+          title={open ? "Replier les activités" : "Déplier les activités"}
         >
           {open ? (
             <ChevronDown className="size-3.5" />
@@ -330,103 +445,178 @@ function WorkstreamCard({
         </Button>
 
         {editing ? (
-          <DetailForm
-            label="workstream"
-            createMode={caps.update}
-            initial={ws}
-            nextOrdre={ws.ordre}
-            onCancel={() => setEditing(false)}
-            onSubmit={async (payload, motif) => {
-              const res = await updateWorkstream(
-                ws.id,
-                payload,
-                motif ? { motif } : undefined
-              );
-              if (res.mode === "validation") {
-                onToast("Demande de modification workstream soumise.");
-              }
-              setEditing(false);
-              onRefresh();
-            }}
-          />
+          <div className="min-w-0 flex-1">
+            <DetailForm
+              label="workstream"
+              createMode={caps.update}
+              initial={ws}
+              nextOrdre={ws.ordre}
+              {...(() => {
+                const check = allChildrenAtteint(activites);
+                return {
+                  canSetAtteint: check.ok,
+                  canSetAtteintHint: check.ok
+                    ? undefined
+                    : `Atteint impossible : ${check.pending.length} activité(s) non atteinte(s).`,
+                };
+              })()}
+              onCancel={() => setEditing(false)}
+              onSubmit={async (payload, motif) => {
+                const res = await updateWorkstream(
+                  ws.id,
+                  payload,
+                  motif ? { motif } : undefined
+                );
+                if (res.mode === "validation") {
+                  onToast("Demande de modification workstream soumise.");
+                }
+                setEditing(false);
+                onRefresh();
+              }}
+            />
+          </div>
         ) : (
           <>
-            <span className="w-5 text-xs text-muted-foreground">{ws.ordre}</span>
-            <span className="min-w-[8rem] flex-1 text-sm font-medium">
-              {ws.nom}
-            </span>
-            <Badge variant="secondary" className="text-[10px]">
-              Workstream
-            </Badge>
-            <span className="text-[11px] text-muted-foreground">
-              {fmtDate(ws.date_debut)} → {fmtDate(ws.date_fin)}
-            </span>
-            <Badge
-              variant="secondary"
-              className="text-[10px]"
-              style={{
-                backgroundColor:
-                  (STATUT_JALON_COLORS[ws.statut] ?? "#94a3b8") + "20",
-                color: STATUT_JALON_COLORS[ws.statut] ?? "#94a3b8",
-              }}
-            >
-              {ws.statut}
-            </Badge>
-            {alerts.length > 0 && (
-              <AlertTriangle className="size-3.5 text-amber-600" />
-            )}
-            {pending && (
-              <Badge
-                variant="outline"
-                className="border-amber-500/50 text-[10px] text-amber-700"
+            {/* Gauche : identité */}
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <span className="w-5 shrink-0 text-xs text-muted-foreground">
+                {ws.ordre}
+              </span>
+              <span
+                className={
+                  enRetard
+                    ? "inline-flex min-w-0 max-w-full items-center truncate rounded-md border border-red-400 bg-red-50/90 px-1.5 py-0.5 text-sm font-semibold text-red-800 dark:border-red-400/70 dark:bg-red-950/40 dark:text-red-100"
+                    : "min-w-0 truncate text-sm font-medium"
+                }
+                title={
+                  enRetard
+                    ? `${ws.nom} — en retard de ${retardJours} jour(s)`
+                    : ws.nom
+                }
               >
-                Demande {pending.operation}
-              </Badge>
-            )}
-            {canCreate && !pending && (
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-7"
-                title="Ajouter activité"
-                onClick={() => {
-                  setOpen(true);
-                  setAddingAct(true);
-                }}
-              >
-                <Plus className="size-3.5" />
-              </Button>
-            )}
-            {canUpdate && !pending && (
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-7"
-                onClick={() => setEditing(true)}
-              >
-                <Pencil className="size-3.5" />
-              </Button>
-            )}
-            {canDelete && !pending && (
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-7 text-destructive"
-                onClick={() => {
-                  setDeleteMotif("");
-                  setDeleteError("");
-                  setDeleteOpen(true);
-                }}
-              >
-                <Trash2 className="size-3.5" />
-              </Button>
-            )}
+                {ws.nom}
+              </span>
+              {enRetard && <RetardBadge days={retardJours!} tone="ws" />}
+              {hasAnomaly && (
+                <span
+                  className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 dark:text-amber-100"
+                  title={alerts.join("\n")}
+                >
+                  <AlertTriangle className="size-3 text-amber-600" />
+                  Incohérence
+                </span>
+              )}
+              {pending && (
+                <Badge
+                  variant="outline"
+                  className="shrink-0 border-amber-500/50 text-[10px] text-amber-700"
+                >
+                  Demande {pending.operation}
+                </Badge>
+              )}
+            </div>
+
+            {/* Droite : méta + actions (toujours collés à droite) */}
+            <div className="ml-auto flex shrink-0 items-center gap-2 self-center">
+              <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+                <Badge variant="secondary" className="text-[10px]">
+                  Workstream
+                </Badge>
+                <span
+                  className="whitespace-nowrap text-[11px] tabular-nums text-muted-foreground"
+                  title="Date début → date fin planifiée"
+                >
+                  {fmtDate(ws.date_debut)} → {fmtDate(ws.date_fin)}
+                </span>
+                {ws.date_reelle && (
+                  <span
+                    className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] tabular-nums text-muted-foreground"
+                    title="Date de finalisation réelle"
+                  >
+                    <span className="text-[10px] font-medium text-[#0A3C74]">
+                      Réel
+                    </span>
+                    {fmtDate(ws.date_reelle)}
+                  </span>
+                )}
+                {clotureEcart != null && (
+                  <ClotureEcartBadge days={clotureEcart} />
+                )}
+                <Badge
+                  variant="secondary"
+                  className="text-[10px]"
+                  style={{
+                    backgroundColor:
+                      (STATUT_JALON_COLORS[ws.statut] ?? "#94a3b8") + "20",
+                    color: STATUT_JALON_COLORS[ws.statut] ?? "#94a3b8",
+                  }}
+                >
+                  {ws.statut}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-0.5 border-l border-border/60 pl-1.5">
+                {canCreate && !pending && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-7"
+                    title="Ajouter activité"
+                    onClick={() => {
+                      onEnsureOpen();
+                      setAddingAct(true);
+                    }}
+                  >
+                    <Plus className="size-3.5" />
+                  </Button>
+                )}
+                {canUpdate && !pending && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-7"
+                    title="Modifier"
+                    onClick={() => setEditing(true)}
+                  >
+                    <Pencil className="size-3.5" />
+                  </Button>
+                )}
+                {canDelete && !pending && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-7 text-destructive"
+                    title="Supprimer"
+                    onClick={() => {
+                      setDeleteMotif("");
+                      setDeleteError("");
+                      setDeleteOpen(true);
+                    }}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                )}
+              </div>
+            </div>
           </>
         )}
       </div>
 
       {open && !editing && (
-        <div className="space-y-1 border-t bg-muted/15 px-2 py-2 pl-8">
+        <div
+          className={`space-y-1 border-t px-2 py-2 pl-8 ${
+            hasAnomaly ? "border-amber-500/25 bg-amber-500/5" : "bg-muted/15"
+          }`}
+        >
+          {hasAnomaly && (
+            <ul className="mb-1 space-y-0.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-950 dark:text-amber-100">
+              {alerts.map((msg, idx) => (
+                <li key={idx} className="flex gap-1.5">
+                  <AlertTriangle className="mt-0.5 size-3 shrink-0 text-amber-600" />
+                  <span>{msg}</span>
+                </li>
+              ))}
+            </ul>
+          )}
           <p className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
             <ListTree className="size-3" />
             Activités
@@ -538,6 +728,12 @@ function ActiviteRow({
   const [deleteMotif, setDeleteMotif] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [now] = useState(() => new Date());
+  const retardJours = planningRetardDays(act.date_fin, act.statut, now, {
+    dateReelle: act.date_reelle,
+  });
+  const enRetard = retardJours != null;
+  const clotureEcart = planningClotureEcartDays(act.date_fin, act.date_reelle);
 
   async function handleDelete() {
     setDeleteError("");
@@ -587,51 +783,122 @@ function ActiviteRow({
   return (
     <>
       <div
-        className={`flex flex-wrap items-center gap-2 rounded-md px-1 py-1 hover:bg-muted/40 ${
-          hasAlert ? "bg-amber-500/5" : ""
+        className={`flex items-center gap-2 rounded-md border px-1.5 py-1 ${
+          hasAlert
+            ? "border-amber-500/40 bg-amber-500/10 shadow-[inset_3px_0_0_0_rgb(245_158_11)] dark:bg-amber-950/25"
+            : enRetard
+              ? "border-transparent bg-red-50/50 dark:bg-red-950/20"
+              : "border-transparent hover:bg-muted/40"
         }`}
       >
-        <span className="w-5 text-xs text-muted-foreground">{act.ordre}</span>
-        <span className="min-w-[7rem] flex-1 text-sm">{act.nom}</span>
-        <Badge variant="outline" className="text-[10px]">
-          Activité
-        </Badge>
-        <span className="text-[11px] text-muted-foreground">
-          {fmtDate(act.date_debut)} → {fmtDate(act.date_fin)}
-        </span>
-        {hasAlert && <AlertTriangle className="size-3 text-amber-600" />}
-        {pending && (
-          <Badge
-            variant="outline"
-            className="border-amber-500/50 text-[10px] text-amber-700"
+        {/* Gauche : identité */}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="w-5 shrink-0 text-xs text-muted-foreground">
+            {act.ordre}
+          </span>
+          <span
+            className={
+              enRetard
+                ? "inline-flex min-w-0 max-w-full items-center truncate rounded-md border border-red-300 bg-red-50/80 px-1.5 py-0.5 text-sm font-medium text-red-700 dark:border-red-400/50 dark:bg-red-950/30 dark:text-red-100"
+                : hasAlert
+                  ? "min-w-0 truncate text-sm font-semibold text-amber-950 dark:text-amber-100"
+                  : "min-w-0 truncate text-sm"
+            }
+            title={
+              enRetard
+                ? `${act.nom} — en retard de ${retardJours} jour(s)`
+                : act.nom
+            }
           >
-            Demande {pending.operation}
-          </Badge>
-        )}
-        {canUpdate && !pending && (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-7"
-            onClick={() => setEditing(true)}
-          >
-            <Pencil className="size-3.5" />
-          </Button>
-        )}
-        {canDelete && !pending && (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-7 text-destructive"
-            onClick={() => {
-              setDeleteMotif("");
-              setDeleteError("");
-              setDeleteOpen(true);
-            }}
-          >
-            <Trash2 className="size-3.5" />
-          </Button>
-        )}
+            {act.nom}
+          </span>
+          {enRetard && <RetardBadge days={retardJours!} tone="act" />}
+          {hasAlert && (
+            <span
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 dark:text-amber-100"
+              title="Incohérence de dates (voir les alertes du workstream / jalon)"
+            >
+              <AlertTriangle className="size-3 text-amber-600" />
+              Incohérence
+            </span>
+          )}
+          {pending && (
+            <Badge
+              variant="outline"
+              className="shrink-0 border-amber-500/50 text-[10px] text-amber-700"
+            >
+              Demande {pending.operation}
+            </Badge>
+          )}
+        </div>
+
+        {/* Droite : méta + actions (toujours collés à droite) */}
+        <div className="ml-auto flex shrink-0 items-center gap-2 self-center">
+          <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+            <Badge variant="outline" className="text-[10px]">
+              Activité
+            </Badge>
+            <span
+              className="whitespace-nowrap text-[11px] tabular-nums text-muted-foreground"
+              title="Date début → date fin planifiée"
+            >
+              {fmtDate(act.date_debut)} → {fmtDate(act.date_fin)}
+            </span>
+            {act.date_reelle && (
+              <span
+                className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] tabular-nums text-muted-foreground"
+                title="Date de finalisation réelle"
+              >
+                <span className="text-[10px] font-medium text-[#0A3C74]">
+                  Réel
+                </span>
+                {fmtDate(act.date_reelle)}
+              </span>
+            )}
+            {clotureEcart != null && (
+              <ClotureEcartBadge days={clotureEcart} />
+            )}
+            <Badge
+              variant="secondary"
+              className="text-[10px]"
+              style={{
+                backgroundColor:
+                  (STATUT_JALON_COLORS[act.statut] ?? "#94a3b8") + "20",
+                color: STATUT_JALON_COLORS[act.statut] ?? "#94a3b8",
+              }}
+            >
+              {act.statut || "Planifié"}
+            </Badge>
+          </div>
+          <div className="flex items-center gap-0.5 border-l border-border/60 pl-1.5">
+            {canUpdate && !pending && (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-7"
+                title="Modifier"
+                onClick={() => setEditing(true)}
+              >
+                <Pencil className="size-3.5" />
+              </Button>
+            )}
+            {canDelete && !pending && (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-7 text-destructive"
+                title="Supprimer"
+                onClick={() => {
+                  setDeleteMotif("");
+                  setDeleteError("");
+                  setDeleteOpen(true);
+                }}
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            )}
+          </div>
+        </div>
       </div>
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
@@ -676,6 +943,8 @@ function DetailForm({
   createMode,
   initial,
   nextOrdre,
+  canSetAtteint = true,
+  canSetAtteintHint,
   onCancel,
   onSubmit,
 }: {
@@ -686,9 +955,13 @@ function DetailForm({
     ordre: number;
     date_debut?: Date | string | null;
     date_fin?: Date | string | null;
+    date_reelle?: Date | string | null;
     statut?: string;
   };
   nextOrdre: number;
+  /** false = option Atteint désactivée (enfants non tous Atteint) */
+  canSetAtteint?: boolean;
+  canSetAtteintHint?: string;
   onCancel: () => void;
   onSubmit: (payload: DetailPayload, motif?: string) => Promise<void>;
 }) {
@@ -696,14 +969,43 @@ function DetailForm({
   const [ordre, setOrdre] = useState(initial?.ordre ?? nextOrdre);
   const [dateDebut, setDateDebut] = useState(toInputDate(initial?.date_debut));
   const [dateFin, setDateFin] = useState(toInputDate(initial?.date_fin));
+  const [dateReelle, setDateReelle] = useState(
+    toInputDate(initial?.date_reelle)
+  );
   const [statut, setStatut] = useState(initial?.statut ?? "Planifié");
   const [motif, setMotif] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const needsMotif = createMode === "VALIDATION";
 
+  function handleStatutChange(next: string) {
+    if (next === "Atteint" && !canSetAtteint) {
+      setError(
+        canSetAtteintHint ??
+          "Impossible de passer à Atteint tant que les sous-éléments ne le sont pas tous."
+      );
+      return;
+    }
+    setError("");
+    setStatut(next);
+    if (next === "Atteint") {
+      // Passage à Atteint → préremplir la date réelle si vide
+      if (!dateReelle) setDateReelle(toYmdLocal());
+    } else {
+      // Quitter Atteint → vider la date de fin réelle
+      setDateReelle("");
+    }
+  }
+
   async function save() {
     if (!nom.trim()) return;
+    if (statut === "Atteint" && !canSetAtteint) {
+      setError(
+        canSetAtteintHint ??
+          "Impossible de passer à Atteint tant que les sous-éléments ne le sont pas tous."
+      );
+      return;
+    }
     if (needsMotif && !motif.trim()) {
       setError("Le motif de la demande est obligatoire.");
       return;
@@ -717,6 +1019,7 @@ function DetailForm({
           ordre,
           date_debut: dateDebut || null,
           date_fin: dateFin || null,
+          date_reelle: dateReelle || null,
           statut,
         },
         needsMotif ? motif.trim() : undefined
@@ -728,69 +1031,134 @@ function DetailForm({
     }
   }
 
+  const fieldHint =
+    "text-[10px] leading-snug text-muted-foreground mt-0.5 max-w-[11rem]";
+
   return (
-    <div className="flex w-full flex-col gap-2 rounded-md border border-dashed bg-muted/20 p-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          type="number"
-          value={ordre}
-          onChange={(e) => setOrdre(Number(e.target.value))}
-          className="h-8 w-14"
-        />
-        <Input
-          value={nom}
-          onChange={(e) => setNom(e.target.value)}
-          className="h-8 min-w-[10rem] flex-1"
-          placeholder={`Nom ${label}`}
-          autoFocus
-        />
-        <Input
-          type="date"
-          value={dateDebut}
-          onChange={(e) => setDateDebut(e.target.value)}
-          className="h-8 w-[9.5rem]"
-        />
-        <Input
-          type="date"
-          value={dateFin}
-          onChange={(e) => setDateFin(e.target.value)}
-          className="h-8 w-[9.5rem]"
-        />
-        <select
-          value={statut}
-          onChange={(e) => setStatut(e.target.value)}
-          className="h-8 rounded-md border bg-background px-2 text-xs"
-        >
-          {STATUT_JALON_LIST.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-7"
-          disabled={loading || !nom.trim()}
-          onClick={save}
-        >
-          {loading ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <Check className="size-3.5" />
-          )}
-        </Button>
-        <Button size="icon" variant="ghost" className="size-7" onClick={onCancel}>
-          <X className="size-3.5" />
-        </Button>
+    <div className="flex w-full flex-col gap-2 rounded-md border border-dashed bg-muted/20 p-2.5">
+      <p className="text-[11px] font-medium text-[#0A3C74]">
+        {initial ? `Modifier le ${label}` : `Nouveau ${label}`}
+      </p>
+      <div className="flex flex-wrap items-start gap-x-2 gap-y-2">
+        <div className="w-14 shrink-0">
+          <Input
+            type="number"
+            value={ordre}
+            onChange={(e) => setOrdre(Number(e.target.value))}
+            className="h-8 w-14"
+            aria-label="Ordre d'affichage"
+          />
+          <p className={fieldHint}>Ordre d&apos;affichage</p>
+        </div>
+        <div className="min-w-[10rem] flex-1">
+          <Input
+            value={nom}
+            onChange={(e) => setNom(e.target.value)}
+            className="h-8 w-full min-w-[10rem]"
+            placeholder={`Nom du ${label}`}
+            autoFocus
+            aria-label={`Nom du ${label}`}
+          />
+          <p className={fieldHint}>Libellé du {label}</p>
+        </div>
+        <div className="w-[9.5rem] shrink-0">
+          <Input
+            type="date"
+            value={dateDebut}
+            onChange={(e) => setDateDebut(e.target.value)}
+            className="h-8 w-[9.5rem]"
+            aria-label="Date de début planifiée"
+          />
+          <p className={fieldHint}>Début planifié</p>
+        </div>
+        <div className="w-[9.5rem] shrink-0">
+          <Input
+            type="date"
+            value={dateFin}
+            onChange={(e) => setDateFin(e.target.value)}
+            className="h-8 w-[9.5rem]"
+            aria-label="Date de fin planifiée"
+          />
+          <p className={fieldHint}>Fin planifiée (cible)</p>
+        </div>
+        <div className="w-[9.5rem] shrink-0">
+          <Input
+            type="date"
+            value={dateReelle}
+            onChange={(e) => setDateReelle(e.target.value)}
+            className="h-8 w-[9.5rem]"
+            aria-label="Date de finalisation réelle"
+          />
+          <p className={fieldHint}>
+            Fin réelle (auto si Atteint ; vidée sinon)
+          </p>
+        </div>
+        <div className="w-[7.5rem] shrink-0">
+          <select
+            value={statut}
+            onChange={(e) => handleStatutChange(e.target.value)}
+            className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+            aria-label="Statut"
+          >
+            {STATUT_JALON_LIST.map((s) => (
+              <option
+                key={s}
+                value={s}
+                disabled={s === "Atteint" && !canSetAtteint && statut !== "Atteint"}
+              >
+                {s}
+                {s === "Atteint" && !canSetAtteint && statut !== "Atteint"
+                  ? " (bloqué)"
+                  : ""}
+              </option>
+            ))}
+          </select>
+          <p className={fieldHint}>
+            {canSetAtteint
+              ? "Statut d'avancement"
+              : canSetAtteintHint ??
+                "Atteint bloqué tant que les enfants ne le sont pas"}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5 pt-0.5">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-7"
+            disabled={loading || !nom.trim()}
+            onClick={save}
+            title="Enregistrer"
+          >
+            {loading ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Check className="size-3.5" />
+            )}
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-7"
+            onClick={onCancel}
+            title="Annuler"
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
       </div>
       {needsMotif && (
-        <Input
-          value={motif}
-          onChange={(e) => setMotif(e.target.value)}
-          className="h-8"
-          placeholder="Motif de la demande (obligatoire)..."
-        />
+        <div>
+          <Input
+            value={motif}
+            onChange={(e) => setMotif(e.target.value)}
+            className="h-8"
+            placeholder="Motif de la demande (obligatoire)..."
+            aria-label="Motif workflow"
+          />
+          <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
+            Justification pour le validateur (mode workflow)
+          </p>
+        </div>
       )}
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>

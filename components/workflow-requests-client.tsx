@@ -20,6 +20,7 @@ import {
   parseDecisionHistory,
   WORKFLOW_STATUS,
   formatJalonWorkflowLabel,
+  formatQaWorkflowLabel,
   resolveWorkflowOrigin,
   type JalonWorkflowCaps,
   type WorkflowOrigin,
@@ -218,7 +219,7 @@ function DiffView({
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-sm font-medium text-destructive">
           <Trash2 className="size-4" />
-          Suppression du jalon
+          Suppression
         </div>
         {oldR ? (
           <ValueTable data={oldR} tone="danger" />
@@ -236,7 +237,7 @@ function DiffView({
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-sm font-medium text-emerald-600 dark:text-emerald-400">
           <FilePlus2 className="size-4" />
-          Création du jalon
+          Création
         </div>
         {newR ? (
           <ValueTable data={newR} tone="success" />
@@ -353,7 +354,14 @@ function decisionCommentOf(r: WorkflowRequestRow): string {
   return r.rejectMotif?.trim() || "";
 }
 
-function jalonDisplayLabel(r: WorkflowRequestRow): string {
+function requestDisplayLabel(r: WorkflowRequestRow): string {
+  if (r.entityType === "consultation_question") {
+    return formatQaWorkflowLabel({
+      entityLabel: r.entityLabel,
+      oldValues: r.oldValues,
+      newValues: r.newValues,
+    });
+  }
   return formatJalonWorkflowLabel({
     entityLabel: r.entityLabel,
     oldValues: r.oldValues,
@@ -420,7 +428,7 @@ export function WorkflowRequestsClient({
       const q = search.toLowerCase();
       list = list.filter(
         (r) =>
-          jalonDisplayLabel(r).toLowerCase().includes(q) ||
+          requestDisplayLabel(r).toLowerCase().includes(q) ||
           r.entityLabel.toLowerCase().includes(q) ||
           r.requesterName.toLowerCase().includes(q) ||
           r.motif.toLowerCase().includes(q) ||
@@ -489,7 +497,7 @@ export function WorkflowRequestsClient({
           <CardDescription>
             {mode === "validation"
               ? isValidator
-                ? "Traitez les demandes de création, modification et suppression de jalons. Un commentaire est obligatoire à chaque décision."
+                ? "Traitez les demandes (jalons, planning, Q&A). Un commentaire est obligatoire à chaque décision."
                 : "Vos demandes de modification (vous ne pouvez pas traiter celles des autres)."
               : isValidator
                 ? "Historique permanent — séparez les actions directes des demandes passées en validation."
@@ -618,7 +626,7 @@ export function WorkflowRequestsClient({
               <thead>
                 <tr className="border-b bg-muted/50">
                   <th className="px-3 py-2 text-left font-medium">Type</th>
-                  <th className="px-3 py-2 text-left font-medium">Jalon</th>
+                  <th className="px-3 py-2 text-left font-medium">Objet</th>
                   <th className="px-3 py-2 text-left font-medium">Origine</th>
                   <th className="px-3 py-2 text-left font-medium">Chantier</th>
                   <th className="px-3 py-2 text-left font-medium">Demandeur</th>
@@ -645,7 +653,7 @@ export function WorkflowRequestsClient({
                       ] ?? r.operation}
                     </td>
                     <td className="px-3 py-2 font-medium">
-                      {jalonDisplayLabel(r)}
+                      {requestDisplayLabel(r)}
                     </td>
                     <td className="px-3 py-2">
                       <OriginBadge origin={origin} />
@@ -804,7 +812,7 @@ export function WorkflowRequestsClient({
                     </div>
                     <DialogHeader className="min-w-0 space-y-1 text-left">
                       <DialogTitle className="text-xl font-bold tracking-tight break-words [overflow-wrap:anywhere] sm:text-2xl">
-                        {jalonDisplayLabel(detail)}
+                        {requestDisplayLabel(detail)}
                       </DialogTitle>
                       <p
                         className="text-sm text-muted-foreground break-words [overflow-wrap:anywhere]"
@@ -838,9 +846,9 @@ export function WorkflowRequestsClient({
                     <MetaTile
                       icon={Milestone}
                       label="Jalon"
-                      title={jalonDisplayLabel(detail)}
+                      title={requestDisplayLabel(detail)}
                     >
-                      {jalonDisplayLabel(detail)}
+                      {requestDisplayLabel(detail)}
                     </MetaTile>
                     <MetaTile
                       icon={Building2}

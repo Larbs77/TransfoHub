@@ -35,6 +35,7 @@ interface Raid {
   mitigation: string;
   responsable: string;
   date_echeance: Date | null;
+  date_echeance_actualisee?: Date | null;
 }
 
 interface Jalon {
@@ -288,9 +289,11 @@ export function ChantierRapport({ chantier, burnRate, showPrintButton = true }: 
       (r) => r.type === "Action" && !["Clôturé", "Abandonné", "NA", "Doublon"].includes(r.statut)
     )
     .sort((a, b) => {
-      // Overdue first
-      const aOv = a.date_echeance && new Date(a.date_echeance) < now ? -1 : 0;
-      const bOv = b.date_echeance && new Date(b.date_echeance) < now ? -1 : 0;
+      // Overdue first (échéance actualisée)
+      const aE = a.date_echeance_actualisee ?? a.date_echeance;
+      const bE = b.date_echeance_actualisee ?? b.date_echeance;
+      const aOv = aE && new Date(aE) < now ? -1 : 0;
+      const bOv = bE && new Date(bE) < now ? -1 : 0;
       return aOv - bOv;
     })
     .slice(0, 8);
@@ -523,12 +526,13 @@ export function ChantierRapport({ chantier, burnRate, showPrintButton = true }: 
           ) : (
             <ul className="space-y-0.5">
               {openActions.map((a) => {
-                const overdue = a.date_echeance && new Date(a.date_echeance) < now;
+                const ech = a.date_echeance_actualisee ?? a.date_echeance;
+                const overdue = ech && new Date(ech) < now;
                 return (
                   <BulletItem
                     key={a.id}
                     color={overdue ? "#ef4444" : "#f97316"}
-                    text={`${a.intitule}${a.responsable ? ` — ${a.responsable}` : ""}${a.date_echeance ? ` (Éch: ${format(new Date(a.date_echeance), "dd/MM/yy", { locale: fr })})` : ""}`}
+                    text={`${a.intitule}${a.responsable ? ` — ${a.responsable}` : ""}${ech ? ` (Éch: ${format(new Date(ech), "dd/MM/yy", { locale: fr })})` : ""}`}
                   />
                 );
               })}

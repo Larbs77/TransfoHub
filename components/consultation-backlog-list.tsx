@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +29,7 @@ import {
   Clock,
   Plus,
   Pencil,
+  Eye,
   Trash2,
   Search,
   ChevronLeft,
@@ -44,7 +45,13 @@ import {
   QA_STATUT_COLORS,
 } from "@/lib/consultation-labels";
 import { ConsultationQuestionForm } from "@/components/consultation-question-form";
-import { deleteConsultationQuestion } from "@/app/(app)/actions";
+import { ConsultationQuestionViewDialog } from "@/components/consultation-question-view-dialog";
+import {
+  deleteConsultationQuestion,
+  getQaWorkflowUiState,
+} from "@/app/(app)/actions";
+import { formatAffecteeADisplay } from "@/lib/consultation-affectation";
+import { isQuestionEnRetard } from "@/lib/consultation-labels";
 import Link from "next/link";
 
 interface QuestionItem {
@@ -59,6 +66,8 @@ interface QuestionItem {
   remontee_par: string;
   affectee_a: string;
   echeance: Date | null;
+  echeance_actualisee?: Date | null;
+  date_fin_reelle?: Date | null;
   resolution: string;
   createdAt: Date;
   updatedAt: Date;
@@ -70,17 +79,47 @@ interface Props {
   initialStatut?: string;
 }
 
-function KpiCard({ label, value, color }: { label: string; value: string | number; color: string }) {
+function KpiCard({
+  label,
+  value,
+  color,
+  active,
+  onClick,
+  title,
+}: {
+  label: string;
+  value: string | number;
+  color: string;
+  active?: boolean;
+  onClick?: () => void;
+  title?: string;
+}) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border p-3">
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-pressed={active}
+      className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-all ${
+        onClick
+          ? "cursor-pointer hover:border-[#0A3C74]/35 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00BDBB]/45"
+          : ""
+      } ${
+        active
+          ? "border-[#0A3C74] bg-[#0A3C74]/[0.05] shadow-sm ring-1 ring-[#0A3C74]/20"
+          : "bg-card"
+      }`}
+    >
       <div
-        className="flex size-9 items-center justify-center rounded-md"
+        className="flex size-9 shrink-0 items-center justify-center rounded-md"
         style={{ backgroundColor: color + "18" }}
       >
-        <span className="text-lg font-bold" style={{ color }}>{value}</span>
+        <span className="text-lg font-bold tabular-nums" style={{ color }}>
+          {value}
+        </span>
       </div>
       <p className="text-xs text-muted-foreground">{label}</p>
-    </div>
+    </button>
   );
 }
 
@@ -166,14 +205,29 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
   const [filterPriorite, setFilterPriorite] = useState(initialPriorite ?? "__all__");
   const [filterStatut, setFilterStatut] = useState(initialStatut ?? "__all__");
   const [filterChantier, setFilterChantier] = useState("__all__");
+  const [filterEnRetard, setFilterEnRetard] = useState(false);
   const [pageSize, setPageSize] = useState<number>(10);
   const [currentPage, setCurrentPage] = useState(1);
 
   const [formOpen, setFormOpen] = useState(false);
-  const [editItem, setEditItem] = useState<QuestionItem | null>(null);
+  const [viewOpen, setViewOpen] = useState(false);
+  const [viewItem, setViewItem] = useState<QuestionItem | null>(null);
+  const [qaModes, setQaModes] = useState({
+    create: "DIRECT",
+    update: "DIRECT",
+    delete: "DIRECT",
+  });
 
   const [sortField, setSortField] = useState<SortField>("createdAt");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  useEffect(() => {
+    getQaWorkflowUiState()
+      .then(setQaModes)
+      .catch(() =>
+        setQaModes({ create: "INTERDIT", update: "INTERDIT", delete: "INTERDIT" })
+      );
+  }, []);
 
   // Unique chantiers for filter dropdown
   const uniqueChantiers = Array.from(
@@ -186,17 +240,34 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
   const critiquesOuvertes = items.filter(
     (q) => q.priorite === "Critique" && q.statut === "Ouverte"
   ).length;
+  const enRetard = items.filter((q) =>
+    isQuestionEnRetard(
+      q.echeance_actualisee ?? q.echeance,
+      q.statut,
+      new Date(),
+      q.echeance
+    )
+  ).length;
   const resolues = items.filter((q) => q.statut === "Résolue").length;
   const tauxResolution = total > 0 ? Math.round((resolues / total) * 100) : 0;
 
   // Filter + sort
   const filtered = useMemo(() => {
-    setCurrentPage(1);
     const result = items.filter((q) => {
       if (filterCategorie !== "__all__" && q.categorie !== filterCategorie) return false;
       if (filterPriorite !== "__all__" && q.priorite !== filterPriorite) return false;
       if (filterStatut !== "__all__" && q.statut !== filterStatut) return false;
       if (filterChantier !== "__all__" && q.chantier.id !== filterChantier) return false;
+      if (
+        filterEnRetard &&
+        !isQuestionEnRetard(
+          q.echeance_actualisee ?? q.echeance,
+          q.statut,
+          new Date(),
+          q.echeance
+        )
+      )
+        return false;
       if (search) {
         const s = search.toLowerCase();
         return (
@@ -204,6 +275,7 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
           q.dossier_ref.toLowerCase().includes(s) ||
           q.chantier.code.toLowerCase().includes(s) ||
           q.remontee_par.toLowerCase().includes(s) ||
+          formatAffecteeADisplay(q.affectee_a).toLowerCase().includes(s) ||
           q.affectee_a.toLowerCase().includes(s)
         );
       }
@@ -231,7 +303,97 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
     });
 
     return result;
-  }, [items, search, filterCategorie, filterPriorite, filterStatut, filterChantier, sortField, sortDir]);
+  }, [items, search, filterCategorie, filterPriorite, filterStatut, filterChantier, filterEnRetard, sortField, sortDir]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    search,
+    filterCategorie,
+    filterPriorite,
+    filterStatut,
+    filterChantier,
+    filterEnRetard,
+    pageSize,
+  ]);
+
+  const kpiActive = {
+    total:
+      filterStatut === "__all__" &&
+      filterPriorite === "__all__" &&
+      filterCategorie === "__all__" &&
+      filterChantier === "__all__" &&
+      !filterEnRetard &&
+      !search,
+    ouvertes:
+      filterStatut === "Ouverte" &&
+      filterPriorite === "__all__" &&
+      !filterEnRetard,
+    critiques:
+      filterStatut === "Ouverte" &&
+      filterPriorite === "Critique" &&
+      !filterEnRetard,
+    enRetard: filterEnRetard,
+    resolues:
+      filterStatut === "Résolue" &&
+      filterPriorite === "__all__" &&
+      !filterEnRetard,
+  };
+
+  function applyKpiFilter(
+    mode: "total" | "ouvertes" | "critiques" | "enRetard" | "resolues"
+  ) {
+    // Re-click same KPI → reset to all
+    if (
+      (mode === "total" && kpiActive.total) ||
+      (mode === "ouvertes" && kpiActive.ouvertes) ||
+      (mode === "critiques" && kpiActive.critiques) ||
+      (mode === "enRetard" && kpiActive.enRetard) ||
+      (mode === "resolues" && kpiActive.resolues)
+    ) {
+      setFilterStatut("__all__");
+      setFilterPriorite("__all__");
+      setFilterCategorie("__all__");
+      setFilterChantier("__all__");
+      setFilterEnRetard(false);
+      setSearch("");
+      return;
+    }
+
+    setSearch("");
+    setFilterCategorie("__all__");
+    setFilterChantier("__all__");
+
+    if (mode === "total") {
+      setFilterStatut("__all__");
+      setFilterPriorite("__all__");
+      setFilterEnRetard(false);
+      return;
+    }
+    if (mode === "ouvertes") {
+      setFilterStatut("Ouverte");
+      setFilterPriorite("__all__");
+      setFilterEnRetard(false);
+      return;
+    }
+    if (mode === "critiques") {
+      setFilterStatut("Ouverte");
+      setFilterPriorite("Critique");
+      setFilterEnRetard(false);
+      return;
+    }
+    if (mode === "enRetard") {
+      setFilterStatut("__all__");
+      setFilterPriorite("__all__");
+      setFilterEnRetard(true);
+      return;
+    }
+    // resolues
+    setFilterStatut("Résolue");
+    setFilterPriorite("__all__");
+    setFilterEnRetard(false);
+  }
 
   // Pagination
   const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -258,29 +420,97 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
     );
   }
 
-  function handleEdit(q: QuestionItem) {
-    setEditItem(q);
-    setFormOpen(true);
+  function handleView(q: QuestionItem) {
+    setViewItem(q);
+    setViewOpen(true);
   }
 
   function handleAdd() {
-    setEditItem(null);
+    if (qaModes.create === "INTERDIT") {
+      alert("Vous n'êtes pas habilité à créer une question Q&A.");
+      return;
+    }
     setFormOpen(true);
   }
 
   async function handleDelete(id: string) {
+    if (qaModes.delete === "INTERDIT") {
+      alert("Vous n'êtes pas habilité à supprimer une question Q&A.");
+      return;
+    }
+    if (qaModes.delete === "VALIDATION") {
+      const motif = window.prompt(
+        "Motif de suppression (demande workflow) :"
+      );
+      if (motif == null) return;
+      if (!motif.trim()) {
+        alert("Le motif est obligatoire pour une suppression en validation.");
+        return;
+      }
+      try {
+        const r = await deleteConsultationQuestion(id, { motif: motif.trim() });
+        if (r.mode === "validation") {
+          alert(
+            "Demande de suppression soumise au workflow. Elle sera appliquée après approbation."
+          );
+        }
+      } catch (e) {
+        alert(e instanceof Error ? e.message : "Suppression impossible.");
+      }
+      return;
+    }
     if (!confirm("Supprimer cette question ?")) return;
-    await deleteConsultationQuestion(id);
+    try {
+      await deleteConsultationQuestion(id);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Suppression impossible.");
+    }
   }
 
   return (
     <div className="space-y-4">
-      {/* KPIs */}
-      <div className="grid grid-cols-4 gap-3">
-        <KpiCard label="Total questions" value={total} color="#3b82f6" />
-        <KpiCard label="Ouvertes" value={ouvertes} color="#f97316" />
-        <KpiCard label="Critiques ouvertes" value={critiquesOuvertes} color="#dc2626" />
-        <KpiCard label={`Taux résolution ${tauxResolution}%`} value={resolues} color="#22c55e" />
+      {/* KPIs — cliquables → filtres */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+        <KpiCard
+          label="Total questions"
+          value={total}
+          color="#3b82f6"
+          active={kpiActive.total}
+          onClick={() => applyKpiFilter("total")}
+          title="Afficher toutes les questions"
+        />
+        <KpiCard
+          label="Ouvertes"
+          value={ouvertes}
+          color="#f97316"
+          active={kpiActive.ouvertes}
+          onClick={() => applyKpiFilter("ouvertes")}
+          title="Filtrer : statut Ouverte"
+        />
+        <KpiCard
+          label="Critiques ouvertes"
+          value={critiquesOuvertes}
+          color="#dc2626"
+          active={kpiActive.critiques}
+          onClick={() => applyKpiFilter("critiques")}
+          title="Filtrer : Ouverte + priorité Critique"
+        />
+        <KpiCard
+          label="En retard"
+          value={enRetard}
+          color="#b91c1c"
+          active={kpiActive.enRetard}
+          onClick={() => applyKpiFilter("enRetard")}
+          title="Filtrer : échéance dépassée (hors Résolue / Abandonnée)"
+        />
+        <KpiCard
+          label={`Résolues · ${tauxResolution}%`}
+          value={resolues}
+          color="#22c55e"
+          active={kpiActive.resolues}
+          onClick={() => applyKpiFilter("resolues")}
+          title="Filtrer : statut Résolue"
+        />
       </div>
 
       <Card>
@@ -290,19 +520,18 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
             {filtered.length} question(s) sur {total}
           </CardDescription>
           <CardAction>
-            <Button
-              size="sm"
-              onClick={handleAdd}
-            >
-              <Plus className="size-4" />
-              Ajouter une question
-            </Button>
+            {qaModes.create !== "INTERDIT" && (
+              <Button size="sm" onClick={handleAdd}>
+                <Plus className="size-4" />
+                Ajouter une question
+              </Button>
+            )}
           </CardAction>
         </CardHeader>
         <CardContent>
           {/* Filters + Page size */}
-          <div className="flex flex-wrap gap-3 mb-4">
-            <div className="relative flex-1 min-w-[200px]">
+          <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <div className="relative min-w-0 sm:col-span-2 xl:col-span-2">
               <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
               <Input
                 className="pl-9"
@@ -312,17 +541,23 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
               />
             </div>
             <Select value={filterCategorie} onValueChange={(v) => { setFilterCategorie(v); setCurrentPage(1); }}>
-              <SelectTrigger className="w-[150px]"><SelectValue placeholder="Catégorie" /></SelectTrigger>
-              <SelectContent>
+              <SelectTrigger className="h-9 w-full min-w-0 overflow-hidden [&_[data-slot=select-value]]:truncate">
+                <SelectValue placeholder="Catégorie" />
+              </SelectTrigger>
+              <SelectContent position="popper" className="max-w-[min(96vw,22rem)]">
                 <SelectItem value="__all__">Toutes catégories</SelectItem>
                 {QA_CATEGORIES.map((c) => (
-                  <SelectItem key={c} value={c}>{c}</SelectItem>
+                  <SelectItem key={c} value={c} className="truncate">
+                    {c}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
             <Select value={filterPriorite} onValueChange={(v) => { setFilterPriorite(v); setCurrentPage(1); }}>
-              <SelectTrigger className="w-[130px]"><SelectValue placeholder="Priorité" /></SelectTrigger>
-              <SelectContent>
+              <SelectTrigger className="h-9 w-full min-w-0 overflow-hidden [&_[data-slot=select-value]]:truncate">
+                <SelectValue placeholder="Priorité" />
+              </SelectTrigger>
+              <SelectContent position="popper">
                 <SelectItem value="__all__">Toutes priorités</SelectItem>
                 {QA_PRIORITES.map((p) => (
                   <SelectItem key={p} value={p}>{p}</SelectItem>
@@ -330,8 +565,10 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
               </SelectContent>
             </Select>
             <Select value={filterStatut} onValueChange={(v) => { setFilterStatut(v); setCurrentPage(1); }}>
-              <SelectTrigger className="w-[130px]"><SelectValue placeholder="Statut" /></SelectTrigger>
-              <SelectContent>
+              <SelectTrigger className="h-9 w-full min-w-0 overflow-hidden [&_[data-slot=select-value]]:truncate">
+                <SelectValue placeholder="Statut" />
+              </SelectTrigger>
+              <SelectContent position="popper">
                 <SelectItem value="__all__">Tous statuts</SelectItem>
                 {QA_STATUTS.map((s) => (
                   <SelectItem key={s} value={s}>{s}</SelectItem>
@@ -339,16 +576,46 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
               </SelectContent>
             </Select>
             <Select value={filterChantier} onValueChange={(v) => { setFilterChantier(v); setCurrentPage(1); }}>
-              <SelectTrigger className="w-[180px]"><SelectValue placeholder="Chantier" /></SelectTrigger>
-              <SelectContent>
+              <SelectTrigger
+                className="h-9 w-full min-w-0 overflow-hidden [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:flex-1 [&_[data-slot=select-value]]:truncate"
+                title={
+                  filterChantier !== "__all__"
+                    ? uniqueChantiers.find((c) => c.id === filterChantier)
+                      ? `${uniqueChantiers.find((c) => c.id === filterChantier)!.code} — ${uniqueChantiers.find((c) => c.id === filterChantier)!.nom}`
+                      : undefined
+                    : undefined
+                }
+              >
+                <SelectValue placeholder="Chantier" />
+              </SelectTrigger>
+              <SelectContent
+                position="popper"
+                className="w-[var(--radix-select-trigger-width)] min-w-[min(100%,18rem)] max-w-[min(96vw,28rem)]"
+              >
                 <SelectItem value="__all__">Tous chantiers</SelectItem>
                 {uniqueChantiers.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.code}</SelectItem>
+                  <SelectItem
+                    key={c.id}
+                    value={c.id}
+                    className="max-w-full py-2"
+                    title={`${c.code} — ${c.nom}`}
+                  >
+                    <span className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden">
+                      <span className="shrink-0 rounded border bg-muted/60 px-1.5 py-0.5 text-[11px] font-bold tabular-nums">
+                        {c.code}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                        {c.nom}
+                      </span>
+                    </span>
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-muted-foreground whitespace-nowrap">Afficher</label>
+            <div className="flex min-w-0 items-center gap-2 sm:col-span-2 xl:col-span-1">
+              <label className="shrink-0 text-xs text-muted-foreground">
+                Afficher
+              </label>
               <Select
                 value={pageSize === 0 ? "all" : String(pageSize)}
                 onValueChange={(v) => {
@@ -356,7 +623,7 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
                   setCurrentPage(1);
                 }}
               >
-                <SelectTrigger className="w-20 h-8" size="sm">
+                <SelectTrigger className="h-9 w-full min-w-0 sm:w-24" size="sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -380,7 +647,9 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
                   <SortableHead field="categorie" className="w-[110px]">Catégorie</SortableHead>
                   <SortableHead field="priorite" className="w-[90px]">Priorité</SortableHead>
                   <SortableHead field="statut" className="w-[90px]">Statut</SortableHead>
-                  <SortableHead field="echeance" className="w-[100px]">Échéance</SortableHead>
+                  <SortableHead field="echeance" className="w-[110px]">
+                    Éch. act.
+                  </SortableHead>
                   <SortableHead field="affectee_a" className="w-[100px]">Affectée à</SortableHead>
                   <TableHead className="w-[70px]" />
                 </TableRow>
@@ -394,16 +663,26 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
                   </TableRow>
                 ) : (
                   paginated.map((q) => (
-                    <TableRow key={q.id} className="cursor-pointer hover:bg-muted/50" onClick={() => handleEdit(q)}>
+                    <TableRow
+                      key={q.id}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => handleView(q)}
+                    >
                       <TableCell className="font-mono text-xs">{q.dossier_ref || "—"}</TableCell>
                       <TableCell className="text-sm max-w-[300px] truncate">{q.question}</TableCell>
-                      <TableCell>
+                      <TableCell className="max-w-[140px]">
                         <Link
                           href={`/chantiers/${q.chantier.id}`}
-                          className="text-xs font-medium hover:underline"
+                          className="block min-w-0 hover:underline"
                           onClick={(e) => e.stopPropagation()}
+                          title={`${q.chantier.code} — ${q.chantier.nom}`}
                         >
-                          {q.chantier.code}
+                          <span className="block text-xs font-semibold tabular-nums">
+                            {q.chantier.code}
+                          </span>
+                          <span className="block truncate text-[11px] text-muted-foreground">
+                            {q.chantier.nom}
+                          </span>
                         </Link>
                       </TableCell>
                       <TableCell>
@@ -439,36 +718,83 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
                           {q.statut}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-xs">
-                        {q.echeance
-                          ? format(new Date(q.echeance), "dd MMM yyyy", { locale: fr })
+                      <TableCell
+                        className={`text-xs ${
+                          isQuestionEnRetard(
+                            q.echeance_actualisee ?? q.echeance,
+                            q.statut,
+                            new Date(),
+                            q.echeance
+                          )
+                            ? "font-semibold text-red-700 dark:text-red-400"
+                            : ""
+                        }`}
+                        title={
+                          q.echeance
+                            ? `Initiale : ${format(new Date(q.echeance), "dd/MM/yyyy", { locale: fr })}`
+                            : undefined
+                        }
+                      >
+                        {(q.echeance_actualisee ?? q.echeance)
+                          ? format(
+                              new Date(
+                                (q.echeance_actualisee ?? q.echeance) as Date
+                              ),
+                              "dd MMM yyyy",
+                              { locale: fr }
+                            )
                           : "—"}
                       </TableCell>
-                      <TableCell className="text-xs">{q.affectee_a || "—"}</TableCell>
+                      <TableCell
+                        className="max-w-[140px] truncate text-xs"
+                        title={formatAffecteeADisplay(q.affectee_a)}
+                      >
+                        {formatAffecteeADisplay(q.affectee_a)}
+                      </TableCell>
                       <TableCell>
-                        <div className="flex gap-1">
+                        <div className="flex gap-0.5">
                           <Button
                             size="sm"
                             variant="ghost"
                             className="h-7 w-7 p-0"
+                            title="Consulter"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleEdit(q);
+                              handleView(q);
                             }}
                           >
-                            <Pencil className="size-3" />
+                            <Eye className="size-3.5 text-[#0A3C74]" />
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDelete(q.id);
-                            }}
-                          >
-                            <Trash2 className="size-3" />
-                          </Button>
+                          {qaModes.update !== "INTERDIT" && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0"
+                              title="Modifier"
+                              asChild
+                            >
+                              <Link
+                                href={`/consultation-backlog/${q.id}/modifier`}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <Pencil className="size-3" />
+                              </Link>
+                            </Button>
+                          )}
+                          {qaModes.delete !== "INTERDIT" && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                              title="Supprimer"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDelete(q.id);
+                              }}
+                            >
+                              <Trash2 className="size-3" />
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -490,11 +816,16 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
         </CardContent>
       </Card>
 
-      {/* Form Dialog */}
+      <ConsultationQuestionViewDialog
+        open={viewOpen}
+        onOpenChange={setViewOpen}
+        question={viewItem}
+      />
+
+      {/* Création uniquement (dialog) — modification = page dédiée */}
       <ConsultationQuestionForm
         open={formOpen}
         onOpenChange={setFormOpen}
-        question={editItem}
       />
     </div>
   );

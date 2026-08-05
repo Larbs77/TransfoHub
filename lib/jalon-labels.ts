@@ -26,6 +26,128 @@ export const STATUT_JALON_COLORS: Record<string, string> = {
 
 export const STATUT_JALON_LIST = Object.keys(STATUT_JALON_LABELS);
 
+/**
+ * Statuts « clos » : l'élément n'est plus en retard (jalon / workstream / activité).
+ * Comparaison normalisée (casse, accents basiques).
+ */
+export function isPlanningClosedStatut(statut: string | null | undefined): boolean {
+  const s = (statut ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return (
+    s === "atteint" ||
+    s === "annule" ||
+    s === "termine" ||
+    s === "clos" ||
+    s === "cloture" ||
+    s === "cloturee" ||
+    s === "fait" ||
+    s === "realise" ||
+    s === "realisee"
+  );
+}
+
+/** @deprecated prefer isPlanningClosedStatut — conservé pour imports éventuels */
+export const PLANNING_CLOSED_STATUTS = new Set(["Atteint", "Annulé"]);
+
+function toDate(v: Date | string | null | undefined): Date | null {
+  if (v == null || v === "") return null;
+  const d = v instanceof Date ? v : new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function calendarDaysBetween(from: Date, to: Date): number {
+  const a = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const b = new Date(to.getFullYear(), to.getMonth(), to.getDate());
+  return Math.round((b.getTime() - a.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+/**
+ * Jours de retard **courant** (élément encore ouvert et échéance dépassée).
+ * null si : pas de date, statut clos, date de fin réelle renseignée, ou échéance future.
+ */
+export function planningRetardDays(
+  due: Date | string | null | undefined,
+  statut: string,
+  now: Date = new Date(),
+  opts?: { dateReelle?: Date | string | null }
+): number | null {
+  // Terminé / clos → jamais « en retard » (même si la date cible est passée)
+  if (isPlanningClosedStatut(statut)) return null;
+  if (toDate(opts?.dateReelle) != null) return null;
+
+  const d = toDate(due);
+  if (!d) return null;
+  if (d >= now) return null;
+
+  const days = calendarDaysBetween(d, now);
+  return days > 0 ? days : null;
+}
+
+export function isPlanningEnRetard(
+  due: Date | string | null | undefined,
+  statut: string,
+  now: Date = new Date(),
+  opts?: { dateReelle?: Date | string | null }
+): boolean {
+  return planningRetardDays(due, statut, now, opts) != null;
+}
+
+/** YYYY-MM-DD local (stable for form / DB payload). */
+export function toYmdLocal(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Résout la date réelle de finalisation :
+ * - statut ≠ Atteint → toujours null (on vide la date réelle)
+ * - statut Atteint + date fournie → date fournie
+ * - statut Atteint sans date → conserve l'existante ou aujourd'hui
+ */
+export function resolvePlanningDateReelle(opts: {
+  statut: string;
+  dateReelle?: string | null;
+  previousDateReelle?: Date | string | null;
+}): string | null {
+  const s = (opts.statut ?? "").trim();
+  // Quitter Atteint (ou tout autre statut non Atteint) → écraser / vider la date réelle
+  if (s !== "Atteint") {
+    return null;
+  }
+
+  const explicit =
+    opts.dateReelle && String(opts.dateReelle).trim()
+      ? String(opts.dateReelle).trim().slice(0, 10)
+      : null;
+  if (explicit) return explicit;
+
+  const prev = toDate(opts.previousDateReelle);
+  if (prev) {
+    return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}-${String(prev.getDate()).padStart(2, "0")}`;
+  }
+  return toYmdLocal();
+}
+
+/**
+ * Écart de clôture (jours) : date_reelle − date_fin planifiée.
+ * null si pas de couple de dates utilisable.
+ * + = livré après la fin planifiée ; − = avant.
+ */
+export function planningClotureEcartDays(
+  dateFinPlanifiee: Date | string | null | undefined,
+  dateReelle: Date | string | null | undefined
+): number | null {
+  const fin = toDate(dateFinPlanifiee);
+  const reelle = toDate(dateReelle);
+  if (!fin || !reelle) return null;
+  return calendarDaysBetween(fin, reelle);
+}
+
 // Template milestones per phase — offsetPct positions milestone as % of chantier duration
 export const JALON_TEMPLATES: { phase: string; nom: string; ordre: number; offsetPct: number }[] = [
   // Précadrage (0-10%)

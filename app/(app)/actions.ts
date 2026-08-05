@@ -39,6 +39,12 @@ import {
 import { EQUIPE_TYPES } from "@/lib/equipe-types";
 import { identityFromRessource } from "@/lib/ressource-user";
 import { allocateNextRaidCode } from "@/lib/raid-code-server";
+import {
+  formatAffecteeADisplay,
+  resolveChantierRoleTag,
+  chantierRoleTagRank,
+} from "@/lib/consultation-affectation";
+import { isRaidClosed, isRaidOverdue } from "@/lib/raid-labels";
 
 // ── Progress Calculation ─────────────────────────────
 
@@ -189,7 +195,10 @@ const membreEquipeInclude = {
 } as const;
 
 export async function getChantierById(id: string) {
-  await requireAuth();
+  // Fiche chantier + Gantt chantier + rapport : même règle de périmètre
+  // (all / assigned). Pas de requirePageAccess("/gantt") ici — le Gantt
+  // chantier est un écran enfant de la fiche.
+  await requireChantierAccess(id);
   return prisma.chantier.findUnique({
     where: { id },
     include: {
@@ -347,9 +356,14 @@ export async function getDashboardStats() {
     (r) => r.probabilite && r.impact && scoreCriticite(r.impact, r.probabilite) >= 12
   );
 
-  // Actions échues: active actions with date_echeance in the past
-  const overdueActionsList = activeActions.filter(
-    (a) => a.date_echeance && a.date_echeance < now
+  // Actions échues: échéance actualisée (fallback initiale) dépassée
+  const overdueActionsList = activeActions.filter((a) =>
+    isRaidOverdue(
+      a.statut,
+      a.date_echeance_actualisee,
+      a.date_echeance,
+      now
+    )
   );
 
   // New KPIs
@@ -664,7 +678,9 @@ export async function getDashboardPMO() {
   const totalActions = activeActions.length;
   const totalRisks = risks.filter((r) => r.statut !== "Clos").length;
   const totalChantiers = chantiers.filter((c) => c.statut !== "Clôturé").length;
-  const overdueActionsList = activeActions.filter((a) => a.date_echeance && a.date_echeance < now);
+  const overdueActionsList = activeActions.filter((a) =>
+    isRaidOverdue(a.statut, a.date_echeance_actualisee, a.date_echeance, now)
+  );
   const criticalRisksList = risks.filter(
     (r) => r.probabilite && r.impact && scoreCriticite(r.impact, r.probabilite) >= 12
   );
@@ -844,6 +860,8 @@ export type PersonalRaidRow = {
   date_identification: Date | null;
   date_revision: Date | null;
   date_echeance: Date | null;
+  date_echeance_actualisee: Date | null;
+  date_fin_reelle: Date | null;
   chantierId: string | null;
   chantierCode: string | null;
   chantierNom: string | null;
@@ -1040,6 +1058,8 @@ export async function getPersonalDashboard() {
     date_identification: r.date_identification,
     date_revision: r.date_revision,
     date_echeance: r.date_echeance,
+    date_echeance_actualisee: r.date_echeance_actualisee,
+    date_fin_reelle: r.date_fin_reelle,
     chantierId: r.chantierId,
     chantierCode: r.chantier?.code ?? null,
     chantierNom: r.chantier?.nom ?? null,
@@ -1094,8 +1114,8 @@ export async function getPersonalDashboard() {
   const myActionsOpen = myActions.filter(
     (a) => a.statut !== "Clôturé" && a.statut !== "Abandonné"
   );
-  const myActionsOverdue = myActionsOpen.filter(
-    (a) => a.date_echeance && a.date_echeance < now
+  const myActionsOverdue = myActionsOpen.filter((a) =>
+    isRaidOverdue(a.statut, a.date_echeance_actualisee, a.date_echeance, now)
   );
   const myRisks = myRaids.filter((r) => r.type === "Risque");
   const myRisksOpen = myRisks.filter((r) => r.statut !== "Clos");
@@ -1236,10 +1256,19 @@ export async function getAlerts() {
       where: {
         ...chantierScope,
         type: "Action",
-        statut: { notIn: ["Clôturé", "Abandonné"] },
-        date_echeance: { lt: now },
+        statut: { notIn: ["Clôturé", "Abandonné", "NA", "Doublon"] },
+        OR: [
+          { date_echeance_actualisee: { lt: now } },
+          {
+            date_echeance_actualisee: null,
+            date_echeance: { lt: now },
+          },
+        ],
       },
-      orderBy: { date_echeance: "asc" },
+      orderBy: [
+        { date_echeance_actualisee: "asc" },
+        { date_echeance: "asc" },
+      ],
       include: { chantier: { select: { code: true, nom: true } } },
     }),
     prisma.consultationQuestion.findMany({
@@ -1260,7 +1289,7 @@ export async function getAlerts() {
     message: `Action échue : ${a.intitule}`,
     detail: a.chantier ? `${a.chantier.code} - ${a.chantier.nom}` : undefined,
     responsable: a.responsable,
-    date: a.date_echeance,
+    date: a.date_echeance_actualisee ?? a.date_echeance,
   }));
 
   const qaAlerts = criticalQuestions.map((q) => ({
@@ -1268,7 +1297,7 @@ export async function getAlerts() {
     type: "qa_critique_echue" as const,
     message: `Q&A critique ouverte depuis ${seuilQaHeures}h+ : ${q.question.substring(0, 60)}${q.question.length > 60 ? "…" : ""}`,
     detail: `${q.chantier.code} - ${q.chantier.nom}`,
-    responsable: q.affectee_a,
+    responsable: formatAffecteeADisplay(q.affectee_a),
     date: q.createdAt,
   }));
 
@@ -1535,7 +1564,9 @@ export async function createRaid(data: {
   statut: string;
   date_identification: string | null;
   date_revision: string | null;
+  /** Échéance initiale (figée ensuite) — aussi copiée en actualisée à la création */
   date_echeance: string | null;
+  date_echeance_actualisee?: string | null;
   commentaires: string;
   comiteId: string | null;
 }) {
@@ -1547,6 +1578,12 @@ export async function createRaid(data: {
     chantierId: data.chantierId || null,
   });
   const code = await allocateNextRaidCode(data.type);
+  const echeanceInitiale = data.date_echeance ? new Date(data.date_echeance) : null;
+  // À la création : actualisée = initiale (sauf override explicite)
+  const echeanceActu = data.date_echeance_actualisee
+    ? new Date(data.date_echeance_actualisee)
+    : echeanceInitiale;
+  const closedOnCreate = isRaidClosed(data.statut);
   const created = await prisma.raid.create({
     data: {
       code,
@@ -1566,7 +1603,9 @@ export async function createRaid(data: {
       statut: data.statut,
       date_identification: data.date_identification ? new Date(data.date_identification) : null,
       date_revision: data.date_revision ? new Date(data.date_revision) : null,
-      date_echeance: data.date_echeance ? new Date(data.date_echeance) : null,
+      date_echeance: echeanceInitiale,
+      date_echeance_actualisee: echeanceActu,
+      date_fin_reelle: closedOnCreate ? new Date() : null,
       commentaires: data.commentaires,
       comiteId: data.comiteId || null,
       createdByUserId: actor.actorUserId,
@@ -1642,7 +1681,10 @@ export async function updateRaid(
     statut: string;
     date_identification: string | null;
     date_revision: string | null;
-    date_echeance: string | null;
+    /** Ignoré en update : échéance initiale figée */
+    date_echeance?: string | null;
+    /** Seule échéance modifiable après création */
+    date_echeance_actualisee?: string | null;
     commentaires: string;
     comiteId: string | null;
   }
@@ -1657,6 +1699,9 @@ export async function updateRaid(
       chantierId: true,
       responsableRessourceId: true,
       statut: true,
+      date_echeance: true,
+      date_echeance_actualisee: true,
+      date_fin_reelle: true,
     },
   });
   if (!existing) throw new Error("Entrée RAID introuvable.");
@@ -1673,7 +1718,13 @@ export async function updateRaid(
     responsableRessourceId: data.responsableRessourceId || null,
     chantierId: data.chantierId || null,
   });
-  // code is immutable — never updated here
+
+  const becomingClosed =
+    isRaidClosed(data.statut) && !isRaidClosed(existing.statut);
+  const reopening =
+    !isRaidClosed(data.statut) && isRaidClosed(existing.statut);
+
+  // code + date_echeance (initiale) immuables — jamais mis à jour ici
   await prisma.raid.update({
     where: { id },
     data: {
@@ -1693,7 +1744,14 @@ export async function updateRaid(
       statut: data.statut,
       date_identification: data.date_identification ? new Date(data.date_identification) : null,
       date_revision: data.date_revision ? new Date(data.date_revision) : null,
-      date_echeance: data.date_echeance ? new Date(data.date_echeance) : null,
+      date_echeance_actualisee: data.date_echeance_actualisee
+        ? new Date(data.date_echeance_actualisee)
+        : null,
+      date_fin_reelle: becomingClosed
+        ? existing.date_fin_reelle ?? new Date()
+        : reopening
+          ? null
+          : existing.date_fin_reelle,
       commentaires: data.commentaires,
       comiteId: data.comiteId || null,
     },
@@ -2393,6 +2451,8 @@ export async function getRessourceById(id: string) {
           intitule: true,
           statut: true,
           date_echeance: true,
+          date_echeance_actualisee: true,
+          date_fin_reelle: true,
           chantierId: true,
           chantier: { select: { code: true, nom: true } },
         },
@@ -3532,50 +3592,94 @@ export async function updateJalon(
   const dateChanged =
     jalonDateKey(existing.date_debut) !== jalonDateKey(data.date_debut) ||
     jalonDateKey(existing.date_cible) !== jalonDateKey(data.date_cible);
+  /** Passage à Atteint (depuis un autre statut) */
+  const goingToAtteint =
+    data.statut === "Atteint" && existing.statut !== "Atteint";
   /**
-   * Validation workflow is only required when date_cible changes
-   * under VALIDATION mode. All other field edits apply immediately.
+   * Mode VALIDATION : workflow si
+   * - modification des dates planifiées, ou
+   * - passage du statut à « Atteint »
+   * Les autres champs s'appliquent immédiatement.
    */
-  const requiresValidation = mode === "VALIDATION" && dateChanged;
+  const requiresValidation =
+    mode === "VALIDATION" && (dateChanged || goingToAtteint);
   const motif = options?.motif?.trim() ?? "";
 
   if (requiresValidation && !motif) {
     throw new Error(
-      "Le motif de la demande est obligatoire pour modifier les dates du jalon."
+      goingToAtteint && !dateChanged
+        ? "Le motif de la demande est obligatoire pour demander le passage du jalon à « Atteint »."
+        : dateChanged && !goingToAtteint
+          ? "Le motif de la demande est obligatoire pour modifier les dates du jalon."
+          : "Le motif de la demande est obligatoire pour cette modification (dates et/ou statut Atteint)."
     );
   }
   if (mode === "DIRECT" && !motif) {
     throw new Error("Le commentaire est obligatoire pour modifier un jalon.");
   }
 
-  const payloadBase = {
-    phase,
-    nom: data.nom,
-    description: data.description ?? "",
-    ordre: data.ordre ?? 0,
-    date_reelle: data.date_reelle ? new Date(data.date_reelle) : null,
-    statut: data.statut,
-    livrables: data.livrables ?? "",
-    commentaire: data.commentaire ?? "",
-  };
+  if (data.statut === "Atteint") {
+    const { assertJalonCanBeAtteint } = await import(
+      "@/lib/planning-status-assert"
+    );
+    await assertJalonCanBeAtteint(id);
+  }
 
-  // ── VALIDATION mode + planning dates changed → request only for the dates ──
+  const { resolvePlanningDateReelle } = await import("@/lib/jalon-labels");
+  /** date_reelle : remplie si Atteint, sinon toujours vidée */
+  const dateReelleYmd = resolvePlanningDateReelle({
+    statut: data.statut,
+    dateReelle: data.date_reelle,
+    previousDateReelle: existing.date_reelle,
+  });
+  const dateReelleValue = dateReelleYmd
+    ? new Date(dateReelleYmd + "T12:00:00.000Z")
+    : null;
+
+  // ── VALIDATION : champs sensibles en attente d'approbation ──
   if (requiresValidation) {
-    // Apply non-date fields immediately; keep current date_cible until approved
+    // Appliquer tout de suite les champs non sensibles ;
+    // conserver dates / Atteint (+ date réelle liée) tant que non approuvés.
+    // Si on quitte Atteint (statut non Atteint) → vider date_reelle tout de suite.
     const partial = await prisma.jalon.update({
       where: { id },
       data: {
-        ...payloadBase,
-        date_debut: existing.date_debut,
-        date_cible: existing.date_cible,
+        phase,
+        nom: data.nom,
+        description: data.description ?? "",
+        ordre: data.ordre ?? 0,
+        livrables: data.livrables ?? "",
+        commentaire: data.commentaire ?? "",
+        statut: goingToAtteint ? existing.statut : data.statut,
+        date_reelle: goingToAtteint
+          ? existing.date_reelle
+          : data.statut === "Atteint"
+            ? dateReelleValue
+            : null,
+        date_debut: dateChanged
+          ? existing.date_debut
+          : data.date_debut
+            ? new Date(data.date_debut)
+            : null,
+        date_cible: dateChanged
+          ? existing.date_cible
+          : new Date(data.date_cible),
       },
     });
 
     const afterSnapshot = jalonSnapshot(partial);
     const proposed = {
       ...afterSnapshot,
-      date_debut: jalonDateKey(data.date_debut) || null,
-      date_cible: jalonDateKey(data.date_cible),
+      date_debut: dateChanged
+        ? jalonDateKey(data.date_debut) || null
+        : afterSnapshot.date_debut,
+      date_cible: dateChanged
+        ? jalonDateKey(data.date_cible)
+        : afterSnapshot.date_cible,
+      statut: goingToAtteint ? "Atteint" : afterSnapshot.statut,
+      date_reelle: goingToAtteint
+        ? dateReelleYmd
+        : afterSnapshot.date_reelle,
     };
 
     const req = await createWorkflowRequest({
@@ -3600,17 +3704,25 @@ export async function updateJalon(
     return { mode: "validation", requestId: req.id };
   }
 
-  // ── Direct apply (DIRECT mode, or VALIDATION without date change) ──
+  // ── Direct apply (DIRECT, ou VALIDATION sans date ni passage Atteint) ──
   const snapshot = jalonSnapshot(existing);
   const newValues = jalonPayloadForWorkflow({
     ...data,
     phase,
+    date_reelle: dateReelleYmd,
   });
 
   const jalon = await prisma.jalon.update({
     where: { id },
     data: {
-      ...payloadBase,
+      phase,
+      nom: data.nom,
+      description: data.description ?? "",
+      ordre: data.ordre ?? 0,
+      date_reelle: dateReelleValue,
+      statut: data.statut,
+      livrables: data.livrables ?? "",
+      commentaire: data.commentaire ?? "",
       date_debut: data.date_debut ? new Date(data.date_debut) : null,
       date_cible: new Date(data.date_cible),
     },
@@ -4237,6 +4349,7 @@ export async function createWorkstream(
     description?: string;
     date_debut?: string | null;
     date_fin?: string | null;
+    date_reelle?: string | null;
     statut?: string;
     commentaire?: string;
   },
@@ -4261,6 +4374,13 @@ export async function createWorkstream(
     WORKFLOW_OPERATION,
   } = await import("@/lib/workflow");
   const { buildWorkstreamEntityLabel } = await import("@/lib/workflow-shared");
+  const { resolvePlanningDateReelle } = await import("@/lib/jalon-labels");
+
+  const statut = data.statut ?? "Planifié";
+  const date_reelle = resolvePlanningDateReelle({
+    statut,
+    dateReelle: data.date_reelle,
+  });
 
   const payload = {
     jalonId: data.jalonId,
@@ -4269,7 +4389,8 @@ export async function createWorkstream(
     description: data.description ?? "",
     date_debut: data.date_debut || null,
     date_fin: data.date_fin || null,
-    statut: data.statut ?? "Planifié",
+    date_reelle,
+    statut,
     commentaire: data.commentaire ?? "",
     chantierId: jalon.chantierId,
   };
@@ -4299,6 +4420,7 @@ export async function createWorkstream(
       description: payload.description,
       date_debut: optionalDate(payload.date_debut),
       date_fin: optionalDate(payload.date_fin),
+      date_reelle: optionalDate(payload.date_reelle),
       statut: payload.statut,
       commentaire: payload.commentaire,
     },
@@ -4315,6 +4437,7 @@ export async function updateWorkstream(
     description?: string;
     date_debut?: string | null;
     date_fin?: string | null;
+    date_reelle?: string | null;
     statut?: string;
     commentaire?: string;
   },
@@ -4340,6 +4463,20 @@ export async function updateWorkstream(
     WORKFLOW_OPERATION,
   } = await import("@/lib/workflow");
   const { buildWorkstreamEntityLabel } = await import("@/lib/workflow-shared");
+  const { resolvePlanningDateReelle } = await import("@/lib/jalon-labels");
+
+  const statut = data.statut ?? existing.statut;
+  if (statut === "Atteint") {
+    const { assertWorkstreamCanBeAtteint } = await import(
+      "@/lib/planning-status-assert"
+    );
+    await assertWorkstreamCanBeAtteint(id);
+  }
+  const date_reelle = resolvePlanningDateReelle({
+    statut,
+    dateReelle: data.date_reelle,
+    previousDateReelle: existing.date_reelle,
+  });
 
   const oldValues = {
     nom: existing.nom,
@@ -4347,6 +4484,7 @@ export async function updateWorkstream(
     description: existing.description,
     date_debut: dateKey(existing.date_debut),
     date_fin: dateKey(existing.date_fin),
+    date_reelle: dateKey(existing.date_reelle),
     statut: existing.statut,
     commentaire: existing.commentaire,
   };
@@ -4356,7 +4494,8 @@ export async function updateWorkstream(
     description: data.description ?? "",
     date_debut: data.date_debut || null,
     date_fin: data.date_fin || null,
-    statut: data.statut ?? existing.statut,
+    date_reelle,
+    statut,
     commentaire: data.commentaire ?? "",
   };
 
@@ -4399,6 +4538,7 @@ export async function updateWorkstream(
       description: newValues.description,
       date_debut: optionalDate(newValues.date_debut),
       date_fin: optionalDate(newValues.date_fin),
+      date_reelle: optionalDate(newValues.date_reelle),
       statut: newValues.statut,
       commentaire: newValues.commentaire,
     },
@@ -4489,6 +4629,7 @@ export async function createActivite(
     description?: string;
     date_debut?: string | null;
     date_fin?: string | null;
+    date_reelle?: string | null;
     statut?: string;
     commentaire?: string;
   },
@@ -4515,6 +4656,13 @@ export async function createActivite(
     WORKFLOW_OPERATION,
   } = await import("@/lib/workflow");
   const { buildActiviteEntityLabel } = await import("@/lib/workflow-shared");
+  const { resolvePlanningDateReelle } = await import("@/lib/jalon-labels");
+
+  const statut = data.statut ?? "Planifié";
+  const date_reelle = resolvePlanningDateReelle({
+    statut,
+    dateReelle: data.date_reelle,
+  });
 
   const payload = {
     workstreamId: data.workstreamId,
@@ -4523,7 +4671,8 @@ export async function createActivite(
     description: data.description ?? "",
     date_debut: data.date_debut || null,
     date_fin: data.date_fin || null,
-    statut: data.statut ?? "Planifié",
+    date_reelle,
+    statut,
     commentaire: data.commentaire ?? "",
     chantierId: ws.jalon.chantierId,
   };
@@ -4553,6 +4702,7 @@ export async function createActivite(
       description: payload.description,
       date_debut: optionalDate(payload.date_debut),
       date_fin: optionalDate(payload.date_fin),
+      date_reelle: optionalDate(payload.date_reelle),
       statut: payload.statut,
       commentaire: payload.commentaire,
     },
@@ -4569,6 +4719,7 @@ export async function updateActivite(
     description?: string;
     date_debut?: string | null;
     date_fin?: string | null;
+    date_reelle?: string | null;
     statut?: string;
     commentaire?: string;
   },
@@ -4598,6 +4749,14 @@ export async function updateActivite(
     WORKFLOW_OPERATION,
   } = await import("@/lib/workflow");
   const { buildActiviteEntityLabel } = await import("@/lib/workflow-shared");
+  const { resolvePlanningDateReelle } = await import("@/lib/jalon-labels");
+
+  const statut = data.statut ?? existing.statut;
+  const date_reelle = resolvePlanningDateReelle({
+    statut,
+    dateReelle: data.date_reelle,
+    previousDateReelle: existing.date_reelle,
+  });
 
   const oldValues = {
     nom: existing.nom,
@@ -4605,6 +4764,7 @@ export async function updateActivite(
     description: existing.description,
     date_debut: dateKey(existing.date_debut),
     date_fin: dateKey(existing.date_fin),
+    date_reelle: dateKey(existing.date_reelle),
     statut: existing.statut,
     commentaire: existing.commentaire,
   };
@@ -4614,7 +4774,8 @@ export async function updateActivite(
     description: data.description ?? "",
     date_debut: data.date_debut || null,
     date_fin: data.date_fin || null,
-    statut: data.statut ?? existing.statut,
+    date_reelle,
+    statut,
     commentaire: data.commentaire ?? "",
   };
 
@@ -4657,6 +4818,7 @@ export async function updateActivite(
       description: newValues.description,
       date_debut: optionalDate(newValues.date_debut),
       date_fin: optionalDate(newValues.date_fin),
+      date_reelle: optionalDate(newValues.date_reelle),
       statut: newValues.statut,
       commentaire: newValues.commentaire,
     },
@@ -4933,7 +5095,217 @@ export async function getConsultationQuestions(chantierId?: string) {
   });
 }
 
-export async function createConsultationQuestion(data: {
+/** Single Q&A question for the dedicated edit page (access scoped by chantier). */
+export async function getConsultationQuestionById(id: string) {
+  await requireAuth();
+  const question = await prisma.consultationQuestion.findUnique({
+    where: { id },
+    include: { chantier: { select: { id: true, code: true, nom: true } } },
+  });
+  if (!question) return null;
+  await requireChantierAccess(question.chantierId);
+  return question;
+}
+
+/**
+ * Options for Q&A assignment block:
+ * - Ressource : all accessible resources
+ * - Équipe organisationnelle : full catalog of institutional teams
+ * - Équipe chantier : members of the selected chantier (DC → Sup → PMO)
+ * - Porteurs org : chantier members + Bureau Programme (for org assignment)
+ */
+export async function getConsultationAssignmentOptions(opts?: {
+  chantierId?: string;
+}) {
+  await requireAuth();
+  const chantierId = opts?.chantierId || undefined;
+
+  const [personnes, equipesOrg, membresChantier, bureauProgTeam] =
+    await Promise.all([
+      getRessourcesForSelect(),
+      prisma.equipe.findMany({
+        where: { is_active: true, type: "institutionnelle" },
+        orderBy: [{ position: "asc" }, { name: "asc" }],
+        select: { id: true, name: true, type: true, description: true },
+      }),
+      chantierId
+        ? prisma.membreEquipe.findMany({
+            where: { chantierId },
+            select: {
+              ressourceId: true,
+              role: true,
+              is_directeur: true,
+              equipe: true,
+              ressource: {
+                select: {
+                  id: true,
+                  nom_complet: true,
+                  type: true,
+                  organisation: true,
+                  actif: true,
+                },
+              },
+            },
+          })
+        : Promise.resolve(
+            [] as {
+              ressourceId: string;
+              role: string;
+              is_directeur: boolean;
+              equipe: string;
+              ressource: {
+                id: string;
+                nom_complet: string;
+                type: string;
+                organisation: string;
+                actif: boolean;
+              };
+            }[]
+          ),
+      prisma.equipe.findFirst({
+        where: {
+          is_active: true,
+          type: "institutionnelle",
+          OR: [
+            { name: { equals: "Bureau Programme", mode: "insensitive" } },
+            { name: { contains: "Bureau Programme", mode: "insensitive" } },
+            { name: { contains: "Programme Office", mode: "insensitive" } },
+          ],
+        },
+        select: { id: true, name: true },
+      }),
+    ]);
+
+  const tagByRessource = new Map<string, "DC" | "Sup" | "PMO" | null>();
+  const bestMembre = new Map<string, (typeof membresChantier)[number]>();
+
+  for (const m of membresChantier) {
+    if (!m.ressource?.actif) continue;
+    const tag = resolveChantierRoleTag(m.role, m.is_directeur);
+    const prevTag = tagByRessource.get(m.ressourceId);
+    if (
+      prevTag == null ||
+      chantierRoleTagRank(tag) < chantierRoleTagRank(prevTag)
+    ) {
+      tagByRessource.set(m.ressourceId, tag);
+      bestMembre.set(m.ressourceId, m);
+    } else if (!bestMembre.has(m.ressourceId)) {
+      bestMembre.set(m.ressourceId, m);
+    }
+  }
+
+  const personnesEquipeChantier = Array.from(bestMembre.values())
+    .map((m) => {
+      const tag = tagByRessource.get(m.ressourceId) ?? null;
+      return {
+        id: m.ressourceId,
+        label: m.ressource.nom_complet,
+        hint: [m.equipe, m.role, m.ressource.organisation]
+          .filter(Boolean)
+          .join(" · "),
+        tag,
+        sortRank: chantierRoleTagRank(tag),
+        group: "Équipe chantier" as const,
+      };
+    })
+    .sort((a, b) => {
+      if (a.sortRank !== b.sortRank) return a.sortRank - b.sortRank;
+      return a.label.localeCompare(b.label, "fr");
+    });
+
+  let personnesBureauProgramme: {
+    id: string;
+    label: string;
+    hint: string;
+    tag: "DC" | "Sup" | "PMO" | null;
+    sortRank: number;
+    group: "Bureau Programme";
+  }[] = [];
+
+  if (bureauProgTeam?.id) {
+    const bp = await prisma.ressource.findMany({
+      where: { actif: true, equipeHierarchieId: bureauProgTeam.id },
+      orderBy: { nom_complet: "asc" },
+      select: {
+        id: true,
+        nom_complet: true,
+        type: true,
+        organisation: true,
+      },
+    });
+    personnesBureauProgramme = bp.map((p) => ({
+      id: p.id,
+      label: p.nom_complet,
+      hint: [bureauProgTeam.name, p.type, p.organisation]
+        .filter(Boolean)
+        .join(" · "),
+      tag: null as "DC" | "Sup" | "PMO" | null,
+      sortRank: 10,
+      group: "Bureau Programme" as const,
+    }));
+  }
+
+  // Porteurs for org assignment: chantier members first, then Bureau Programme (deduped)
+  const porteurIds = new Set<string>();
+  const porteursOrg: {
+    id: string;
+    label: string;
+    hint: string;
+    tag: "DC" | "Sup" | "PMO" | null;
+    sortRank: number;
+    group: string;
+  }[] = [];
+
+  for (const p of personnesEquipeChantier) {
+    if (porteurIds.has(p.id)) continue;
+    porteurIds.add(p.id);
+    porteursOrg.push(p);
+  }
+  for (const p of personnesBureauProgramme) {
+    if (porteurIds.has(p.id)) continue;
+    porteurIds.add(p.id);
+    porteursOrg.push(p);
+  }
+
+  return {
+    personnes: personnes.map((p) => {
+      const tag = tagByRessource.get(p.id) ?? null;
+      return {
+        id: p.id,
+        label: p.nom_complet,
+        hint: [p.type, p.organisation].filter(Boolean).join(" · "),
+        tag,
+        sortRank: chantierRoleTagRank(tag),
+      };
+    }),
+    /** All organizational (institutional) teams. */
+    equipesOrganisationnelles: equipesOrg.map((e) => ({
+      id: e.id,
+      label: e.name,
+      hint: e.description?.trim() || "Équipe organisationnelle",
+    })),
+    /** Alias kept for older clients — same list. */
+    equipesInstitutionnelles: equipesOrg.map((e) => ({
+      id: e.id,
+      label: e.name,
+      hint: e.description?.trim() || "Équipe organisationnelle",
+    })),
+    /** Members of the selected chantier team, ordered DC → Sup → PMO. */
+    personnesEquipeChantier,
+    /** Alias for previous name. */
+    personnesEquipeFunc: personnesEquipeChantier,
+    /** Bureau Programme resources. */
+    personnesBureauProgramme,
+    /** Combined porteurs for org assignment (chantier + BP). */
+    porteursOrg,
+  };
+}
+
+export type QaMutationResult =
+  | { mode: "direct" }
+  | { mode: "validation"; requestId: string };
+
+function qaPayloadForWorkflow(data: {
   chantierId: string;
   dossier_ref: string;
   question: string;
@@ -4943,10 +5315,146 @@ export async function createConsultationQuestion(data: {
   remontee_par: string;
   affectee_a: string;
   echeance: string | null;
+  echeance_actualisee?: string | null;
+  date_fin_reelle?: string | null;
   resolution: string;
 }) {
-  await requireRole("Admin", "Programme_Office", "PMO_Chantier");
-  await prisma.consultationQuestion.create({
+  return {
+    chantierId: data.chantierId,
+    dossier_ref: data.dossier_ref,
+    question: data.question,
+    categorie: data.categorie,
+    priorite: data.priorite,
+    statut: data.statut,
+    remontee_par: data.remontee_par,
+    affectee_a: data.affectee_a,
+    echeance: data.echeance,
+    echeance_actualisee: data.echeance_actualisee ?? data.echeance,
+    date_fin_reelle: data.date_fin_reelle ?? null,
+    resolution: data.resolution,
+  };
+}
+
+function ymdFromDate(d: Date | null | undefined): string | null {
+  if (!d) return null;
+  return d.toISOString().slice(0, 10);
+}
+
+function resolveQaDateFinReelle(params: {
+  statut: string;
+  previousStatut?: string;
+  previousDateFin?: Date | null;
+}): Date | null {
+  const closed =
+    params.statut === "Résolue" || params.statut === "Abandonnée";
+  if (!closed) return null;
+  // Keep existing date if already closed before
+  if (
+    params.previousDateFin &&
+    (params.previousStatut === "Résolue" ||
+      params.previousStatut === "Abandonnée")
+  ) {
+    return params.previousDateFin;
+  }
+  return new Date();
+}
+
+function qaEntityLabel(dossier_ref: string, question: string): string {
+  const ref = dossier_ref?.trim() || "";
+  const q = question?.trim() || "";
+  if (ref && q) return `${ref} · ${q.slice(0, 80)}${q.length > 80 ? "…" : ""}`;
+  return q.slice(0, 100) || ref || "Question Q&A";
+}
+
+export async function getQaWorkflowUiState(): Promise<{
+  create: string;
+  update: string;
+  delete: string;
+}> {
+  const session = await requireAuth();
+  const { getSessionQaWorkflowCaps } = await import("@/lib/workflow");
+  const caps = await getSessionQaWorkflowCaps(session);
+  return {
+    create: caps.create,
+    update: caps.update,
+    delete: caps.delete,
+  };
+}
+
+export async function createConsultationQuestion(
+  data: {
+    chantierId: string;
+    dossier_ref: string;
+    question: string;
+    categorie: string;
+    priorite: string;
+    statut: string;
+    remontee_par: string;
+    affectee_a: string;
+    echeance: string | null;
+    resolution: string;
+  },
+  options?: { motif?: string }
+): Promise<QaMutationResult> {
+  const session = await requireAuth();
+  await requireChantierAccess(data.chantierId);
+
+  const {
+    getSessionQaWorkflowCaps,
+    modeForOperation,
+    createWorkflowRequest,
+    WORKFLOW_ENTITY,
+    WORKFLOW_OPERATION,
+  } = await import("@/lib/workflow");
+
+  const caps = await getSessionQaWorkflowCaps(session);
+  const mode = modeForOperation(caps, WORKFLOW_OPERATION.CREATE);
+  if (mode === "INTERDIT") {
+    throw new Error("Vous n'êtes pas habilité à créer une question Q&A.");
+  }
+
+  const payload = qaPayloadForWorkflow(data);
+  const label = qaEntityLabel(data.dossier_ref, data.question);
+
+  if (mode === "VALIDATION") {
+    const req = await createWorkflowRequest({
+      entityType: WORKFLOW_ENTITY.CONSULTATION_QUESTION,
+      operation: WORKFLOW_OPERATION.CREATE,
+      entityId: null,
+      entityLabel: label,
+      chantierId: data.chantierId,
+      motif: options?.motif ?? "",
+      oldValues: null,
+      newValues: payload,
+      session,
+    });
+    revalidatePath("/workflow/demandes");
+    revalidatePath("/workflow/historique");
+    revalidatePath("/workflow/dashboard");
+    revalidatePath("/consultation-backlog");
+    revalidatePath(`/chantiers/${data.chantierId}`);
+    return { mode: "validation", requestId: req.id };
+  }
+
+  if (
+    (data.statut === "Résolue" || data.statut === "Abandonnée") &&
+    !data.resolution.trim()
+  ) {
+    throw new Error(
+      "La réponse est obligatoire lorsque le statut est « Résolue » ou « Abandonnée »."
+    );
+  }
+
+  const echeanceDate = data.echeance ? new Date(data.echeance) : null;
+  const dateFin = resolveQaDateFinReelle({ statut: data.statut });
+  const createPayload = {
+    ...payload,
+    echeance: data.echeance,
+    echeance_actualisee: data.echeance,
+    date_fin_reelle: ymdFromDate(dateFin),
+  };
+
+  const created = await prisma.consultationQuestion.create({
     data: {
       chantierId: data.chantierId,
       dossier_ref: data.dossier_ref,
@@ -4956,13 +5464,32 @@ export async function createConsultationQuestion(data: {
       statut: data.statut,
       remontee_par: data.remontee_par,
       affectee_a: data.affectee_a,
-      echeance: data.echeance ? new Date(data.echeance) : null,
+      echeance: echeanceDate,
+      echeance_actualisee: echeanceDate,
+      date_fin_reelle: dateFin,
       resolution: data.resolution,
     },
   });
+
+  const { writeDirectWorkflowAudit } = await import("@/lib/workflow");
+  await writeDirectWorkflowAudit({
+    entityType: WORKFLOW_ENTITY.CONSULTATION_QUESTION,
+    operation: WORKFLOW_OPERATION.CREATE,
+    entityId: created.id,
+    entityLabel: label,
+    chantierId: data.chantierId,
+    motif: "Création directe",
+    oldValues: null,
+    newValues: createPayload,
+    session,
+  });
+
   revalidatePath("/consultation-backlog");
   revalidatePath("/chantiers");
+  revalidatePath(`/chantiers/${data.chantierId}`);
+  revalidatePath("/workflow/historique");
   revalidatePath("/");
+  return { mode: "direct" };
 }
 
 export async function updateConsultationQuestion(
@@ -4976,40 +5503,270 @@ export async function updateConsultationQuestion(
     statut: string;
     remontee_par: string;
     affectee_a: string;
-    echeance: string | null;
+    /** Ignored on update — échéance initiale is immutable */
+    echeance?: string | null;
+    /** Mutable due date */
+    echeance_actualisee?: string | null;
     resolution: string;
+  },
+  options?: { motif?: string }
+): Promise<QaMutationResult> {
+  const session = await requireAuth();
+  const existing = await prisma.consultationQuestion.findUnique({
+    where: { id },
+  });
+  if (!existing) throw new Error("Question introuvable.");
+  await requireChantierAccess(existing.chantierId);
+  await requireChantierAccess(data.chantierId);
+
+  if (
+    (data.statut === "Résolue" || data.statut === "Abandonnée") &&
+    !data.resolution.trim()
+  ) {
+    throw new Error(
+      "La réponse est obligatoire lorsque le statut est « Résolue » ou « Abandonnée »."
+    );
   }
-) {
-  await requireRole("Admin", "Programme_Office", "PMO_Chantier");
-  if (data.statut === "Résolue" && !data.resolution.trim()) {
-    throw new Error("La résolution est obligatoire lorsque le statut est 'Résolue'.");
+
+  const {
+    getSessionQaWorkflowCaps,
+    modeForOperation,
+    createWorkflowRequest,
+    WORKFLOW_ENTITY,
+    WORKFLOW_OPERATION,
+  } = await import("@/lib/workflow");
+
+  const caps = await getSessionQaWorkflowCaps(session);
+  const mode = modeForOperation(caps, WORKFLOW_OPERATION.UPDATE);
+  if (mode === "INTERDIT") {
+    throw new Error("Vous n'êtes pas habilité à modifier une question Q&A.");
   }
+
+  // Texte de la question : modifiable uniquement en mode DIRECT
+  const questionText = data.question?.trim() ?? "";
+  if (mode !== "DIRECT" && questionText !== existing.question.trim()) {
+    throw new Error(
+      "Le texte de la question ne peut être modifié que par un rôle en mode Direct (sans workflow)."
+    );
+  }
+  const effectiveQuestion =
+    mode === "DIRECT" ? questionText || existing.question : existing.question;
+
+  // Échéance initiale figée
+  const echeanceInitialeYmd = ymdFromDate(existing.echeance);
+  const echeanceActuYmd =
+    data.echeance_actualisee !== undefined
+      ? data.echeance_actualisee
+      : ymdFromDate(existing.echeance_actualisee) ?? echeanceInitialeYmd;
+
+  const dateFin = resolveQaDateFinReelle({
+    statut: data.statut,
+    previousStatut: existing.statut,
+    previousDateFin: existing.date_fin_reelle,
+  });
+
+  const payload = qaPayloadForWorkflow({
+    ...data,
+    question: effectiveQuestion,
+    echeance: echeanceInitialeYmd,
+    echeance_actualisee: echeanceActuYmd,
+    date_fin_reelle: ymdFromDate(dateFin),
+  });
+  const oldValues = {
+    chantierId: existing.chantierId,
+    dossier_ref: existing.dossier_ref,
+    question: existing.question,
+    categorie: existing.categorie,
+    priorite: existing.priorite,
+    statut: existing.statut,
+    remontee_par: existing.remontee_par,
+    affectee_a: existing.affectee_a,
+    echeance: echeanceInitialeYmd,
+    echeance_actualisee: ymdFromDate(existing.echeance_actualisee),
+    date_fin_reelle: ymdFromDate(existing.date_fin_reelle),
+    resolution: existing.resolution,
+  };
+  const label = qaEntityLabel(data.dossier_ref, effectiveQuestion);
+
+  if (mode === "VALIDATION") {
+    const req = await createWorkflowRequest({
+      entityType: WORKFLOW_ENTITY.CONSULTATION_QUESTION,
+      operation: WORKFLOW_OPERATION.UPDATE,
+      entityId: id,
+      entityLabel: label,
+      chantierId: data.chantierId,
+      motif: options?.motif ?? "",
+      oldValues,
+      newValues: payload,
+      session,
+    });
+    revalidatePath("/workflow/demandes");
+    revalidatePath("/workflow/historique");
+    revalidatePath("/workflow/dashboard");
+    revalidatePath("/consultation-backlog");
+    revalidatePath(`/chantiers/${data.chantierId}`);
+    return { mode: "validation", requestId: req.id };
+  }
+
   await prisma.consultationQuestion.update({
     where: { id },
     data: {
       chantierId: data.chantierId,
       dossier_ref: data.dossier_ref,
-      question: data.question,
+      question: effectiveQuestion,
       categorie: data.categorie,
       priorite: data.priorite,
       statut: data.statut,
       remontee_par: data.remontee_par,
       affectee_a: data.affectee_a,
-      echeance: data.echeance ? new Date(data.echeance) : null,
+      // never change existing.echeance
+      echeance_actualisee: echeanceActuYmd
+        ? new Date(echeanceActuYmd)
+        : null,
+      date_fin_reelle: dateFin,
       resolution: data.resolution,
     },
   });
+
+  const { writeDirectWorkflowAudit } = await import("@/lib/workflow");
+  await writeDirectWorkflowAudit({
+    entityType: WORKFLOW_ENTITY.CONSULTATION_QUESTION,
+    operation: WORKFLOW_OPERATION.UPDATE,
+    entityId: id,
+    entityLabel: label,
+    chantierId: data.chantierId,
+    motif: "Modification directe",
+    oldValues,
+    newValues: payload,
+    session,
+  });
+
   revalidatePath("/consultation-backlog");
   revalidatePath("/chantiers");
+  revalidatePath(`/chantiers/${data.chantierId}`);
+  revalidatePath("/workflow/historique");
   revalidatePath("/");
+  return { mode: "direct" };
 }
 
-export async function deleteConsultationQuestion(id: string) {
-  await requireRole("Admin", "Programme_Office");
+export async function deleteConsultationQuestion(
+  id: string,
+  options?: { motif?: string }
+): Promise<QaMutationResult> {
+  const session = await requireAuth();
+  const existing = await prisma.consultationQuestion.findUnique({
+    where: { id },
+  });
+  if (!existing) throw new Error("Question introuvable.");
+  await requireChantierAccess(existing.chantierId);
+
+  const {
+    getSessionQaWorkflowCaps,
+    modeForOperation,
+    createWorkflowRequest,
+    WORKFLOW_ENTITY,
+    WORKFLOW_OPERATION,
+  } = await import("@/lib/workflow");
+
+  const caps = await getSessionQaWorkflowCaps(session);
+  const mode = modeForOperation(caps, WORKFLOW_OPERATION.DELETE);
+  if (mode === "INTERDIT") {
+    throw new Error("Vous n'êtes pas habilité à supprimer une question Q&A.");
+  }
+
+  const oldValues = {
+    chantierId: existing.chantierId,
+    dossier_ref: existing.dossier_ref,
+    question: existing.question,
+    categorie: existing.categorie,
+    priorite: existing.priorite,
+    statut: existing.statut,
+    remontee_par: existing.remontee_par,
+    affectee_a: existing.affectee_a,
+    echeance: ymdFromDate(existing.echeance),
+    echeance_actualisee: ymdFromDate(existing.echeance_actualisee),
+    date_fin_reelle: ymdFromDate(existing.date_fin_reelle),
+    resolution: existing.resolution,
+  };
+  const label = qaEntityLabel(existing.dossier_ref, existing.question);
+
+  if (mode === "VALIDATION") {
+    const req = await createWorkflowRequest({
+      entityType: WORKFLOW_ENTITY.CONSULTATION_QUESTION,
+      operation: WORKFLOW_OPERATION.DELETE,
+      entityId: id,
+      entityLabel: label,
+      chantierId: existing.chantierId,
+      motif: options?.motif ?? "",
+      oldValues,
+      newValues: null,
+      session,
+    });
+    revalidatePath("/workflow/demandes");
+    revalidatePath("/workflow/historique");
+    revalidatePath("/workflow/dashboard");
+    revalidatePath("/consultation-backlog");
+    revalidatePath(`/chantiers/${existing.chantierId}`);
+    return { mode: "validation", requestId: req.id };
+  }
+
   await prisma.consultationQuestion.delete({ where: { id } });
+
+  const { writeDirectWorkflowAudit } = await import("@/lib/workflow");
+  await writeDirectWorkflowAudit({
+    entityType: WORKFLOW_ENTITY.CONSULTATION_QUESTION,
+    operation: WORKFLOW_OPERATION.DELETE,
+    entityId: id,
+    entityLabel: label,
+    chantierId: existing.chantierId,
+    motif: "Suppression directe",
+    oldValues,
+    newValues: null,
+    session,
+  });
+
   revalidatePath("/consultation-backlog");
   revalidatePath("/chantiers");
+  revalidatePath(`/chantiers/${existing.chantierId}`);
+  revalidatePath("/workflow/historique");
   revalidatePath("/");
+  return { mode: "direct" };
+}
+
+/** Change tracking for a Q&A question (workflow + direct audits). */
+export async function getConsultationQuestionHistory(questionId: string) {
+  const session = await requireAuth();
+  const question = await prisma.consultationQuestion.findUnique({
+    where: { id: questionId },
+    select: { id: true, chantierId: true },
+  });
+  if (!question) throw new Error("Question introuvable.");
+  await requireChantierAccess(question.chantierId);
+
+  const { WORKFLOW_ENTITY } = await import("@/lib/workflow-shared");
+  const rows = await prisma.workflowRequest.findMany({
+    where: {
+      entityType: WORKFLOW_ENTITY.CONSULTATION_QUESTION,
+      entityId: questionId,
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return rows.map((r) => ({
+    id: r.id,
+    operation: r.operation,
+    status: r.status,
+    priority: r.priority,
+    motif: r.motif,
+    rejectMotif: r.rejectMotif,
+    requesterName: r.requesterName,
+    approverName: r.approverName,
+    oldValues: r.oldValues,
+    newValues: r.newValues,
+    decisionHistory: r.decisionHistory,
+    createdAt: r.createdAt,
+    processedAt: r.processedAt,
+  }));
 }
 
 // ── Dashboard CTP / CTR ─────────────────────────────
@@ -5098,7 +5855,9 @@ export async function getDashboardCTP(month: number, year: number) {
       description: r.intitule,
       mitigation: r.mitigation,
       responsable: r.responsable,
-      echeance: r.date_echeance ? r.date_echeance.toISOString() : null,
+      echeance: (r.date_echeance_actualisee ?? r.date_echeance)
+        ? (r.date_echeance_actualisee ?? r.date_echeance)!.toISOString()
+        : null,
     }));
 
   // Pending decisions
@@ -5251,7 +6010,9 @@ export async function getDashboardCTR(startDate: string, endDate: string) {
       description: r.intitule,
       mitigation: r.mitigation,
       responsable: r.responsable,
-      echeance: r.date_echeance ? r.date_echeance.toISOString() : null,
+      echeance: (r.date_echeance_actualisee ?? r.date_echeance)
+        ? (r.date_echeance_actualisee ?? r.date_echeance)!.toISOString()
+        : null,
     }));
 
   const totalBudgetMAD = chantiers.reduce((s, c) => s + c.budgetTotalMAD, 0);

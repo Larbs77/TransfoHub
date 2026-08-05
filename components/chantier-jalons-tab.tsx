@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { format, differenceInDays } from "date-fns";
 import { fr } from "date-fns/locale";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardAction } from "@/components/ui/card";
@@ -28,7 +28,11 @@ import {
   MapPin,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   GanttChart,
+  TimerOff,
+  ShieldAlert,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -42,7 +46,10 @@ import {
   PHASES,
   PHASE_COLORS,
   STATUT_JALON_COLORS,
+  planningRetardDays,
+  isPlanningClosedStatut,
 } from "@/lib/jalon-labels";
+import { collectJalonCoherenceIssues } from "@/lib/planning-coherence";
 import type { JalonWorkflowCaps, WorkflowMode } from "@/lib/workflow-shared";
 import type { PlanningDetailGouvernance } from "@/lib/planning-coherence";
 import {
@@ -149,15 +156,54 @@ export function ChantierJalonsTab({
   const [expandedJalons, setExpandedJalons] = useState<Record<string, boolean>>(
     {}
   );
+  const [expandedWorkstreams, setExpandedWorkstreams] = useState<
+    Record<string, boolean>
+  >({});
 
+  /** Défaut : tout replié à l’ouverture de l’onglet. */
   function isExpanded(id: string) {
-    return expandedJalons[id] ?? true;
+    return expandedJalons[id] ?? false;
   }
   function toggleJalon(id: string) {
     setExpandedJalons((prev) => ({
       ...prev,
-      [id]: !(prev[id] ?? true),
+      [id]: !(prev[id] ?? false),
     }));
+  }
+  function toggleWorkstream(id: string) {
+    setExpandedWorkstreams((prev) => ({
+      ...prev,
+      [id]: !(prev[id] ?? false),
+    }));
+  }
+  function ensureWorkstreamOpen(id: string) {
+    setExpandedWorkstreams((prev) => ({ ...prev, [id]: true }));
+  }
+
+  function expandAllTree() {
+    const nextJalons: Record<string, boolean> = {};
+    const nextWs: Record<string, boolean> = {};
+    for (const j of jalons) {
+      nextJalons[j.id] = true;
+      for (const ws of j.workstreams ?? []) {
+        nextWs[ws.id] = true;
+      }
+    }
+    setExpandedJalons(nextJalons);
+    setExpandedWorkstreams(nextWs);
+  }
+
+  function collapseAllTree() {
+    const nextJalons: Record<string, boolean> = {};
+    const nextWs: Record<string, boolean> = {};
+    for (const j of jalons) {
+      nextJalons[j.id] = false;
+      for (const ws of j.workstreams ?? []) {
+        nextWs[ws.id] = false;
+      }
+    }
+    setExpandedJalons(nextJalons);
+    setExpandedWorkstreams(nextWs);
   }
 
   const canCreate = workflowCaps.create !== "INTERDIT";
@@ -174,11 +220,22 @@ export function ChantierJalonsTab({
   const total = jalons.length;
   const atteints = jalons.filter((j) => j.statut === "Atteint").length;
   const enRetard = jalons.filter(
-    (j) => new Date(j.date_cible) < now && !["Atteint", "Annulé"].includes(j.statut)
+    (j) =>
+      planningRetardDays(j.date_cible, j.statut, now, {
+        dateReelle: j.date_reelle,
+      }) != null
   ).length;
   const prochaine = jalons
-    .filter((j) => new Date(j.date_cible) >= now && !["Atteint", "Annulé"].includes(j.statut))
-    .sort((a, b) => new Date(a.date_cible).getTime() - new Date(b.date_cible).getTime())[0];
+    .filter(
+      (j) =>
+        !isPlanningClosedStatut(j.statut) &&
+        !j.date_reelle &&
+        new Date(j.date_cible) >= now
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.date_cible).getTime() - new Date(b.date_cible).getTime()
+    )[0];
 
   // Group by phase
   const phaseGroups = PHASES.map((phase) => {
@@ -191,17 +248,29 @@ export function ChantierJalonsTab({
   const defaultTab = phaseGroups.find((g) => g.total > 0)?.phase ?? PHASES[0];
 
   function ecart(j: JalonData): { days: number; label: string; color: string } | null {
-    if (!j.date_reelle) {
-      if (new Date(j.date_cible) < now && !["Atteint", "Annulé"].includes(j.statut)) {
-        const days = differenceInDays(now, new Date(j.date_cible));
-        return { days, label: `+${days}j`, color: "#ef4444" };
-      }
-      return null;
+    // En retard courant (ouvert + échéance dépassée) → rouge
+    const retard = planningRetardDays(j.date_cible, j.statut, now, {
+      dateReelle: j.date_reelle,
+    });
+    if (retard != null) {
+      return { days: retard, label: `+${retard}j`, color: "#ef4444" };
     }
-    const days = differenceInDays(new Date(j.date_reelle), new Date(j.date_cible));
-    if (days === 0) return { days: 0, label: "0j", color: "#22c55e" };
-    if (days > 0) return { days, label: `+${days}j`, color: "#ef4444" };
-    return { days, label: `${days}j`, color: "#22c55e" };
+
+    // Terminé : écart historique vs date réelle (pas du « en retard » rouge)
+    if (j.date_reelle) {
+      const days = differenceInDays(
+        new Date(j.date_reelle),
+        new Date(j.date_cible)
+      );
+      if (days === 0) return { days: 0, label: "0j", color: "#22c55e" };
+      if (days > 0) {
+        // Achevé en retard → gris/ambre, pas rouge « en retard »
+        return { days, label: `+${days}j`, color: "#64748b" };
+      }
+      return { days, label: `${days}j`, color: "#22c55e" };
+    }
+
+    return null;
   }
 
   async function handleDeleteConfirm() {
@@ -256,6 +325,60 @@ export function ChantierJalonsTab({
   );
   const chantierStartPct = (differenceInDays(new Date(dateDebut), timelineStart) / totalDuration) * 100;
   const chantierEndPct = (differenceInDays(new Date(dateFin), timelineStart) / totalDuration) * 100;
+
+  /** Jalons Atteint livrés après la date cible (retard historique enregistré). */
+  const atteintsHorsDelai = useMemo(() => {
+    return jalons.filter((j) => {
+      if (j.statut !== "Atteint" || !j.date_reelle) return false;
+      return (
+        differenceInDays(new Date(j.date_reelle), new Date(j.date_cible)) > 0
+      );
+    }).length;
+  }, [jalons]);
+
+  /**
+   * Anomalies de cohérence planning (mêmes règles que les alertes de l’arbre).
+   * Permet le fil d’Ariane visuel phase → jalon → workstream → activité.
+   */
+  const planningAnomalies = useMemo(() => {
+    const workstreamIds = new Set<string>();
+    const activiteIds = new Set<string>();
+    const jalonIds = new Set<string>();
+    const issueCountByJalon = new Map<string, number>();
+    const jalonsWithAnomalyByPhase = new Map<string, number>();
+
+    for (const j of jalons) {
+      const issues = collectJalonCoherenceIssues({
+        id: j.id,
+        nom: j.nom,
+        date_cible: j.date_cible,
+        statut: j.statut,
+        workstreams: j.workstreams,
+      });
+      if (issues.length === 0) continue;
+      jalonIds.add(j.id);
+      issueCountByJalon.set(j.id, issues.length);
+      jalonsWithAnomalyByPhase.set(
+        j.phase,
+        (jalonsWithAnomalyByPhase.get(j.phase) ?? 0) + 1
+      );
+      for (const issue of issues) {
+        if (issue.level === "workstream") workstreamIds.add(issue.entityId);
+        if (issue.level === "activite") activiteIds.add(issue.entityId);
+        if (issue.level === "jalon") jalonIds.add(issue.entityId);
+      }
+    }
+
+    return {
+      jalons: jalonIds.size,
+      workstreams: workstreamIds.size,
+      activites: activiteIds.size,
+      total: jalonIds.size + workstreamIds.size + activiteIds.size,
+      jalonIds,
+      issueCountByJalon,
+      jalonsWithAnomalyByPhase,
+    };
+  }, [jalons]);
 
   return (
     <div className="space-y-4">
@@ -406,7 +529,37 @@ export function ChantierJalonsTab({
             Activité
           </CardDescription>
           <CardAction>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div
+                className="flex items-center gap-0.5 rounded-md border border-[#0A3C74]/15 bg-[#0A3C74]/[0.03] p-0.5"
+                role="group"
+                aria-label="Déplier ou replier l'arborescence jalons"
+              >
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs text-[#0A3C74] hover:bg-white"
+                  onClick={expandAllTree}
+                  disabled={total === 0}
+                  title="Déplier tous les jalons, workstreams et activités"
+                >
+                  <ChevronsUpDown className="size-3.5" />
+                  Tout déplier
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs text-[#0A3C74] hover:bg-white"
+                  onClick={collapseAllTree}
+                  disabled={total === 0}
+                  title="Replier tous les jalons, workstreams et activités"
+                >
+                  <ChevronsDownUp className="size-3.5" />
+                  Tout replier
+                </Button>
+              </div>
               <Button
                 size="sm"
                 variant="outline"
@@ -468,6 +621,98 @@ export function ChantierJalonsTab({
           </CardAction>
         </CardHeader>
         <CardContent>
+          {/* Mentions synthèse : atteints hors délai + anomalies de cohérence */}
+          {total > 0 && (
+            <div className="mb-4 grid gap-2 sm:grid-cols-2">
+              <div
+                className={`flex items-start gap-3 rounded-xl border px-3.5 py-3 ${
+                  atteintsHorsDelai > 0
+                    ? "border-orange-500/35 bg-orange-500/[0.07]"
+                    : "border-border bg-muted/20"
+                }`}
+                title="Jalons au statut Atteint dont la date réelle est postérieure à la date cible"
+              >
+                <span
+                  className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg ${
+                    atteintsHorsDelai > 0
+                      ? "bg-orange-500/15 text-orange-700 dark:text-orange-300"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  <TimerOff className="size-4" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold tracking-tight text-foreground">
+                    Atteints hors délai
+                  </p>
+                  <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                    Jalons clôturés après leur date cible
+                  </p>
+                  <p
+                    className={`mt-1.5 text-2xl font-bold tabular-nums ${
+                      atteintsHorsDelai > 0
+                        ? "text-orange-700 dark:text-orange-300"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {atteintsHorsDelai}
+                  </p>
+                </div>
+              </div>
+
+              <div
+                className={`flex items-start gap-3 rounded-xl border px-3.5 py-3 ${
+                  planningAnomalies.total > 0
+                    ? "border-amber-500/40 bg-amber-500/[0.08]"
+                    : "border-border bg-muted/20"
+                }`}
+                title="Incohérences de dates : activité hors workstream, workstream après jalon, plages inversées…"
+              >
+                <span
+                  className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg ${
+                    planningAnomalies.total > 0
+                      ? "bg-amber-500/15 text-amber-800 dark:text-amber-200"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  <ShieldAlert className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold tracking-tight text-foreground">
+                    Anomalies de planning
+                  </p>
+                  <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                    Incohérences de dates dans l&apos;arbre
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <Badge
+                      variant="secondary"
+                      className="gap-1 border border-amber-500/25 bg-background/80 text-[11px] font-semibold tabular-nums"
+                    >
+                      <Milestone className="size-3 text-amber-700" />
+                      {planningAnomalies.jalons} jalon
+                      {planningAnomalies.jalons !== 1 ? "s" : ""}
+                    </Badge>
+                    <Badge
+                      variant="secondary"
+                      className="gap-1 border border-amber-500/25 bg-background/80 text-[11px] font-semibold tabular-nums"
+                    >
+                      {planningAnomalies.workstreams} workstream
+                      {planningAnomalies.workstreams !== 1 ? "s" : ""}
+                    </Badge>
+                    <Badge
+                      variant="secondary"
+                      className="gap-1 border border-amber-500/25 bg-background/80 text-[11px] font-semibold tabular-nums"
+                    >
+                      {planningAnomalies.activites} activit
+                      {planningAnomalies.activites !== 1 ? "és" : "é"}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {toast && (
             <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
               {toast}
@@ -487,34 +732,71 @@ export function ChantierJalonsTab({
             </div>
           ) : (
             <Tabs defaultValue={defaultTab} className="space-y-3">
-              <TabsList>
-                {phaseGroups.map((group) => (
-                  <TabsTrigger
-                    key={group.phase}
-                    value={group.phase}
-                    className="gap-1.5"
-                    disabled={group.total === 0}
-                  >
-                    <div
-                      className="size-2 rounded-full"
-                      style={{ backgroundColor: PHASE_COLORS[group.phase] }}
-                    />
-                    <span style={{ color: group.total > 0 ? undefined : "#9ca3af" }}>
-                      {group.phase}
-                    </span>
-                    <Badge
-                      variant="secondary"
-                      className="text-[10px] px-1.5 py-0"
-                      style={
-                        group.atteints === group.total && group.total > 0
-                          ? { backgroundColor: "#22c55e20", color: "#22c55e" }
+              <TabsList className="h-auto flex-wrap gap-1 bg-muted/40 p-1">
+                {phaseGroups.map((group) => {
+                  const anomalyCount =
+                    planningAnomalies.jalonsWithAnomalyByPhase.get(
+                      group.phase
+                    ) ?? 0;
+                  const phaseHasAnomaly = anomalyCount > 0;
+                  return (
+                    <TabsTrigger
+                      key={group.phase}
+                      value={group.phase}
+                      disabled={group.total === 0}
+                      title={
+                        phaseHasAnomaly
+                          ? `${anomalyCount} jalon(s) avec incohérence(s) de planning dans cette phase`
                           : undefined
                       }
+                      className={`gap-1.5 ${
+                        phaseHasAnomaly
+                          ? "border border-amber-500/45 bg-amber-500/15 text-amber-950 data-[state=active]:border-amber-500/60 data-[state=active]:bg-amber-500/25 data-[state=active]:text-amber-950 dark:text-amber-100 dark:data-[state=active]:text-amber-50"
+                          : ""
+                      }`}
                     >
-                      {group.atteints}/{group.total}
-                    </Badge>
-                  </TabsTrigger>
-                ))}
+                      {phaseHasAnomaly ? (
+                        <AlertTriangle className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                      ) : (
+                        <div
+                          className="size-2 shrink-0 rounded-full"
+                          style={{
+                            backgroundColor: PHASE_COLORS[group.phase],
+                          }}
+                        />
+                      )}
+                      <span
+                        style={{
+                          color: group.total > 0 ? undefined : "#9ca3af",
+                        }}
+                      >
+                        {group.phase}
+                      </span>
+                      <Badge
+                        variant="secondary"
+                        className={`px-1.5 py-0 text-[10px] ${
+                          phaseHasAnomaly
+                            ? "border border-amber-500/35 bg-amber-500/20 text-amber-900 dark:text-amber-100"
+                            : ""
+                        }`}
+                        style={
+                          !phaseHasAnomaly &&
+                          group.atteints === group.total &&
+                          group.total > 0
+                            ? {
+                                backgroundColor: "#22c55e20",
+                                color: "#22c55e",
+                              }
+                            : undefined
+                        }
+                      >
+                        {phaseHasAnomaly
+                          ? `${anomalyCount} alerte${anomalyCount > 1 ? "s" : ""}`
+                          : `${group.atteints}/${group.total}`}
+                      </Badge>
+                    </TabsTrigger>
+                  );
+                })}
               </TabsList>
 
               {phaseGroups.map((group) => (
@@ -568,20 +850,45 @@ export function ChantierJalonsTab({
                                 0
                               ) ?? 0;
                             const expanded = isExpanded(j.id);
+                            const retardJours = planningRetardDays(
+                              j.date_cible,
+                              j.statut,
+                              now,
+                              { dateReelle: j.date_reelle }
+                            );
+                            const enRetardJalon = retardJours != null;
+                            const anomalyCount =
+                              planningAnomalies.issueCountByJalon.get(j.id) ??
+                              0;
+                            const hasAnomaly = anomalyCount > 0;
                             return (
                               <Fragment key={j.id}>
-                                <TableRow>
+                                <TableRow
+                                  className={
+                                    hasAnomaly
+                                      ? "border-l-4 border-l-amber-500 bg-amber-500/10 dark:bg-amber-950/30"
+                                      : enRetardJalon
+                                        ? "bg-red-50/40 dark:bg-red-950/15"
+                                        : undefined
+                                  }
+                                >
                                   <TableCell className="px-1">
                                     <Button
                                       type="button"
                                       size="icon"
                                       variant="ghost"
-                                      className="size-7"
+                                      className={`size-7 ${
+                                        hasAnomaly
+                                          ? "text-amber-700 hover:bg-amber-500/15 dark:text-amber-300"
+                                          : ""
+                                      }`}
                                       onClick={() => toggleJalon(j.id)}
                                       title={
                                         expanded
                                           ? "Replier workstreams"
-                                          : "Déplier workstreams"
+                                          : hasAnomaly
+                                            ? `Déplier — ${anomalyCount} incohérence(s) de planning`
+                                            : "Déplier workstreams"
                                       }
                                     >
                                       {expanded ? (
@@ -592,10 +899,39 @@ export function ChantierJalonsTab({
                                     </Button>
                                   </TableCell>
                                   <TableCell>
-                                    <div>
-                                      <span className="text-sm font-medium">
-                                        {j.nom}
-                                      </span>
+                                    <div className="space-y-1">
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <span
+                                          className={
+                                            enRetardJalon
+                                              ? "inline-flex max-w-full items-center rounded-md border-2 border-red-600 bg-red-50 px-2 py-0.5 text-sm font-semibold text-red-800 dark:border-red-500 dark:bg-red-950/50 dark:text-red-100"
+                                              : hasAnomaly
+                                                ? "inline-flex max-w-full items-center rounded-md border border-amber-500/50 bg-amber-500/15 px-2 py-0.5 text-sm font-semibold text-amber-950 dark:text-amber-100"
+                                                : "text-sm font-medium"
+                                          }
+                                          title={
+                                            enRetardJalon
+                                              ? `En retard de ${retardJours} jour(s)`
+                                              : hasAnomaly
+                                                ? `${anomalyCount} incohérence(s) de planning — ouvrir le détail`
+                                                : undefined
+                                          }
+                                        >
+                                          {j.nom}
+                                        </span>
+                                        {hasAnomaly && (
+                                          <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 dark:text-amber-100">
+                                            <AlertTriangle className="size-3 text-amber-600" />
+                                            {anomalyCount} alerte
+                                            {anomalyCount > 1 ? "s" : ""}
+                                          </span>
+                                        )}
+                                        {enRetardJalon && (
+                                          <span className="inline-flex items-center rounded-full border border-red-600/40 bg-red-600/10 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-red-700 dark:text-red-300">
+                                            +{retardJours}j
+                                          </span>
+                                        )}
+                                      </div>
                                       {j.description && (
                                         <p className="max-w-[180px] truncate text-xs text-muted-foreground">
                                           {j.description}
@@ -715,6 +1051,11 @@ export function ChantierJalonsTab({
                                         detailGouvernance={detailGouvernance}
                                         pendingByEntityId={pendingByEntityId}
                                         onToast={setToast}
+                                        workstreamOpen={expandedWorkstreams}
+                                        onToggleWorkstream={toggleWorkstream}
+                                        onEnsureWorkstreamOpen={
+                                          ensureWorkstreamOpen
+                                        }
                                       />
                                     </TableCell>
                                   </TableRow>

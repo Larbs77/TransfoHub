@@ -17,7 +17,8 @@ export type ExcelPreviewRow = { line:number; level:PlanningLevel; action:Plannin
 export type ExcelPlanningPreview = { chantierId:string; chantierCode:string; chantierNom:string; total:number; createCount:number; updateCount:number; skipCount:number; errorCount:number; rows:ExcelPreviewRow[]; formatErrors:string[]; fingerprint:string; counts:Record<PlanningLevel,{create:number;update:number;skip:number;error:number}> };
 
 export const PLANNING_HEADERS = ["Niveau *","Phase","Élément *","Ordre","Date de début","Date de fin / cible","Date réelle","Statut","Description","Livrables","Commentaire","ID technique"] as const;
-const DETAIL_STATUSES=["Planifié","En cours","Terminé","Bloqué","Annulé"];
+/** Même catalogue que les jalons (Atteint = terminé métier). */
+const DETAIL_STATUSES=["Planifié","En cours","Atteint","Reporté","Annulé"];
 const norm=(v:unknown)=>String(v??"").normalize("NFC").trim().replace(/\s+/g," ");
 const key=(v:unknown)=>norm(v).toLocaleLowerCase("fr");
 const iso=(d:Date|null)=>d?`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")}`:"";
@@ -123,7 +124,11 @@ export function buildExcelPlanningPreview(args:{chantierId:string;chantierCode:s
     if(start==="INVALID")errors.push("Date de début invalide.");if(end==="INVALID")errors.push("Date de fin / cible invalide.");if(actual==="INVALID")errors.push("Date réelle invalide.");
     if(level==="JALON"&&!end)errors.push("Date cible obligatoire pour un jalon.");if(start instanceof Date&&end instanceof Date&&start>end)errors.push("Date de début postérieure à la date de fin / cible.");
     if(start instanceof Date&&(start<args.chantierStart||start>args.chantierEnd))warnings.push("Date de début hors période du chantier.");if(end instanceof Date&&(end<args.chantierStart||end>args.chantierEnd))warnings.push("Date de fin / cible hors période du chantier.");
-    const ordre=Number(r.Ordre||0);if(!Number.isInteger(ordre)||ordre<0)errors.push("Ordre invalide.");const statut=norm(r.Statut)||"Planifié";
+    const ordre=Number(r.Ordre||0);if(!Number.isInteger(ordre)||ordre<0)errors.push("Ordre invalide.");
+    // Ancien libellé Excel « Terminé » / « Bloqué » → catalogue unifié jalons
+    let statut=norm(r.Statut)||"Planifié";
+    if(key(statut)==="termine"||key(statut)==="terminee")statut="Atteint";
+    if(key(statut)==="bloque")statut="Reporté";
     if(level==="JALON"&&!STATUT_JALON_LIST.some(s=>key(s)===key(statut)))errors.push("Statut de jalon invalide.");
     if(level!=="JALON"&&!DETAIL_STATUSES.some(s=>key(s)===key(statut)))errors.push("Statut de workstream ou d'activité invalide.");
     const id=norm(r["ID technique"]);let existing=id?byId.get(id):undefined;if(id&&!existing&&!restoreIntoEmptyPlanning)errors.push("ID technique inconnu.");if(id&&!existing&&restoreIntoEmptyPlanning)warnings.push("ID technique de sauvegarde ignoré : l'élément sera recréé avec un nouvel identifiant.");if(existing&&existing.level!==level)errors.push("L'ID ne correspond pas au niveau indiqué.");

@@ -135,7 +135,17 @@ export const RAID_CSV_COLUMNS: CsvColumn[] = [
   {
     key: "date_echeance",
     header: "date_echeance",
-    description: "jj/mm/aaaa",
+    description: "Échéance initiale jj/mm/aaaa (figée)",
+  },
+  {
+    key: "date_echeance_actualisee",
+    header: "date_echeance_actualisee",
+    description: "Échéance actualisée jj/mm/aaaa (pilotage)",
+  },
+  {
+    key: "date_fin_reelle",
+    header: "date_fin_reelle",
+    description: "Fin réelle jj/mm/aaaa (clôture)",
   },
   { key: "commentaires", header: "commentaires", description: "Commentaires" },
 ];
