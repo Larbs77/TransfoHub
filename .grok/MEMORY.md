@@ -1,8 +1,10 @@
 # TransfoHub — project memory (workspace)
 
-Last updated: **2026-08-05** · package **0.4.0+** · branch **`main`** @ **`0fb8f98`** (pushed to `origin/main`)
+Last updated: **2026-08-06** · package **0.4.0+** · branch **`main`**
 
-This file is for **agents and humans** working on TransfoHub. Canonical product rules also live in **`AGENTS.md`**. Functional docs: **`docs/DOCUMENTATION_FONCTIONNELLE.md`**. Deploy: **`DEPLOY.md`**.
+This file is for **agents and humans** working on TransfoHub. Canonical product rules also live in **`AGENTS.md`**.  
+**New developer / agent handoff:** `docs/ONBOARDING.md`, `docs/CONTEXTE_RECENT.md`, `docs/REGLES_DEVELOPPEMENT.md`, `docs/AGENT_BOOTSTRAP.md`.  
+Functional docs: **`docs/DOCUMENTATION_FONCTIONNELLE.md`**. Deploy: **`DEPLOY.md`**.
 
 ---
 
@@ -13,12 +15,11 @@ This file is for **agents and humans** working on TransfoHub. Canonical product 
 | Name | TransfoHub / PMO Transformation Bancaire |
 | Remote | `https://github.com/Larbs77/TransfoHub.git` |
 | Local path | `E:\Bank-Of-Africa\TransfoHub` |
-| **main tip** | `0fb8f98` — Gantt portefeuille, Q&A/RAID dual échéances, planning & consultation polish |
-| Prior on main | `25dedab` secure planning purge; `bb84dc0` jalon workflow; `facf69a` RAID collab / équipes |
+| **main** | See `git log -1` — handoff docs added 2026-08-06; deploy shell packs removed from repo |
 | Tag released | `v0.4.0` (SMTP, Import/Purge, system DB maintenance) |
 | UI language | **French** |
 | Brand | Bank of Africa navy `#0A3C74` + teal `#00BDBB` |
-| Local DB (often) | PostgreSQL **`transfohuDB`** |
+| Local DB (often) | PostgreSQL **`transfohuDB`** / `transfodb` |
 
 ---
 
