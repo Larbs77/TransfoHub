@@ -1,6 +1,6 @@
 # TransfoHub — project memory (workspace)
 
-Last updated: **2026-07-13** · package **0.4.0** · branch **`main`** @ **`534bf23`** (pushed to `origin/main`)
+Last updated: **2026-08-05** · package **0.4.0+** · branch **`main`** @ **`0fb8f98`** (pushed to `origin/main`)
 
 This file is for **agents and humans** working on TransfoHub. Canonical product rules also live in **`AGENTS.md`**. Functional docs: **`docs/DOCUMENTATION_FONCTIONNELLE.md`**. Deploy: **`DEPLOY.md`**.
 
@@ -13,11 +13,12 @@ This file is for **agents and humans** working on TransfoHub. Canonical product 
 | Name | TransfoHub / PMO Transformation Bancaire |
 | Remote | `https://github.com/Larbs77/TransfoHub.git` |
 | Local path | `E:\Bank-Of-Africa\TransfoHub` |
-| **main tip** | `534bf23` — RAID assign rules, team header, audit UI, deploy docs |
-| Prior feature commit | `facf69a` — collaborative RAID, team types, membership rules |
+| **main tip** | `0fb8f98` — Gantt portefeuille, Q&A/RAID dual échéances, planning & consultation polish |
+| Prior on main | `25dedab` secure planning purge; `bb84dc0` jalon workflow; `facf69a` RAID collab / équipes |
 | Tag released | `v0.4.0` (SMTP, Import/Purge, system DB maintenance) |
 | UI language | **French** |
 | Brand | Bank of Africa navy `#0A3C74` + teal `#00BDBB` |
+| Local DB (often) | PostgreSQL **`transfohuDB`** |
 
 ---
 
@@ -30,7 +31,82 @@ This file is for **agents and humans** working on TransfoHub. Canonical product 
 - CSV product format: **pipe `|`**  
 
 **Prisma stamp:** bump `PRISMA_MODEL_STAMP` in `lib/prisma.ts` after every schema change.  
-Current stamp family: **`equipe-institutionnelle-fonctionnelle-v1`** (+ raid collab models).
+**Current stamp:** `raid-echeance-actualisee-v1`
+
+**Client vs server:** never import `lib/workflow.ts` / Prisma into client components — use `lib/workflow-shared.ts` / pure helpers.
+
+---
+
+## Dual échéances (Q&A + RAID) — decision 2026-08
+
+Same pattern on **ConsultationQuestion** and **Raid** (RAID **without** workflow):
+
+| Field (Q&A / RAID) | Role |
+|--------------------|------|
+| Initiale (`echeance` / `date_echeance`) | Set at **create**, **immutable** after (engagement) |
+| Actualisée (`echeance_actualisee` / `date_echeance_actualisee`) | Copy of initiale at create; **only** editable pilot date |
+| Fin réelle (`date_fin_reelle`) | Set on terminal status (Résolue/Abandonnée Q&A; Clôturé/Clos/Abandonné/Validée/… RAID) |
+
+- **KPI / « En retard »** = based on **actualisée** (fallback initiale).  
+- RAID list: under intitulé, if **initiale** past and not closed → amber `AlertTriangle` + « Échéance initiale dd/MM/yy · dépassée » (same style as planning coherence).  
+- Helpers: `isQuestionEnRetard` (`lib/consultation-labels.ts`), `isRaidOverdue` / `isRaidInitialEcheancePast` / `raidEffectiveEcheance` (`lib/raid-labels.ts`).  
+- Migrations: `20260805190000_qa_echeance_actualisee`, `20260805210000_raid_echeance_actualisee`.
+
+---
+
+## Gantt
+
+### Chantier (`/chantiers/[id]/gantt`)
+- Sticky header + structure column; week ticks `dd/MM` + `Sxx`; bar **clip** (clamp left/right in `[0,100]` before width).  
+- Jalon bars + diamond in screen and HTML exports.  
+- Export **HTML figé** (WYSIWYG filtered view) + **HTML interactif** (full plan offline, not filtered).  
+- Both HTML modes: sticky first row + first column.  
+- Filters toolbar 2 lines: (1) Du/Au, Trimestre en cours, scale, contenu période, Aujourd’hui, Ajuster; (2) Jalons/WS/Act, déplier/replier, exports.  
+- Back nav: `?from=jalons` → `/jalons`; `?from=portefeuille` → `/gantt`.  
+- Files: `components/chantier-gantt-view.tsx`, `lib/gantt-export-html.ts`, `lib/gantt-export-interactive.ts`.
+
+### Portefeuille (`/gantt`)
+- Same UX improvements as chantier **except interactive HTML** (not needed).  
+- Export **HTML figé** only via `lib/gantt-export-portfolio-html.ts` (scale snapshot before dynamic import; filename includes scale).  
+- `components/portfolio-gantt-view.tsx`.  
+- Migration roles: `20260805120000_grant_portfolio_gantt_default_roles`.
+
+### Bar clip rule (critical)
+Always clamp `left`/`right` to `[0,100]` **before** computing width — otherwise bars overshoot when start is outside the window.
+
+---
+
+## Planning jalons / workstreams / activités
+
+- Status rules split: pure rules `lib/planning-status-rules.ts`, server assert `lib/planning-status-assert.ts` (client must not pull Prisma).  
+- Cascade **Atteint**, clear `date_reelle` rules, coherence `lib/planning-coherence.ts`.  
+- WS/activité real date field: migration `20260805200000_ws_activite_date_reelle`.  
+- Import Excel/CSV planning: admin données + scripts; date format **`jj/mm/aaaa`**.  
+- Chantiers tab order pattern: **Chantiers | Ressources | RAID** where applicable.
+
+---
+
+## Consultation Q&A
+
+- Backlog + chantier tab; view dialog `components/consultation-question-view-dialog.tsx`.  
+- Affectation helpers `lib/consultation-affectation.ts`.  
+- Workflow modes for Q&A: migration `20260805180000_qa_workflow_modes`.  
+- Seed sample: `scripts/seed-ch023-qa-questions.ts` (CH_023).
+
+---
+
+## RAID
+
+### Collaboration (unchanged principles)
+- List `/raid` → detail `/raid/[id]`.  
+- Comments + audit; status change requires comment.  
+- Assign: Admin / Bureau Programme any; DC/Suppléant/PMO on linked chantier only.  
+- `RAID.equipeId` via `resolveRaidEquipeId` (func if member of chantier, else institutional).
+
+### Form & list (2026-08)
+- Dialog BOA-styled, wide (~68rem), sections Identification / Rattachement / Risque / Pilotage.  
+- Table: `table-fixed`, compact columns, dates `dd/MM/yy`, header **Identification** (not bare « Date »).  
+- Seed demo RAID: `scripts/seed-ch023-raids.ts` (20 mixed types on CH_023).
 
 ---
 
@@ -38,73 +114,10 @@ Current stamp family: **`equipe-institutionnelle-fonctionnelle-v1`** (+ raid col
 
 | Type | Meaning | Creation |
 |------|---------|----------|
-| `institutionnelle` | Bank org unit; `Ressource.equipeHierarchieId`; comité owners | Admin CRUD `/admin/equipes` |
-| `fonctionnelle` | Chantier programme team 1:1 (`Equipe.chantierId`) | **Auto** on chantier create; members = `MembreEquipe` |
+| `institutionnelle` | Bank org unit; `Ressource.equipeHierarchieId` | Admin `/admin/equipes` |
+| `fonctionnelle` | Chantier team 1:1 (`Equipe.chantierId`) | Auto on chantier create |
 
-- Helpers: `lib/equipe-types.ts`, `lib/equipe-chantier.ts`  
-- Migration: `20260713180000_equipe_institutionnelle_fonctionnelle`  
-- Admin UI: tabs Institutionnelles | Fonctionnelles  
-
-### RAID.equipeId (assignment rule — do not break)
-
-When assignee is set:
-1. If assignee is **MembreEquipe** on RAID’s `chantierId` → **functional** chantier team  
-2. Else → assignee’s **institutional** hierarchy team  
-3. Unassign → clear `equipeId`  
-
----
-
-## MembreEquipe
-
-- `ressourceId` **required**; no free-text identity (`nom_complet` removed)  
-- Optional `commentaires`  
-- Display name = `ressource.nom_complet`  
-- Migration: `20260713120000_membre_equipe_require_ressource`  
-
----
-
-## RAID collaboration & rights
-
-### Surfaces
-- List: `/raid` (click row) → detail **`/raid/[id]`**  
-- Models: `RaidComment`, `RaidAuditLog`  
-- UI: `components/raid-detail-client.tsx`; actions: `app/(app)/raid/[id]/actions.ts`  
-- Lib: `lib/raid-collaboration.ts`, `lib/raid-labels.ts`  
-
-### Create (`AppRole.raid_create_scope`)
-- `none` (default) | `chantier` | `programme`  
-- Admin effective **programme**  
-- Migration: `20260713140000_app_role_raid_create_scope`  
-
-### Collaborate (comment, status, auto-assign if unassigned)
-- Admin / Programme_Office / institutional **Bureau Programme**  
-- Assignee  
-- Any `MembreEquipe` on RAID chantier  
-- Same institutional team as assignee  
-- Same derived `raid.equipeId` (func or inst)  
-- Status change: **comment mandatory**  
-- Comment does **not** auto-assign  
-
-### Assign / reassign only (`canAssignRaid`)
-- Admin, role Programme_Office, or institutional team « Bureau Programme » → **any** RAID  
-- Directeur de chantier / Suppléant / PMO on **that** chantier → RAID **linked to that chantier** only  
-- Others cannot reassign  
-- Team resolution on reassign still uses `resolveRaidEquipeId`  
-
-### List visibility (`getRaidItems` when scope ≠ all)
-OR: chantier in scope · assigned to me · `equipeId` = my institutional team  
-
-### Kanban
-- Move: assignee · institutional teammates (when `equipeId` inst) · DC/Suppléant/PMO · programme-level  
-- Mandatory comment on move  
-
-### UI details
-- Header shows **Équipe liée** (info only) + Fonctionnelle/Institutionnelle badge  
-- Journal d’audit = card list (no horizontal scroll; text wraps)  
-
-### Import RAID CSV
-- Script: `scripts/import-raid-csv.ts`  
-- Source used: `E:\Bank-Of-Africa\TRANSFO-HUB-DB\20260713\Raid.csv` (66 rows imported locally once)  
+Helpers: `lib/equipe-types.ts`, `lib/equipe-chantier.ts`.
 
 ---
 
@@ -123,37 +136,29 @@ OR: chantier in scope · assigned to me · `equipeId` = my institutional team
 
 ## Deploy (VPS Node + PM2 + Nginx)
 
-- Guide: **`DEPLOY.md`**  
-- PM2: `ecosystem.config.cjs`  
-- Nginx sample: `deploy/nginx-transfohub.conf`  
-- Cloud: pull **`origin/main`** (not `master`), then `npm ci` → `db:generate` → `db:migrate` → `build` → `pm2 restart`  
-- Collaborative RAID has **no separate menu**: open `/raid` → click a row → `/raid/{id}`  
+- Guide: **`DEPLOY.md`** · PM2 `ecosystem.config.cjs` · Nginx `deploy/nginx-transfohub.conf`  
+- Cloud: pull **`origin/main`** → `npm ci` → `db:generate` → `db:migrate` → `build` → `pm2 restart`  
 
 ---
 
-## Functional documentation
+## Key migrations (recent)
 
-- **`docs/DOCUMENTATION_FONCTIONNELLE.md`** — full French functional doc (features + rules)  
-- KPI formulas: **`KPIS.txt`**  
-
----
-
-## Stack hard rules
-
-- No SQLite / better-sqlite3  
-- After schema change: migrate + generate + **bump PRISMA_MODEL_STAMP**  
-- French UI labels  
-- Brand navy/teal/white  
+| Migration | Topic |
+|-----------|--------|
+| `…_grant_portfolio_gantt_default_roles` | Page `/gantt` on default roles |
+| `…_qa_workflow_modes` | Q&A workflow modes |
+| `…_qa_echeance_actualisee` | Q&A dual échéances + fin réelle |
+| `…_ws_activite_date_reelle` | Workstream/activité real dates |
+| `…_raid_echeance_actualisee` | RAID dual échéances + fin réelle |
 
 ---
 
 ## Suggested next work (open)
 
-- Wire product emails via `sendMail()`  
-- Align full form `updateRaid` guards with collab matrix  
+- Wire product emails via `sendMail()` for RAID / workflow notifications  
 - Extend Import/Purge to more tables  
-- Optional: tag a release after Optimisation-Fonctionnelle (beyond v0.4.0)  
-- Production: change maintenance + admin passwords; SMTP  
+- Tag a release beyond `v0.4.0` when ready  
+- Production: rotate maintenance + admin passwords; SMTP  
 
 ---
 
@@ -165,7 +170,9 @@ OR: chantier in scope · assigned to me · `equipeId` = my institutional team
 | This memory | `.grok/MEMORY.md` |
 | Functional doc | `docs/DOCUMENTATION_FONCTIONNELLE.md` |
 | Deploy | `DEPLOY.md`, `ecosystem.config.cjs` |
-| RAID collab | `app/(app)/raid/[id]/`, `lib/raid-collaboration.ts` |
-| Equipe helpers | `lib/equipe-chantier.ts`, `lib/equipe-types.ts` |
-| Page catalog | `lib/app-pages.ts` |
+| Gantt chantier | `components/chantier-gantt-view.tsx`, `lib/gantt-export-*.ts` |
+| Gantt portefeuille | `components/portfolio-gantt-view.tsx`, `lib/gantt-export-portfolio-html.ts` |
+| RAID | `components/raid-list.tsx`, `raid-form-dialog.tsx`, `app/(app)/raid/[id]/` |
+| Q&A | `components/consultation-*`, `lib/consultation-*.ts` |
+| Planning rules | `lib/planning-status-rules.ts`, `lib/planning-status-assert.ts` |
 | Prisma stamp | `lib/prisma.ts` |
