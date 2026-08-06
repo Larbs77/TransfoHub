@@ -658,15 +658,9 @@ step_new_platform() {
     ok "Uploads copiés"
   fi
 
-  # ecosystem PM2
-  if [[ -f "${APP_DIR_TARGET}/ecosystem.config.cjs" ]]; then
-    sed -i "s/start -p [0-9]\+/start -p ${APP_PORT}/g" "${APP_DIR_TARGET}/ecosystem.config.cjs" || true
-    sed -i "s/PORT: [0-9]\+/PORT: ${APP_PORT}/g" "${APP_DIR_TARGET}/ecosystem.config.cjs" || true
-    sed -i "s/name: \"transfohub\"/name: \"${PM2_NAME}\"/g" "${APP_DIR_TARGET}/ecosystem.config.cjs" || true
-  fi
-
   mkdir -p "${APP_DIR_TARGET}/logs" "${APP_DIR_TARGET}/public/uploads/avatars"
   chmod 600 "${APP_DIR_TARGET}/.env" 2>/dev/null || true
+  # ecosystem name/port : finalisé à l'étape 6 (ensure_ecosystem_for_release)
 
   resolve_tools
 
@@ -703,32 +697,108 @@ step_new_platform() {
 }
 
 # --- Bascule PM2 + admin -----------------------------------------------------
+# Exécute une commande PM2 sous l'utilisateur d'origine (admin_keba) si possible.
+# Évite le piège : root et admin_keba ont des daemons ~/.pm2 séparés.
+run_pm2() {
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    local home
+    home="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || echo "/home/${SUDO_USER}")"
+    # -H : home correct pour ~/.pm2
+    # PATH : conserver le bin pm2/node de l'utilisateur
+    sudo -u "$SUDO_USER" -H env "PATH=${PATH}" "HOME=${home}" "$PM2_BIN" "$@"
+  else
+    "$PM2_BIN" "$@"
+  fi
+}
+
+ensure_ecosystem_for_release() {
+  local eco="${APP_DIR_TARGET}/ecosystem.config.cjs"
+  if [[ ! -f "$eco" ]]; then
+    warn "ecosystem.config.cjs absent — génération minimale"
+    cat > "$eco" <<EOF
+module.exports = {
+  apps: [{
+    name: "${PM2_NAME}",
+    script: "node_modules/next/dist/bin/next",
+    args: "start -p ${APP_PORT}",
+    cwd: __dirname,
+    instances: 1,
+    exec_mode: "fork",
+    autorestart: true,
+    max_memory_restart: "1G",
+    env: { NODE_ENV: "production", PORT: ${APP_PORT} },
+    error_file: "./logs/pm2-error.log",
+    out_file: "./logs/pm2-out.log",
+    merge_logs: true,
+    time: true,
+  }],
+};
+EOF
+    return 0
+  fi
+  # Forcer name + port (toutes variantes de quotes)
+  sed -i -E "s/name:[[:space:]]*['\"][^'\"]+['\"]/name: \"${PM2_NAME}\"/" "$eco" || true
+  sed -i -E "s/start -p [0-9]+/start -p ${APP_PORT}/g" "$eco" || true
+  sed -i -E "s/PORT:[[:space:]]*[0-9]+/PORT: ${APP_PORT}/g" "$eco" || true
+  mkdir -p "${APP_DIR_TARGET}/logs"
+  info "ecosystem : name=${PM2_NAME} port=${APP_PORT}"
+  grep -E "name:|args:|PORT:" "$eco" | head -10 || true
+}
+
 step_switch_and_admin() {
   echo
   echo -e "${BOLD}═══ 6) Bascule PM2 + menu administration ═══${NC}"
 
   resolve_tools
+  ensure_ecosystem_for_release
 
-  # Arrêt ancienne instance (même nom ou anciennes variantes)
-  info "Arrêt PM2 : ${PM2_NAME_OLD} (via ${PM2_BIN})"
-  "$PM2_BIN" stop "$PM2_NAME_OLD" 2>/dev/null || true
-  "$PM2_BIN" delete "$PM2_NAME_OLD" 2>/dev/null || true
+  # Qui exécute PM2 ?
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    info "PM2 sera piloté en tant que : ${SUDO_USER} (daemon ~/.pm2 de cet utilisateur)"
+  else
+    warn "PM2 en root — utilisez le même user pour 'pm2 list' ensuite"
+  fi
+
+  # Arrêt ancienne instance
+  info "Arrêt PM2 : ${PM2_NAME_OLD}"
+  run_pm2 stop "$PM2_NAME_OLD" 2>/dev/null || true
+  run_pm2 delete "$PM2_NAME_OLD" 2>/dev/null || true
   local n
   for n in transfohub transfohub-recette pmo-app; do
     [[ "$n" == "$PM2_NAME_OLD" ]] && continue
-    "$PM2_BIN" stop "$n" 2>/dev/null || true
+    run_pm2 stop "$n" 2>/dev/null || true
+    run_pm2 delete "$n" 2>/dev/null || true
   done
 
-  (cd "$APP_DIR_TARGET" && "$PM2_BIN" start ecosystem.config.cjs)
-  "$PM2_BIN" save || true
-  # Ne pas forcer -u root si l'instance tourne sous admin_keba : tenter les deux
+  # Droits lecture pour l'utilisateur app si plateforme sous /var/www
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    chown -R "${SUDO_USER}:${SUDO_USER}" "$APP_DIR_TARGET" 2>/dev/null \
+      || warn "Impossible de chown ${APP_DIR_TARGET} → ${SUDO_USER} (continuer en root PM2)"
+    # symlink parent
+    chown -h "${SUDO_USER}:${SUDO_USER}" "${PLATFORMS_ROOT}/current" 2>/dev/null || true
+  fi
+
+  info "Démarrage PM2 depuis ${APP_DIR_TARGET}"
+  if ! (cd "$APP_DIR_TARGET" && run_pm2 start ecosystem.config.cjs); then
+    err "Échec pm2 start — tentative directe next start..."
+    (cd "$APP_DIR_TARGET" && run_pm2 start "node_modules/next/dist/bin/next" --name "$PM2_NAME" -- start -p "$APP_PORT") \
+      || die "Impossible de démarrer l'application avec PM2"
+  fi
+
+  run_pm2 save || true
+
   if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
     local home
     home="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || echo "/home/${SUDO_USER}")"
-    "$PM2_BIN" startup systemd -u "$SUDO_USER" --hp "$home" 2>/dev/null || true
+    run_pm2 startup systemd -u "$SUDO_USER" --hp "$home" 2>/dev/null || true
   else
-    "$PM2_BIN" startup systemd -u root --hp /root 2>/dev/null || true
+    run_pm2 startup systemd -u root --hp /root 2>/dev/null || true
   fi
+
+  echo
+  info "État PM2 :"
+  run_pm2 list || true
+  run_pm2 describe "$PM2_NAME" 2>/dev/null | head -30 || warn "Process ${PM2_NAME} non décrit — vérifier run_pm2 list"
 
   sleep 3
   local code
@@ -736,7 +806,12 @@ step_switch_and_admin() {
   if [[ "$code" =~ ^[23] ]]; then
     ok "App locale HTTP ${code} → :${APP_PORT}/login"
   else
-    warn "App locale HTTP ${code} — ${PM2_BIN} logs ${PM2_NAME}"
+    warn "App locale HTTP ${code}"
+    warn "Logs : run_pm2 logs ${PM2_NAME} --lines 40"
+    if [[ -f "${APP_DIR_TARGET}/logs/pm2-error.log" ]]; then
+      warn "--- logs/pm2-error.log (fin) ---"
+      tail -40 "${APP_DIR_TARGET}/logs/pm2-error.log" || true
+    fi
   fi
 
   # Menu admin pointant sur la plateforme courante
