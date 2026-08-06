@@ -1,105 +1,77 @@
 ================================================================================
- TransfoHub — script_prod (console admin PRODUCTION banque)
- Domaine : https://transfohub.eurafric.com
+ TransfoHub — script_prod (console admin PRODUCTION)
+ Exécution : admin_keba UNIQUEMENT — pas de root, pas de Nginx
+ Domaine   : https://transfohub.eurafric.com
 ================================================================================
 
-CONTENU
--------
-  config.env              Config prod (APP_DIR, PM2, port 8000, backups)
-  transfohub-admin.sh     Menu admin (comme le cloud)
-  INSTALL.sh              Installation sur le serveur
-  releases/               Déposer ici le ZIP de la nouvelle version
-  backups/                (optionnel ; backups réels = /home/admin_keba/backups)
+FICHIERS
+--------
+  config.env           → chemins prod (préremplis)
+  transfohub-admin.sh  → menu (stop/start/restart PM2, deploy, rollback, backup)
+  INSTALL.sh           → setup local (sans root)
+  releases/            → déposer le ZIP de la nouvelle version
   README.txt
 
-CONFIG PRÉREMPLIE
------------------
+CONFIG
+------
   APP_DIR=/home/admin_keba/workspace/Transfohub-main
   PM2_NAME=transfohub
-  PM2_USER=admin_keba
   APP_PORT=8000
-  PUBLIC_HOST=transfohub.eurafric.com
   BACKUP_ROOT=/home/admin_keba/backups
 
-================================================================================
-ÉTAPES SUR LE SERVEUR PROD
-================================================================================
+INSTALLATION SUR LE SERVEUR
+---------------------------
+  1) Récupérer le pack
+       cd /home/admin_keba
+       # git pull du repo puis :
+       cp -a TransfoHub/deploy/script_prod ~/script_prod
+       # ou unzip script_prod.zip -d ~/script_prod
 
-A) Récupérer les fichiers (choisir une méthode)
-----------------------------------------------
+  2) Installer (en admin_keba, SANS sudo)
+       cd ~/script_prod
+       chmod +x transfohub-admin.sh INSTALL.sh
+       ./INSTALL.sh
 
-  # Méthode 1 — ZIP du pack depuis GitHub (si accès réseau)
-  cd /home/admin_keba
-  curl -fL -o script_prod.zip \
-    https://github.com/Larbs77/TransfoHub/raw/main/deploy/script_prod.zip
-  unzip -o script_prod.zip -d script_prod
-  # ou si le zip contient déjà le dossier script_prod :
-  # unzip -o script_prod.zip
+  3) Déposer le ZIP de l'application
+       ~/script_prod/releases/TransfoHub-main.zip
 
-  # Méthode 2 — git pull / clone du repo puis copier
-  cd /home/admin_keba
-  git clone https://github.com/Larbs77/TransfoHub.git   # si pas déjà là
-  # ou : cd TransfoHub && git pull origin main
-  cp -a TransfoHub/deploy/script_prod ~/script_prod
+  4) Lancer le menu (SANS sudo)
+       ~/menu-prod.sh
+       # ou
+       ~/script_prod/transfohub-admin.sh
 
-  # Méthode 3 — scp depuis votre PC
-  # scp -r deploy/script_prod admin_keba@SERVEUR:/home/admin_keba/
+MENU
+----
+  1) Arrêter l'application (PM2)
+  2) Démarrer l'application (PM2)
+  3) Redémarrer l'application (PM2)
+  4) Déployer depuis Git
+  5) Déployer depuis ZIP   ← option b) dossier releases/
+  6) Rollback source + DB
+  7) Sauvegarde manuelle
+  8) Lister les sauvegardes
+  0) Quitter
 
-
-B) Installer la console
------------------------
-  cd /home/admin_keba/script_prod
-  chmod +x transfohub-admin.sh INSTALL.sh
-  # Vérifier config.env une dernière fois
-  nano config.env
-  sudo ./INSTALL.sh
-
-
-C) Déposer le ZIP de la NOUVELLE version de l'application
----------------------------------------------------------
-  # Télécharger depuis GitHub (poste autorisé) puis copier sur le serveur :
-  /home/admin_keba/script_prod/releases/TransfoHub-main.zip
-
-  # Exemple scp :
-  # scp TransfoHub-main.zip admin_keba@SERVEUR:/home/admin_keba/script_prod/releases/
-
-
-D) Lancer le menu et déployer
+DÉPLOYER UNE NOUVELLE VERSION
 -----------------------------
-  sudo /root/scripts/menu-prod.sh
-  # ou
-  sudo /home/admin_keba/script_prod/transfohub-admin.sh
+  1. Copier le ZIP dans ~/script_prod/releases/
+  2. ~/menu-prod.sh
+  3. Choix 5 → b (releases) → confirmer
+  4. Vérifier :
+       pm2 list
+       pm2 logs transfohub --lines 40
+       curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/login
+       curl -kI https://transfohub.eurafric.com/login
 
-  Menu :
-    1) Tout arrêter          (PM2 only — Nginx reste up)
-    2) Tout démarrer
-    3) Tout redémarrer
-    4) Déployer depuis Git
-    5) Déployer depuis ZIP   ← choisir c) dossier releases/  ou a) chemin
-    6) Rollback source + DB
-    7) Sauvegarde manuelle
-    8) Lister les sauvegardes
-    0) Quitter
-
-  Pour une nouvelle version (recommandé) :
-    → option 7 (backup manuel) optionnel si vous voulez un filet avant
-    → option 5 (ZIP) → confirmer
-    Le script fait : backup auto → extract → preserve .env → npm ci
-                    → migrate (pas de seed) → build → pm2 restart
-
-
-E) Vérifications après déploiement
-----------------------------------
-  sudo -u admin_keba -H bash -lc 'export PM2_HOME=$HOME/.pm2; pm2 list; pm2 logs transfohub --lines 40 --nostream'
-  curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/login
-  curl -kI https://transfohub.eurafric.com/login
-
-
-IMPORTANT PM2
--------------
-  Toujours utiliser le daemon de admin_keba :
-    sudo -u admin_keba -H bash -lc 'export PM2_HOME=$HOME/.pm2; pm2 list'
-
-  Ne pas lancer pm2 en root pour cette application.
+NOTES
+-----
+  - Nginx n'est PAS géré (pas de start/stop/reload).
+  - Ne pas lancer en root (le script refuse root pour éviter le mauvais ~/.pm2).
+  - Si "pm2: commande introuvable", le script cherche nvm sous $HOME et peut
+    installer pm2 via npm install -g pour l'utilisateur courant.
+  - Optionnel dans config.env si besoin :
+      CMD_PM2=.../bin/pm2
+      CMD_NPM=.../bin/npm
+      CMD_NODE=.../bin/node
 
 ================================================================================

@@ -1,17 +1,12 @@
 #!/bin/bash
 # =============================================================================
 # TransfoHub — menu d'administration PRODUCTION (banque)
-# Modèle : script cloud /root/scripts/transfohub-admin.sh (analysé le 2026-08-06)
-#
-# Emplacement recommandé :
-#   /root/scripts/transfohub-prod/transfohub-admin.sh
-#   + config.env à côté
-# Raccourci :
-#   /root/scripts/menu-prod.sh → ce script
+# Exécution : utilisateur applicatif (admin_keba) — PAS besoin de root
+# Pas d'actions Nginx (géré hors de ce script)
 #
 # Usage :
-#   /root/scripts/menu-prod.sh
-#   /root/scripts/menu-prod.sh --backup-only
+#   ./transfohub-admin.sh
+#   ./transfohub-admin.sh --backup-only
 # =============================================================================
 set -euo pipefail
 
@@ -25,21 +20,19 @@ fi
 # shellcheck disable=SC1090
 source "$CONFIG_FILE"
 
-# Defaults (si absents du config)
-APP_DIR="${APP_DIR:-/var/www/transfohub}"
+# Defaults
+APP_DIR="${APP_DIR:-$HOME/workspace/Transfohub-main}"
 PM2_NAME="${PM2_NAME:-transfohub}"
-APP_PORT="${APP_PORT:-7000}"
-BACKUP_ROOT="${BACKUP_ROOT:-/root/backups/transfohub-prod}"
+APP_PORT="${APP_PORT:-8000}"
+BACKUP_ROOT="${BACKUP_ROOT:-$HOME/backups}"
 MAX_BACKUPS="${MAX_BACKUPS:-15}"
 GIT_REMOTE_DEFAULT="${GIT_REMOTE_DEFAULT:-origin}"
 GIT_BRANCH_DEFAULT="${GIT_BRANCH_DEFAULT:-main}"
 GITHUB_ZIP_DEFAULT="${GITHUB_ZIP_DEFAULT:-https://github.com/Larbs77/TransfoHub/archive/refs/heads/main.zip}"
-LOG_FILE="${LOG_FILE:-${SCRIPT_DIR}/transfohub-prod-admin.log}"
-NGINX_SERVICE="${NGINX_SERVICE:-nginx}"
-STOP_NGINX_ON_STOP="${STOP_NGINX_ON_STOP:-no}"
-PM2_USER="${PM2_USER:-}"
-PUBLIC_HOST="${PUBLIC_HOST:-}"
-PUBLIC_URL="${PUBLIC_URL:-}"
+LOG_FILE="${LOG_FILE:-${BACKUP_ROOT}/transfohub-prod-admin.log}"
+PUBLIC_HOST="${PUBLIC_HOST:-transfohub.eurafric.com}"
+PUBLIC_URL="${PUBLIC_URL:-https://transfohub.eurafric.com}"
+ENV_NAME="${ENV_NAME:-production}"
 RELEASES_DIR="${RELEASES_DIR:-${SCRIPT_DIR}/releases}"
 
 # --- Couleurs ----------------------------------------------------------------
@@ -50,7 +43,7 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-log()  { echo -e "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
+log()  { mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true; echo -e "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
 info() { echo -e "${CYAN}➜${NC} $*"; }
 ok()   { echo -e "${GREEN}✔${NC} $*"; log "OK: $*"; }
 warn() { echo -e "${YELLOW}⚠${NC} $*"; log "WARN: $*"; }
@@ -65,48 +58,43 @@ confirm() {
   [[ "${ans:-}" =~ ^[oOyY]$ ]]
 }
 
-require_root() {
-  [[ "$(id -u)" -eq 0 ]] || die "Exécutez ce script en root (sudo)."
+# Pas de root requis — refuser root pour éviter le mauvais ~/.pm2
+refuse_root() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    die "N'exécutez PAS ce script en root. Connectez-vous en admin_keba (ou l'user PM2) puis : ./transfohub-admin.sh"
+  fi
 }
 
-# --- Résolution node/npm/pm2 (PATH root vs user banque) -----------------------
+# --- PATH node/npm/pm2 (nvm, etc.) -------------------------------------------
 expand_tool_path() {
-  local dir home
-  for dir in /usr/local/bin /usr/bin /bin /opt/nodejs/bin; do
+  local dir
+  for dir in /usr/local/bin /usr/bin /bin "$HOME/.local/bin" "$HOME/.npm-global/bin" "$HOME/bin"; do
     [[ -d "$dir" ]] && PATH="${dir}:${PATH}"
   done
-  if [[ -n "${PM2_USER}" && "${PM2_USER}" != "root" ]]; then
-    home="$(getent passwd "$PM2_USER" 2>/dev/null | cut -d: -f6 || echo "/home/${PM2_USER}")"
-  elif [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
-    home="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || echo "/home/${SUDO_USER}")"
-  else
-    home=""
-  fi
-  if [[ -n "$home" ]]; then
-    for dir in "${home}/.local/bin" "${home}/.npm-global/bin" "${home}/bin"; do
-      [[ -d "$dir" ]] && PATH="${dir}:${PATH}"
-    done
-    # shellcheck disable=SC2086
-    for dir in "${home}/.nvm/versions/node/"*/bin; do
-      [[ -d "$dir" ]] && PATH="${dir}:${PATH}"
-    done
-  fi
   # shellcheck disable=SC2086
-  for dir in /root/.nvm/versions/node/*/bin; do
+  for dir in "$HOME/.nvm/versions/node/"*/bin; do
+    [[ -d "$dir" ]] && PATH="${dir}:${PATH}"
+  done
+  # shellcheck disable=SC2086
+  for dir in "$HOME/.local/share/fnm/node-versions/"*/installation/bin; do
     [[ -d "$dir" ]] && PATH="${dir}:${PATH}"
   done
   export PATH
+  export PM2_HOME="${PM2_HOME:-$HOME/.pm2}"
 }
 
 find_bin() {
-  local name="$1" c
-  [[ -n "${!2:-}" && -x "${!2}" ]] && { echo "${!2}"; return 0; } 2>/dev/null || true
+  local name="$1"
   case "$name" in
     pm2)  [[ -n "${CMD_PM2:-}" && -x "$CMD_PM2" ]] && { echo "$CMD_PM2"; return 0; } ;;
     npm)  [[ -n "${CMD_NPM:-}" && -x "$CMD_NPM" ]] && { echo "$CMD_NPM"; return 0; } ;;
     node) [[ -n "${CMD_NODE:-}" && -x "$CMD_NODE" ]] && { echo "$CMD_NODE"; return 0; } ;;
   esac
+  local c
   c="$(command -v "$name" 2>/dev/null || true)"
+  [[ -n "$c" && -x "$c" ]] && { echo "$c"; return 0; }
+  # recherche limitée sous $HOME
+  c="$(find "$HOME" -maxdepth 6 -type f -name "$name" 2>/dev/null | grep -E '/bin/'"$name"'$' | head -1 || true)"
   [[ -n "$c" && -x "$c" ]] && { echo "$c"; return 0; }
   return 1
 }
@@ -120,30 +108,29 @@ resolve_tools() {
   NODE_BIN="$(find_bin node || true)"
   NPM_BIN="$(find_bin npm || true)"
   PM2_BIN="$(find_bin pm2 || true)"
+
   if [[ -z "$PM2_BIN" && -n "$NPM_BIN" ]]; then
-    info "pm2 absent du PATH — npm install -g pm2..."
+    info "pm2 introuvable — installation dans le préfixe npm de l'utilisateur..."
     "$NPM_BIN" install -g pm2
     expand_tool_path
     PM2_BIN="$(find_bin pm2 || true)"
+    if [[ -z "$PM2_BIN" ]]; then
+      local prefix
+      prefix="$("$NPM_BIN" config get prefix 2>/dev/null || true)"
+      [[ -x "${prefix}/bin/pm2" ]] && PM2_BIN="${prefix}/bin/pm2"
+    fi
   fi
+
+  [[ -n "$NODE_BIN" ]] || die "node introuvable (nvm chargé ?)"
   [[ -n "$NPM_BIN" ]] || die "npm introuvable"
-  [[ -n "$PM2_BIN" ]] || die "pm2 introuvable — installez-le pour root ou définissez CMD_PM2 / PM2_USER"
+  [[ -n "$PM2_BIN" ]] || die "pm2 introuvable. Installez : npm install -g pm2"
+
+  ok "node=$NODE_BIN | npm=$NPM_BIN | pm2=$PM2_BIN | PM2_HOME=$PM2_HOME"
 }
 
-# PM2 sous le bon utilisateur (évite ~/.pm2 root vs admin)
 run_pm2() {
   resolve_tools
-  local user="${PM2_USER:-}"
-  if [[ -z "$user" && -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
-    user="$SUDO_USER"
-  fi
-  if [[ -n "$user" && "$user" != "root" ]]; then
-    local home
-    home="$(getent passwd "$user" 2>/dev/null | cut -d: -f6 || echo "/home/${user}")"
-    sudo -u "$user" -H env "PATH=${PATH}" "HOME=${home}" "$PM2_BIN" "$@"
-  else
-    "$PM2_BIN" "$@"
-  fi
+  "$PM2_BIN" "$@"
 }
 
 run_npm() {
@@ -163,24 +150,24 @@ current_git_info() {
   if [[ -d "${APP_DIR}/.git" ]]; then
     (cd "$APP_DIR" && echo "branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?') commit=$(git rev-parse --short HEAD 2>/dev/null || echo '?')")
   else
-    echo "branch=n/a commit=n/a (pas de dépôt git)"
+    echo "branch=n/a commit=n/a"
   fi
 }
 
 status_banner() {
   clear
   echo -e "${BOLD}══════════════════════════════════════════════════${NC}"
-  echo -e "${BOLD}  TransfoHub — Administration PRODUCTION (banque)${NC}"
+  echo -e "${BOLD}  TransfoHub — Admin PRODUCTION (user: $(whoami))${NC}"
   echo -e "${BOLD}══════════════════════════════════════════════════${NC}"
-  [[ -n "$PUBLIC_URL" ]] && echo -e "  URL     : ${CYAN}${PUBLIC_URL}${NC}"
-  echo -e "  Env     : ${CYAN}${ENV_NAME:-production}${NC}"
+  echo -e "  URL     : ${CYAN}${PUBLIC_URL}${NC}"
+  echo -e "  Env     : ${CYAN}${ENV_NAME}${NC}"
   echo -e "  App     : ${CYAN}${APP_DIR}${NC}"
   echo -e "  Port    : ${CYAN}${APP_PORT}${NC}  |  PM2 : ${CYAN}${PM2_NAME}${NC}"
   echo -e "  Git     : $(current_git_info)"
   echo -e "  Backups : ${CYAN}${BACKUP_ROOT}${NC}"
-  if resolve_tools 2>/dev/null; then
-    local st
-    st="$(run_pm2 jlist 2>/dev/null | python3 -c "
+  echo -e "  Releases: ${CYAN}${RELEASES_DIR}${NC}"
+  local st
+  st="$(run_pm2 jlist 2>/dev/null | python3 -c "
 import sys, json
 try:
   data=json.load(sys.stdin)
@@ -189,56 +176,52 @@ try:
 except Exception:
   print('inconnu')
 " 2>/dev/null || echo '?')"
-    if [[ "$st" == "online" ]]; then
-      echo -e "  Statut  : ${GREEN}online${NC}"
-    else
-      echo -e "  Statut  : ${YELLOW}${st}${NC}"
-    fi
+  if [[ "$st" == "online" ]]; then
+    echo -e "  Statut  : ${GREEN}online${NC}"
+  else
+    echo -e "  Statut  : ${YELLOW}${st}${NC}"
   fi
+  echo -e "  ${YELLOW}Nginx non géré par ce script (ops séparée)${NC}"
   echo -e "${BOLD}══════════════════════════════════════════════════${NC}"
   echo
 }
 
-# --- Stop / Start / Restart --------------------------------------------------
+# --- Stop / Start / Restart (PM2 uniquement) ---------------------------------
 do_stop() {
-  info "Arrêt de l'application..."
+  info "Arrêt PM2 ${PM2_NAME}..."
   run_pm2 stop "$PM2_NAME" 2>/dev/null || warn "PM2 ${PM2_NAME} déjà arrêté ou absent"
-  if [[ "${STOP_NGINX_ON_STOP}" =~ ^(yes|YES|true|TRUE|1)$ ]]; then
-    systemctl stop "$NGINX_SERVICE" 2>/dev/null || true
-    ok "Arrêt PM2 + Nginx."
-  else
-    ok "Arrêt PM2 (Nginx laissé actif — STOP_NGINX_ON_STOP=no)."
-  fi
+  ok "Application arrêtée (Nginx non touché)."
 }
 
 do_start() {
-  info "Démarrage..."
-  systemctl start "$NGINX_SERVICE" 2>/dev/null || warn "Nginx non démarré"
+  info "Démarrage PM2 ${PM2_NAME}..."
+  ensure_ecosystem_port
   if run_pm2 describe "$PM2_NAME" >/dev/null 2>&1; then
     run_pm2 start "$PM2_NAME"
   else
-    [[ -f "${APP_DIR}/ecosystem.config.cjs" ]] || die "ecosystem.config.cjs manquant"
-    ensure_ecosystem_port
-    (cd "$APP_DIR" && run_pm2 start ecosystem.config.cjs)
+    [[ -f "${APP_DIR}/ecosystem.config.cjs" ]] || die "ecosystem.config.cjs manquant dans ${APP_DIR}"
+    (cd "$APP_DIR" && run_pm2 start ecosystem.config.cjs) \
+      || (cd "$APP_DIR" && run_pm2 start node_modules/next/dist/bin/next --name "$PM2_NAME" -- start -p "$APP_PORT")
   fi
   run_pm2 save >/dev/null 2>&1 || true
   sleep 2
   curl -s -o /dev/null -w "HTTP local /login → %{http_code}\n" --max-time 10 "http://127.0.0.1:${APP_PORT}/login" || true
-  ok "Démarrage terminé."
+  ok "Application démarrée (Nginx non touché)."
 }
 
 do_restart() {
-  info "Redémarrage..."
-  systemctl reload "$NGINX_SERVICE" 2>/dev/null || systemctl restart "$NGINX_SERVICE" 2>/dev/null || true
+  info "Redémarrage PM2 ${PM2_NAME}..."
+  ensure_ecosystem_port
   if run_pm2 describe "$PM2_NAME" >/dev/null 2>&1; then
-    run_pm2 restart "$PM2_NAME"
+    run_pm2 restart "$PM2_NAME" --update-env
   else
-    (cd "$APP_DIR" && run_pm2 start ecosystem.config.cjs)
+    do_start
+    return 0
   fi
   run_pm2 save >/dev/null 2>&1 || true
   sleep 2
   curl -s -o /dev/null -w "HTTP local /login → %{http_code}\n" --max-time 10 "http://127.0.0.1:${APP_PORT}/login" || true
-  ok "Redémarrage terminé."
+  ok "Application redémarrée (Nginx non touché)."
 }
 
 # --- Backups -----------------------------------------------------------------
@@ -273,8 +256,9 @@ create_backup() {
     echo "created_at=$(date -Iseconds)"
     echo "reason=${reason}"
     echo "app_dir=${APP_DIR}"
-    echo "env=${ENV_NAME:-production}"
-    echo "public_host=${PUBLIC_HOST:-}"
+    echo "env=${ENV_NAME}"
+    echo "public_host=${PUBLIC_HOST}"
+    echo "user=$(whoami)"
     echo "git=$(current_git_info)"
     echo "host=$(hostname)"
   } > "${dir}/meta.txt"
@@ -285,7 +269,7 @@ create_backup() {
     cp -a "${APP_DIR}/config/maintenance-user.json" "${dir}/config/"
   fi
 
-  info "Archive des sources (sans node_modules)..."
+  info "Archive des sources..."
   tar -C "$APP_DIR" \
     --exclude='./node_modules' \
     --exclude='./.git' \
@@ -306,7 +290,7 @@ create_backup() {
       die "Échec pg_dump — opération annulée."
     fi
   else
-    warn "pg_dump introuvable — backup sans dump DB"
+    warn "pg_dump introuvable dans le PATH — backup sans dump DB"
   fi
 
   touch "${dir}/COMPLETE"
@@ -369,14 +353,13 @@ pm2_reload_app() {
       || (cd "$APP_DIR" && run_pm2 start node_modules/next/dist/bin/next --name "$PM2_NAME" -- start -p "$APP_PORT")
   fi
   run_pm2 save >/dev/null 2>&1 || true
-  systemctl start "$NGINX_SERVICE" 2>/dev/null || systemctl reload "$NGINX_SERVICE" 2>/dev/null || true
   sleep 2
   local code
   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://127.0.0.1:${APP_PORT}/login" || echo fail)"
   if [[ "$code" =~ ^(200|302|307)$ ]]; then
     ok "Application répond (HTTP ${code})."
   else
-    warn "Réponse HTTP ${code} — vérifiez : pm2 logs ${PM2_NAME} (user=${PM2_USER:-root})"
+    warn "Réponse HTTP ${code} — pm2 logs ${PM2_NAME}"
     run_pm2 list || true
   fi
 }
@@ -384,6 +367,7 @@ pm2_reload_app() {
 # --- Déploiements ------------------------------------------------------------
 deploy_from_git() {
   echo -e "${BOLD}Déploiement depuis Git (PRODUCTION)${NC}"
+  [[ -d "${APP_DIR}/.git" ]] || die "Pas de dépôt git dans ${APP_DIR} — utilisez l'option ZIP"
   local remote branch
   read -r -p "Remote [${GIT_REMOTE_DEFAULT}] : " remote
   remote="${remote:-$GIT_REMOTE_DEFAULT}"
@@ -392,7 +376,7 @@ deploy_from_git() {
 
   echo
   info "Remote=${remote}  Branche=${branch}"
-  warn "Une sauvegarde source+DB sera créée AVANT le déploiement."
+  warn "Sauvegarde source+DB avant déploiement."
   confirm "CONFIRMER le déploiement Git en PRODUCTION ?" || { warn "Annulé."; return 0; }
 
   create_backup "pre-git-deploy"
@@ -425,16 +409,16 @@ deploy_from_git() {
 
 deploy_from_zip() {
   echo -e "${BOLD}Déploiement depuis ZIP (PRODUCTION)${NC}"
-  echo "  a) ZIP déjà sur le serveur (recommandé banque)"
-  echo "  b) Télécharger depuis GitHub (si réseau autorisé)"
-  echo "  c) Choisir dans ${RELEASES_DIR}/"
+  echo "  a) Chemin d'un ZIP sur le serveur"
+  echo "  b) Choisir dans ${RELEASES_DIR}/"
+  echo "  c) Télécharger GitHub (si réseau autorisé)"
   read -r -p "Choix [a/b/c] : " mode
   local zip_path=""
   local work
-  work="$(mktemp -d /tmp/transfohub-zip-XXXXXX)"
+  work="$(mktemp -d "${TMPDIR:-/tmp}/transfohub-zip-XXXXXX")"
 
-  case "${mode:-a}" in
-    b|B)
+  case "${mode:-b}" in
+    c|C)
       local url
       read -r -p "URL ZIP [${GITHUB_ZIP_DEFAULT}] : " url
       url="${url:-$GITHUB_ZIP_DEFAULT}"
@@ -442,29 +426,30 @@ deploy_from_zip() {
       info "Téléchargement : $url"
       curl -fL --progress-bar -o "$zip_path" "$url" || { rm -rf "$work"; die "Téléchargement échoué"; }
       ;;
-    c|C)
+    a|A)
+      read -r -p "Chemin absolu du fichier .zip : " zip_path
+      [[ -f "$zip_path" ]] || { rm -rf "$work"; die "Fichier introuvable : $zip_path"; }
+      ;;
+    *)
       mkdir -p "$RELEASES_DIR"
       mapfile -t ZIPS < <(find "$RELEASES_DIR" -maxdepth 1 -type f -name '*.zip' | sort)
       if [[ ${#ZIPS[@]} -eq 0 ]]; then
         rm -rf "$work"
-        die "Aucun ZIP dans ${RELEASES_DIR}"
+        die "Aucun ZIP dans ${RELEASES_DIR} — déposez TransfoHub-main.zip puis relancez"
       fi
       local i=1
       for z in "${ZIPS[@]}"; do
-        printf "  %2d) %s\n" "$i" "$(basename "$z")"
+        printf "  %2d) %s  (%s)\n" "$i" "$(basename "$z")" "$(du -h "$z" | awk '{print $1}')"
         i=$((i + 1))
       done
-      read -r -p "Numéro : " num
+      read -r -p "Numéro [1] : " num
+      num="${num:-1}"
       zip_path="${ZIPS[$((num - 1))]}"
       [[ -f "$zip_path" ]] || { rm -rf "$work"; die "Sélection invalide"; }
       ;;
-    *)
-      read -r -p "Chemin absolu du fichier .zip : " zip_path
-      [[ -f "$zip_path" ]] || { rm -rf "$work"; die "Fichier introuvable : $zip_path"; }
-      ;;
   esac
 
-  confirm "Sauvegarder la version actuelle puis déployer ce ZIP en PRODUCTION ?" || { rm -rf "$work"; warn "Annulé."; return 0; }
+  confirm "Sauvegarder puis déployer ce ZIP en PRODUCTION ?" || { rm -rf "$work"; warn "Annulé."; return 0; }
 
   create_backup "pre-zip-deploy"
 
@@ -494,7 +479,7 @@ deploy_from_zip() {
       --exclude 'config/maintenance-user.json' \
       "${src}/" "${APP_DIR}/"
   else
-    die "rsync requis pour le déploiement ZIP"
+    die "rsync requis (yum/apt install rsync)"
   fi
 
   cp -a "$env_bak" "${APP_DIR}/.env"
@@ -513,8 +498,6 @@ deploy_from_zip() {
 # --- Rollback ----------------------------------------------------------------
 do_rollback() {
   echo -e "${BOLD}${RED}Rollback PRODUCTION — source + base de données${NC}"
-  echo "Ceci va restaurer fichiers + PostgreSQL depuis une sauvegarde."
-  echo
   list_backups || { pause; return 0; }
   echo
   read -r -p "Numéro de sauvegarde (0 = annuler) : " num
@@ -533,7 +516,7 @@ do_rollback() {
   echo
   confirm "CONFIRMER le rollback PRODUCTION ? (la DB sera écrasée)" || { warn "Annulé."; return 0; }
 
-  info "Filet de sécurité (backup état actuel)..."
+  info "Filet de sécurité..."
   create_backup "pre-rollback" || warn "Sauvegarde pré-rollback en échec"
 
   load_db_url
@@ -554,10 +537,13 @@ do_rollback() {
 
   info "Restauration PostgreSQL..."
   load_db_url
+  if ! command -v psql >/dev/null 2>&1; then
+    die "psql introuvable — impossible de restaurer la DB"
+  fi
   if gunzip -c "${bak}/db.sql.gz" | psql "$DB_URL" -v ON_ERROR_STOP=1; then
     ok "Base restaurée."
   else
-    die "Échec restauration DB — voir ${bak} et pre-rollback"
+    die "Échec restauration DB — voir ${bak}"
   fi
 
   resolve_tools
@@ -575,10 +561,10 @@ do_rollback() {
 # --- Menu --------------------------------------------------------------------
 show_menu() {
   status_banner
-  echo "  1) Tout arrêter"
-  echo "  2) Tout démarrer"
-  echo "  3) Tout redémarrer"
-  echo "  4) Déployer une nouvelle version (sources Git)"
+  echo "  1) Arrêter l'application (PM2)"
+  echo "  2) Démarrer l'application (PM2)"
+  echo "  3) Redémarrer l'application (PM2)"
+  echo "  4) Déployer une nouvelle version (Git)"
   echo "  5) Déployer à partir d'un fichier ZIP"
   echo "  6) Rollback à une ancienne version (source + DB)"
   echo "  7) Créer une sauvegarde manuelle (source + DB)"
@@ -601,12 +587,9 @@ show_menu() {
 }
 
 main() {
-  require_root
-  if [[ "${APP_DIR}" == *REMPLACER* ]]; then
-    die "Éditez config.env : renseignez APP_DIR (chemin réel de la prod banque)"
-  fi
-  mkdir -p "$BACKUP_ROOT" "$(dirname "$LOG_FILE")" "$RELEASES_DIR"
-  touch "$LOG_FILE"
+  refuse_root
+  mkdir -p "$BACKUP_ROOT" "$RELEASES_DIR"
+  touch "$LOG_FILE" 2>/dev/null || LOG_FILE="${SCRIPT_DIR}/transfohub-prod-admin.log"
   resolve_tools
 
   if [[ "${1:-}" == "--backup-only" ]]; then
