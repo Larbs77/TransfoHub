@@ -92,10 +92,106 @@ require_root() {
   [[ "$(id -u)" -eq 0 ]] || die "Exécutez en root : sudo $0 ${ZIP_ARG}"
 }
 
+# Chemins absolus (sudo n'a souvent PAS le PATH de admin_keba / nvm)
+NODE_BIN=""
+NPM_BIN=""
+PM2_BIN=""
+
 # --- Helpers -----------------------------------------------------------------
+expand_tool_path() {
+  # PATH élargi pour root + utilisateur sudo + emplacements classiques
+  # (sous sudo, pm2/npm sont souvent dans le home de admin_keba / nvm)
+  local dir
+  for dir in /usr/local/bin /usr/bin /bin /opt/nodejs/bin /root/.local/bin; do
+    [[ -d "$dir" ]] && PATH="${dir}:${PATH}"
+  done
+  # shellcheck disable=SC2086
+  for dir in /root/.nvm/versions/node/*/bin; do
+    [[ -d "$dir" ]] && PATH="${dir}:${PATH}"
+  done
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    local home
+    home="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || true)"
+    home="${home:-/home/${SUDO_USER}}"
+    for dir in \
+      "${home}/.local/bin" \
+      "${home}/.npm-global/bin" \
+      "${home}/bin"
+    do
+      [[ -d "$dir" ]] && PATH="${dir}:${PATH}"
+    done
+    # shellcheck disable=SC2086
+    for dir in \
+      "${home}/.nvm/versions/node/"*/bin \
+      "${home}/.local/share/fnm/node-versions/"*/installation/bin
+    do
+      [[ -d "$dir" ]] && PATH="${dir}:${PATH}"
+    done
+  fi
+  export PATH
+}
+
+find_bin() {
+  local name="$1"
+  local c
+  c="$(command -v "$name" 2>/dev/null || true)"
+  if [[ -n "$c" && -x "$c" ]]; then
+    echo "$c"
+    return 0
+  fi
+  # Chercher sous le home de SUDO_USER (cas fréquent banque)
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    local home
+    home="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || true)"
+    home="${home:-/home/${SUDO_USER}}"
+    if [[ -d "$home" ]]; then
+      c="$(find "$home" -maxdepth 6 -type f -name "$name" 2>/dev/null \
+        | grep -E '/bin/'"$name"'$' | head -1 || true)"
+      if [[ -n "$c" && -x "$c" ]]; then
+        echo "$c"
+        return 0
+      fi
+    fi
+  fi
+  return 1
+}
+
+resolve_tools() {
+  expand_tool_path
+
+  NODE_BIN="$(find_bin node || true)"
+  NPM_BIN="$(find_bin npm || true)"
+  PM2_BIN="$(find_bin pm2 || true)"
+
+  # Si npm trouvé mais pas pm2 → installer pm2 pour root (global)
+  if [[ -z "$PM2_BIN" && -n "$NPM_BIN" ]]; then
+    info "pm2 introuvable dans le PATH root — installation globale via npm..."
+    "$NPM_BIN" install -g pm2
+    expand_tool_path
+    PM2_BIN="$(find_bin pm2 || true)"
+    # chemin classique après npm -g
+    if [[ -z "$PM2_BIN" && -n "$NPM_BIN" ]]; then
+      local prefix
+      prefix="$("$NPM_BIN" config get prefix 2>/dev/null || true)"
+      if [[ -x "${prefix}/bin/pm2" ]]; then
+        PM2_BIN="${prefix}/bin/pm2"
+      fi
+    fi
+  fi
+
+  [[ -n "$NODE_BIN" ]] || die "node introuvable (même hors PATH sudo). Installez Node ou ajoutez-le au PATH."
+  [[ -n "$NPM_BIN" ]] || die "npm introuvable (même hors PATH sudo)."
+  [[ -n "$PM2_BIN" ]] || die "pm2 introuvable. Essayez : sudo npm install -g pm2  (ou avec le npm de admin_keba)"
+
+  ok "Outils : node=$NODE_BIN"
+  ok "         npm=$NPM_BIN"
+  ok "         pm2=$PM2_BIN"
+}
+
 list_pm2_apps() {
-  command -v pm2 >/dev/null 2>&1 || return 0
-  pm2 jlist 2>/dev/null | python3 -c "
+  [[ -n "${PM2_BIN:-}" ]] || PM2_BIN="$(find_bin pm2 2>/dev/null || true)"
+  [[ -n "${PM2_BIN:-}" && -x "$PM2_BIN" ]] || return 0
+  "$PM2_BIN" jlist 2>/dev/null | python3 -c "
 import sys, json
 try:
   data=json.load(sys.stdin)
@@ -111,8 +207,8 @@ except Exception:
 
 guess_port_from_pm2() {
   local name="$1"
-  command -v pm2 >/dev/null 2>&1 || return 0
-  pm2 jlist 2>/dev/null | python3 -c "
+  [[ -n "${PM2_BIN:-}" && -x "$PM2_BIN" ]] || return 0
+  "$PM2_BIN" jlist 2>/dev/null | python3 -c "
 import sys, json
 name='''${name}'''
 try:
@@ -280,22 +376,21 @@ step_ask_current_instance() {
   echo -e "  Domaine public (conservé) : ${CYAN}${PUBLIC_URL}${NC}"
   echo
 
-  if command -v pm2 >/dev/null 2>&1; then
-    echo -e "${BOLD}Applications PM2 détectées :${NC}"
-    local line
-    local n=0
-    while IFS=$'\t' read -r name st cwd; do
-      [[ -z "${name:-}" ]] && continue
-      n=$((n + 1))
-      printf "  %2d) PM2=%-24s statut=%-10s cwd=%s\n" "$n" "$name" "$st" "$cwd"
-    done < <(list_pm2_apps)
-    [[ "$n" -eq 0 ]] && echo "  (aucune)"
-    echo
-  fi
+  resolve_tools
+
+  echo -e "${BOLD}Applications PM2 détectées :${NC}"
+  local n=0
+  while IFS=$'\t' read -r name st cwd; do
+    [[ -z "${name:-}" ]] && continue
+    n=$((n + 1))
+    printf "  %2d) PM2=%-24s statut=%-10s cwd=%s\n" "$n" "$name" "$st" "$cwd"
+  done < <(list_pm2_apps)
+  [[ "$n" -eq 0 ]] && echo "  (aucune — pm2 OK mais process vide, ou dump jlist vide)"
+  echo
 
   # Chemin actuel
   local default_dir="${APP_DIR:-}"
-  if [[ -z "$default_dir" ]] && command -v pm2 >/dev/null 2>&1; then
+  if [[ -z "$default_dir" ]]; then
     default_dir="$(list_pm2_apps | head -1 | awk -F'\t' '{print $3}')"
   fi
 
@@ -416,12 +511,9 @@ step_packages() {
       die "Node.js >= ${NODE_MAJOR_MIN} requis"
     fi
   fi
-  ok "Node $(node -v) / npm $(npm -v)"
-
-  if ! command -v pm2 >/dev/null 2>&1; then
-    npm install -g pm2
-  fi
-  ok "PM2 $(pm2 -v)"
+  expand_tool_path
+  resolve_tools
+  ok "Node $($NODE_BIN -v) / npm $($NPM_BIN -v) / PM2 $($PM2_BIN -v)"
 }
 
 # --- Nginx -------------------------------------------------------------------
@@ -576,21 +668,23 @@ step_new_platform() {
   mkdir -p "${APP_DIR_TARGET}/logs" "${APP_DIR_TARGET}/public/uploads/avatars"
   chmod 600 "${APP_DIR_TARGET}/.env" 2>/dev/null || true
 
+  resolve_tools
+
   # Build sur la NOUVELLE plateforme (l'ancienne tourne encore)
   info "npm ci (nouvelle plateforme)..."
-  (cd "$APP_DIR_TARGET" && npm ci)
+  (cd "$APP_DIR_TARGET" && "$NPM_BIN" ci)
 
   info "Prisma generate..."
-  (cd "$APP_DIR_TARGET" && npm run db:generate)
+  (cd "$APP_DIR_TARGET" && "$NPM_BIN" run db:generate)
 
   if [[ "${RUN_DB_MIGRATE}" =~ ^(yes|YES|true|TRUE|1)$ ]]; then
     info "Migrations sur la DB existante (pas de seed)..."
-    (cd "$APP_DIR_TARGET" && npm run db:migrate)
+    (cd "$APP_DIR_TARGET" && "$NPM_BIN" run db:migrate)
     ok "Migrations OK"
   fi
 
   info "Build production..."
-  (cd "$APP_DIR_TARGET" && npm run build)
+  (cd "$APP_DIR_TARGET" && "$NPM_BIN" run build)
   ok "Build OK — plateforme prête : ${APP_DIR_TARGET}"
 
   # Symlink current
@@ -613,21 +707,28 @@ step_switch_and_admin() {
   echo
   echo -e "${BOLD}═══ 6) Bascule PM2 + menu administration ═══${NC}"
 
-  # Arrêt ancienne instance (même nom ou anciennes variantes)
-  if command -v pm2 >/dev/null 2>&1; then
-    info "Arrêt PM2 : ${PM2_NAME_OLD}"
-    pm2 stop "$PM2_NAME_OLD" 2>/dev/null || true
-    pm2 delete "$PM2_NAME_OLD" 2>/dev/null || true
-    # autres noms courants
-    for n in transfohub transfohub-recette pmo-app; do
-      [[ "$n" == "$PM2_NAME_OLD" ]] && continue
-      pm2 stop "$n" 2>/dev/null || true
-    done
-  fi
+  resolve_tools
 
-  (cd "$APP_DIR_TARGET" && pm2 start ecosystem.config.cjs)
-  pm2 save || true
-  pm2 startup systemd -u root --hp /root 2>/dev/null || true
+  # Arrêt ancienne instance (même nom ou anciennes variantes)
+  info "Arrêt PM2 : ${PM2_NAME_OLD} (via ${PM2_BIN})"
+  "$PM2_BIN" stop "$PM2_NAME_OLD" 2>/dev/null || true
+  "$PM2_BIN" delete "$PM2_NAME_OLD" 2>/dev/null || true
+  local n
+  for n in transfohub transfohub-recette pmo-app; do
+    [[ "$n" == "$PM2_NAME_OLD" ]] && continue
+    "$PM2_BIN" stop "$n" 2>/dev/null || true
+  done
+
+  (cd "$APP_DIR_TARGET" && "$PM2_BIN" start ecosystem.config.cjs)
+  "$PM2_BIN" save || true
+  # Ne pas forcer -u root si l'instance tourne sous admin_keba : tenter les deux
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    local home
+    home="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || echo "/home/${SUDO_USER}")"
+    "$PM2_BIN" startup systemd -u "$SUDO_USER" --hp "$home" 2>/dev/null || true
+  else
+    "$PM2_BIN" startup systemd -u root --hp /root 2>/dev/null || true
+  fi
 
   sleep 3
   local code
@@ -635,7 +736,7 @@ step_switch_and_admin() {
   if [[ "$code" =~ ^[23] ]]; then
     ok "App locale HTTP ${code} → :${APP_PORT}/login"
   else
-    warn "App locale HTTP ${code} — pm2 logs ${PM2_NAME}"
+    warn "App locale HTTP ${code} — ${PM2_BIN} logs ${PM2_NAME}"
   fi
 
   # Menu admin pointant sur la plateforme courante
