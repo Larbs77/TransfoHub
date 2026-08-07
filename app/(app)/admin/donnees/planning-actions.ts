@@ -577,11 +577,15 @@ export async function confirmJalonPlanningExcel(chantierId:string,base64:string,
   await prisma.$transaction(async tx=>{
     const refs=new Map<string,string>(); for(const n of nodes) refs.set(n.id,n.id);
     const date=(v:unknown)=>typeof v==="string"&&v?ymdToUtcDate(v):null;
-    // Appliquer d'abord les niveaux bas (ACTIVITE → WORKSTREAM → JALON) pour la règle Atteint
-    const ordered=[...ops].sort((a,b)=>{
-      const rank=(l:string)=>l==="ACTIVITE"?0:l==="WORKSTREAM"?1:2;
-      return rank(a.level)-rank(b.level);
-    });
+    // CREATE : parents d'abord (JALON → WORKSTREAM → ACTIVITE) pour résoudre les parentRef `new:…`.
+    // UPDATE : enfants d'abord (ACTIVITE → WORKSTREAM → JALON) pour la règle Atteint.
+    // Les CREATE passent avant les UPDATE : un rattachement peut viser un parent encore à créer.
+    const levelRankCreate = (l: string) => (l === "JALON" ? 0 : l === "WORKSTREAM" ? 1 : 2);
+    const levelRankUpdate = (l: string) => (l === "ACTIVITE" ? 0 : l === "WORKSTREAM" ? 1 : 2);
+    const ordered = [
+      ...ops.filter((o) => o.kind === "CREATE").sort((a, b) => levelRankCreate(a.level) - levelRankCreate(b.level)),
+      ...ops.filter((o) => o.kind === "UPDATE").sort((a, b) => levelRankUpdate(a.level) - levelRankUpdate(b.level)),
+    ];
     for(const op of ordered){
       const d=op.data;
       if(op.kind==="UPDATE"&&op.id){
