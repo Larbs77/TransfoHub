@@ -50,6 +50,10 @@ import {
 } from "@/app/(app)/actions";
 import { formatAffecteeADisplay } from "@/lib/consultation-affectation";
 import { isQuestionEnRetard } from "@/lib/consultation-labels";
+import {
+  useCanWritePage,
+  useIsConsultationChantier,
+} from "@/components/user-provider";
 
 interface QuestionItem {
   id: string;
@@ -138,6 +142,14 @@ export function ChantierConsultationTab({ questions, chantierId }: Props) {
     update: "DIRECT",
     delete: "DIRECT",
   });
+  const canWriteQa =
+    useCanWritePage("/consultation-backlog") &&
+    !useIsConsultationChantier(chantierId);
+  const effectiveQa = {
+    create: canWriteQa ? qaModes.create : "INTERDIT",
+    update: canWriteQa ? qaModes.update : "INTERDIT",
+    delete: canWriteQa ? qaModes.delete : "INTERDIT",
+  };
 
   useEffect(() => {
     getQaWorkflowUiState()
@@ -260,7 +272,7 @@ export function ChantierConsultationTab({ questions, chantierId }: Props) {
   }
 
   function handleAdd() {
-    if (qaModes.create === "INTERDIT") {
+    if (effectiveQa.create === "INTERDIT") {
       alert("Vous n'êtes pas habilité à créer une question Q&A.");
       return;
     }
@@ -268,11 +280,11 @@ export function ChantierConsultationTab({ questions, chantierId }: Props) {
   }
 
   async function handleDelete(id: string) {
-    if (qaModes.delete === "INTERDIT") {
+    if (effectiveQa.delete === "INTERDIT") {
       alert("Vous n'êtes pas habilité à supprimer une question Q&A.");
       return;
     }
-    if (qaModes.delete === "VALIDATION") {
+    if (effectiveQa.delete === "VALIDATION") {
       const motif = window.prompt(
         "Motif de suppression (demande workflow) :"
       );
@@ -445,7 +457,7 @@ export function ChantierConsultationTab({ questions, chantierId }: Props) {
             </SelectContent>
           </Select>
         </div>
-        {qaModes.create !== "INTERDIT" && (
+        {effectiveQa.create !== "INTERDIT" && (
           <Button onClick={handleAdd} size="sm" className="shrink-0">
             <Plus className="mr-1 size-4" />
             Ajouter
@@ -547,7 +559,7 @@ export function ChantierConsultationTab({ questions, chantierId }: Props) {
                       >
                         <Eye className="size-3.5 text-[#0A3C74]" />
                       </Button>
-                      {qaModes.update !== "INTERDIT" && (
+                      {effectiveQa.update !== "INTERDIT" && (
                         <Button
                           variant="ghost"
                           size="icon"
@@ -563,7 +575,7 @@ export function ChantierConsultationTab({ questions, chantierId }: Props) {
                           </Link>
                         </Button>
                       )}
-                      {qaModes.delete !== "INTERDIT" && (
+                      {effectiveQa.delete !== "INTERDIT" && (
                         <Button
                           variant="ghost"
                           size="icon"

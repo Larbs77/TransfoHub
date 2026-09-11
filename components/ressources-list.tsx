@@ -43,6 +43,7 @@ import { RessourceCard } from "./ressource-card";
 import { RessourceFormDialog } from "./ressource-form-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import { deleteRessource } from "@/app/(app)/actions";
+import { useCanWritePage } from "@/components/user-provider";
 import {
   RESSOURCE_TYPE_LABELS,
   RESSOURCE_TYPE_COLORS,
@@ -260,6 +261,7 @@ export function RessourcesList({
   );
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const canWrite = useCanWritePage("/ressources");
 
   const orgOptions = useMemo(() => {
     const orgs = new Set(ressources.map((r) => r.organisation).filter(Boolean));
@@ -428,6 +430,7 @@ export function RessourcesList({
               {hasActiveFilters ? " (filtrées)" : ""}
             </CardDescription>
           </div>
+          {canWrite && (
           <CardAction>
             <Button
               size="sm"
@@ -438,6 +441,7 @@ export function RessourcesList({
               Nouvelle ressource
             </Button>
           </CardAction>
+          )}
         </CardHeader>
         <CardContent>
           {/* Filters */}
@@ -725,6 +729,8 @@ export function RessourcesList({
                           </td>
                           <td className="px-3 py-2.5">
                             <div className="flex items-center justify-end gap-1">
+                              {canWrite && (
+                                <>
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -746,6 +752,8 @@ export function RessourcesList({
                               >
                                 <Trash2 className="size-3.5 text-destructive" />
                               </Button>
+                                </>
+                              )}
                               <Button
                                 variant="ghost"
                                 size="icon"

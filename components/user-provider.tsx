@@ -16,12 +16,16 @@ interface UserContextType {
   roleLabel: string;
   roleColor: string;
   allowedPages: string[];
+  /** Paths the role may mutate. Unenforced screens stay writable if accessible. */
+  allowedWritePages: string[];
   ressourceId: string | null;
   dashboardType: DashboardType;
   /** programme | chantier | none — create RAID permission from role */
   raidCreateScope: "none" | "chantier" | "programme";
   /** Chantier data scope from AppRole: all | assigned | none */
   chantierScope: "all" | "assigned" | "none";
+  /** Extra chantiers in consultation only (not a team member). Empty if scope all. */
+  consultationChantierIds: string[];
 }
 
 const UserContext = createContext<UserContextType | null>(null);
@@ -56,14 +60,51 @@ export function useCanAccessPage(path: string) {
   );
 }
 
+export function useCanWritePage(path: string) {
+  const { allowedWritePages, role } = useUser();
+  const canAccess = useCanAccessPage(path);
+  if (role === "Admin") return true;
+  if (!canAccess) return false;
+  if (allowedWritePages.includes(path)) return true;
+  return allowedWritePages.some(
+    (p) => p !== "/" && (path === p || path.startsWith(p + "/"))
+  );
+}
+
 /** Whether the current role may create new RAID entries. */
 export function useCanCreateRaid() {
   const { raidCreateScope } = useUser();
-  return raidCreateScope === "programme" || raidCreateScope === "chantier";
+  const canWrite = useCanWritePage("/raid");
+  return (
+    canWrite &&
+    (raidCreateScope === "programme" || raidCreateScope === "chantier")
+  );
 }
 
-/** Create chantier: only roles with périmètre données chantiers = tous les chantiers. */
+/** Create chantier: périmètre « tous les chantiers » AND page écriture. */
 export function useCanCreateChantier() {
   const { role, chantierScope } = useUser();
-  return role === "Admin" || chantierScope === "all";
+  const canWrite = useCanWritePage("/chantiers");
+  return canWrite && (role === "Admin" || chantierScope === "all");
+}
+
+/** RAID lecture : agir seulement si on est le responsable. */
+export function useIsConsultationChantier(
+  chantierId: string | null | undefined
+) {
+  const { consultationChantierIds, chantierScope } = useUser();
+  if (chantierScope === "all") return false;
+  if (!chantierId) return false;
+  return consultationChantierIds.includes(chantierId);
+}
+
+export function useCanMutateRaid(responsableRessourceId?: string | null) {
+  const canWrite = useCanWritePage("/raid");
+  const { ressourceId } = useUser();
+  if (canWrite) return true;
+  return !!(
+    ressourceId &&
+    responsableRessourceId &&
+    ressourceId === responsableRessourceId
+  );
 }

@@ -1,4 +1,8 @@
-import { getUserChantierIds, type SessionData } from "@/lib/auth";
+import {
+  getUserChantierIds,
+  getUserMemberChantierIds,
+  type SessionData,
+} from "@/lib/auth";
 import { getRoleByCode } from "@/lib/roles";
 import { isComiteNiveauOperationnel } from "@/lib/comite-niveau";
 
@@ -20,7 +24,7 @@ export async function canManageOperationalComite(
 ): Promise<boolean> {
   if (await canManageGouvernanceComites(session)) return true;
   if (!chantierId) return false;
-  const ids = await getUserChantierIds(session);
+  const ids = await getUserMemberChantierIds(session);
   if (ids === "all") return true;
   return ids.includes(chantierId);
 }
@@ -66,7 +70,7 @@ export async function comiteListWhereForSession(session: SessionData): Promise<{
 export async function comiteWritableWhereForSession(
   session: SessionData
 ): Promise<{ chantierId: { in: string[] } } | undefined> {
-  const ids = await getUserChantierIds(session);
+  const ids = await getUserMemberChantierIds(session);
   if (ids === "all") return undefined;
   return { chantierId: { in: ids.length ? ids : ["__none__"] } };
 }

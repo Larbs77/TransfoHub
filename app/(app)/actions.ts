@@ -10,6 +10,8 @@ import {
   requireChantierAccess,
   requireRaidCreateAccess,
   requirePageAccess,
+  requirePageWrite,
+  requireRaidWriteOrAssignee,
   getUserChantierIds,
   hashPassword,
   validatePasswordComplexity,
@@ -203,7 +205,7 @@ export async function getChantierById(id: string) {
   // Fiche chantier + Gantt chantier + rapport : même règle de périmètre
   // (all / assigned). Pas de requirePageAccess("/gantt") ici — le Gantt
   // chantier est un écran enfant de la fiche.
-  await requireChantierAccess(id);
+  await requireChantierAccess(id, { write: false });
   return prisma.chantier.findUnique({
     where: { id },
     include: {
@@ -1381,6 +1383,22 @@ export async function markAllMyNotificationsRead() {
 
 // ── Chantier CRUD ────────────────────────────────────
 
+function normalizeEspaceDocumentaireUrl(raw: string | undefined): string {
+  const value = (raw ?? "").trim();
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error("invalid");
+    }
+    return url.toString();
+  } catch {
+    throw new Error(
+      "Le lien de l'espace documentaire doit être une URL http(s) valide."
+    );
+  }
+}
+
 export async function createChantier(data: {
   code: string;
   nom: string;
@@ -1404,8 +1422,12 @@ export async function createChantier(data: {
   statut: string;
   avancement: number;
   rmdIds?: string[];
+  lien_espace_documentaire?: string;
 }) {
-  const session = await requireAuth();
+  const session = await requirePageWrite("/chantiers");
+  const lien_espace_documentaire = normalizeEspaceDocumentaireUrl(
+    data.lien_espace_documentaire
+  );
   // Only rôles with périmètre données chantiers = « tous les chantiers »
   if (session.role !== "Admin") {
     const role = await getRoleByCode(session.role);
@@ -1420,6 +1442,7 @@ export async function createChantier(data: {
       code: data.code,
       nom: data.nom,
       description: data.description,
+      lien_espace_documentaire,
       domaine: data.domaine,
       type_chantier: data.type_chantier,
       priorite: data.priorite,
@@ -1475,9 +1498,14 @@ export async function updateChantier(
     statut: string;
     avancement: number;
     rmdIds?: string[];
+    lien_espace_documentaire?: string;
   }
 ) {
+  await requirePageWrite("/chantiers");
   await requireChantierAccess(id);
+  const lien_espace_documentaire = normalizeEspaceDocumentaireUrl(
+    data.lien_espace_documentaire
+  );
   await prisma.$transaction(async (tx) => {
     await tx.chantier.update({
       where: { id },
@@ -1485,6 +1513,7 @@ export async function updateChantier(
         code: data.code,
         nom: data.nom,
         description: data.description,
+        lien_espace_documentaire,
         domaine: data.domaine,
         type_chantier: data.type_chantier,
         priorite: data.priorite,
@@ -1523,6 +1552,7 @@ export async function updateChantier(
 }
 
 export async function deleteChantier(id: string) {
+  await requirePageWrite("/chantiers");
   await requireRole("Admin", "Programme_Office");
   const counts = await prisma.chantier.findUnique({
     where: { id },
@@ -1616,6 +1646,7 @@ export async function createRaid(data: {
   commentaires: string;
   comiteId: string | null;
 }) {
+  await requirePageWrite("/raid");
   let chantierId = data.chantierId || null;
   if (data.comiteId) {
     const comite = await prisma.comite.findUnique({
@@ -1778,6 +1809,7 @@ export async function updateRaid(
     },
   });
   if (!existing) throw new Error("Entrée RAID introuvable.");
+  await requireRaidWriteOrAssignee(existing);
 
   // Edit form: scope « tous », assignee, or DC / suppléant / PMO du chantier lié
   if (!(await canEditRaidForm(session, existing))) {
@@ -1896,7 +1928,7 @@ export async function fetchRaidFormEditContext() {
 }
 
 export async function deleteRaid(id: string, options?: { motif?: string }) {
-  const session = await requireAuth();
+  const session = await requirePageWrite("/raid");
   // Delete: only rôles with périmètre chantiers = « tous les chantiers »
   if (!(await canDeleteRaid(session))) {
     throw new Error(
@@ -1932,7 +1964,7 @@ export async function deleteRaid(id: string, options?: { motif?: string }) {
 // ── RMD CRUD ─────────────────────────────────────────
 
 export async function getRmds() {
-  await requireRole("Admin", "Programme_Office");
+  await requirePageAccess("/rmds");
   return prisma.rmd.findMany({
     orderBy: { nom_complet: "asc" },
     include: {
@@ -1942,7 +1974,7 @@ export async function getRmds() {
 }
 
 export async function getRmdById(id: string) {
-  await requireRole("Admin", "Programme_Office");
+  await requirePageAccess("/rmds");
   return prisma.rmd.findUnique({
     where: { id },
     include: {
@@ -1977,7 +2009,7 @@ export async function createRmd(data: {
   domaine: string;
   suppleant: string;
 }) {
-  await requireRole("Admin", "Programme_Office");
+  await requirePageWrite("/rmds");
   await prisma.rmd.create({ data });
   revalidatePath("/");
   revalidatePath("/rmds");
@@ -1991,7 +2023,7 @@ export async function updateRmd(
     suppleant: string;
   }
 ) {
-  await requireRole("Admin", "Programme_Office");
+  await requirePageWrite("/rmds");
   await prisma.rmd.update({ where: { id }, data });
   revalidatePath("/");
   revalidatePath("/rmds");
@@ -1999,7 +2031,7 @@ export async function updateRmd(
 }
 
 export async function deleteRmd(id: string) {
-  await requireRole("Admin", "Programme_Office");
+  await requirePageWrite("/rmds");
   const counts = await prisma.rmd.findUnique({
     where: { id },
     include: { _count: { select: { chantiers: true } } },
@@ -2051,6 +2083,7 @@ export async function createMembreEquipe(data: {
   is_directeur?: boolean;
   charge_pourcentage?: number;
 }) {
+  await requirePageWrite("/chantiers");
   await requireChantierAccess(data.chantierId);
   if (!data.ressourceId?.trim()) {
     throw new Error("Une ressource est obligatoire pour chaque membre d'équipe.");
@@ -2093,7 +2126,7 @@ export async function updateMembreEquipe(
     charge_pourcentage?: number;
   }
 ) {
-  await requireRole("Admin", "Programme_Office", "PMO_Chantier");
+  await requirePageWrite("/chantiers");
   if (!data.ressourceId?.trim()) {
     throw new Error("Une ressource est obligatoire pour chaque membre d'équipe.");
   }
@@ -2104,6 +2137,12 @@ export async function updateMembreEquipe(
   if (!ressource) {
     throw new Error("Ressource introuvable.");
   }
+  const existingMembre = await prisma.membreEquipe.findUnique({
+    where: { id },
+    select: { chantierId: true },
+  });
+  if (!existingMembre) throw new Error("Membre introuvable.");
+  await requireChantierAccess(existingMembre.chantierId);
   const membre = await prisma.membreEquipe.update({
     where: { id },
     data: {
@@ -2123,7 +2162,13 @@ export async function updateMembreEquipe(
 }
 
 export async function deleteMembreEquipe(id: string) {
-  await requireRole("Admin", "Programme_Office");
+  await requirePageWrite("/chantiers");
+  const existing = await prisma.membreEquipe.findUnique({
+    where: { id },
+    select: { chantierId: true },
+  });
+  if (!existing) throw new Error("Membre introuvable.");
+  await requireChantierAccess(existing.chantierId);
   const membre = await prisma.membreEquipe.delete({ where: { id } });
   await syncChantierFunctionalMembership(membre.chantierId);
   revalidatePath(`/chantiers/${membre.chantierId}`);
@@ -2133,7 +2178,7 @@ export async function deleteMembreEquipe(id: string) {
 // ── Comités ──────────────────────────────────────────
 
 export async function getComites() {
-  const session = await requireRole("Admin", "Programme_Office", "PMO_Chantier");
+  const session = await requirePageAccess("/comites");
   const where = await comiteListWhereForSession(session);
   return prisma.comite.findMany({
     where,
@@ -2198,7 +2243,7 @@ export async function createComite(data: {
   invitation_envoyee: boolean;
   chantierId?: string | null;
 }) {
-  const session = await requirePageAccess("/comites");
+  const session = await requirePageWrite("/comites");
   const param = await assertValidComiteInstance(data.instance, {
     requireActive: true,
   });
@@ -2245,7 +2290,7 @@ export async function updateComite(
     chantierId?: string | null;
   }
 ) {
-  const session = await requirePageAccess("/comites");
+  const session = await requirePageWrite("/comites");
   const current = await prisma.comite.findUnique({
     where: { id },
     select: { instance: true, chantierId: true },
@@ -2283,7 +2328,7 @@ export async function updateComite(
 }
 
 export async function deleteComite(id: string) {
-  const session = await requirePageAccess("/comites");
+  const session = await requirePageWrite("/comites");
   const current = await prisma.comite.findUnique({
     where: { id },
     select: { instance: true, chantierId: true },
@@ -2516,7 +2561,7 @@ export async function getProfilsRessource() {
 }
 
 export async function getAllProfilsRessource() {
-  await requireRole("Admin", "Workforce_Manager");
+  await requirePageAccess("/profils");
   return prisma.profilRessource.findMany({
     orderBy: [{ type_ressource: "asc" }, { ordre: "asc" }, { nom: "asc" }],
     include: { _count: { select: { ressources: true } } },
@@ -2538,7 +2583,7 @@ export async function createProfilRessource(data: {
   ordre: number;
   actif: boolean;
 }) {
-  await requireRole("Admin", "Workforce_Manager");
+  await requirePageWrite("/profils");
   await prisma.profilRessource.create({ data });
   revalidatePath("/");
   revalidatePath("/profils");
@@ -2554,14 +2599,14 @@ export async function updateProfilRessource(
     actif: boolean;
   }
 ) {
-  await requireRole("Admin", "Workforce_Manager");
+  await requirePageWrite("/profils");
   await prisma.profilRessource.update({ where: { id }, data });
   revalidatePath("/");
   revalidatePath("/profils");
 }
 
 export async function deleteProfilRessource(id: string) {
-  await requireRole("Admin", "Workforce_Manager");
+  await requirePageWrite("/profils");
   const counts = await prisma.profilRessource.findUnique({
     where: { id },
     include: { _count: { select: { ressources: true } } },
@@ -2603,7 +2648,7 @@ const ressourcePeopleInclude = {
 } as const;
 
 export async function getRessources() {
-  await requireRole("Admin", "Programme_Office", "Workforce_Manager");
+  await requirePageAccess("/ressources");
   return prisma.ressource.findMany({
     orderBy: { nom_complet: "asc" },
     include: ressourcePeopleInclude,
@@ -2611,7 +2656,7 @@ export async function getRessources() {
 }
 
 export async function getRessourceById(id: string) {
-  await requireRole("Admin", "Programme_Office", "PMO_Chantier", "Workforce_Manager");
+  await requirePageAccess("/ressources", "/saisie-temps");
   return prisma.ressource.findUnique({
     where: { id },
     include: {
@@ -2696,7 +2741,7 @@ export async function createRessource(data: {
     role: string;
   } | null;
 }) {
-  await requireRole("Admin", "Workforce_Manager");
+  await requirePageWrite("/ressources");
   const equipeHierarchieId = await assertEquipeHierarchie(data.equipeHierarchieId);
 
   if (data.createAccount) {
@@ -2785,7 +2830,7 @@ export async function updateRessource(
     equipeFonctionnelleIds?: string[];
   }
 ) {
-  await requireRole("Admin", "Workforce_Manager");
+  await requirePageWrite("/ressources");
   const equipeHierarchieId = await assertEquipeHierarchie(data.equipeHierarchieId);
 
   await prisma.$transaction(async (tx) => {
@@ -2875,7 +2920,7 @@ export async function createAccountForRessource(
 }
 
 export async function deleteRessource(id: string) {
-  await requireRole("Admin", "Workforce_Manager");
+  await requirePageWrite("/ressources");
   const counts = await prisma.ressource.findUnique({
     where: { id },
     include: {
@@ -2955,7 +3000,8 @@ export async function upsertSaisieTemps(data: {
   jours_travailles: number;
   commentaire?: string;
 }) {
-  await requireRole("Admin", "Programme_Office", "PMO_Chantier", "Workforce_Manager");
+  await requirePageWrite("/saisie-temps");
+  await requireChantierAccess(data.chantierId);
   const dateLundi = new Date(data.date_lundi);
   await prisma.saisieTemps.upsert({
     where: {
@@ -2993,7 +3039,11 @@ export async function upsertSaisiesTempsBatch(
     commentaire?: string;
   }[]
 ) {
-  await requireRole("Admin", "Programme_Office", "PMO_Chantier", "Workforce_Manager");
+  await requirePageWrite("/saisie-temps");
+  const chantierIds = [...new Set(entries.map((e) => e.chantierId))];
+  for (const chantierId of chantierIds) {
+    await requireChantierAccess(chantierId);
+  }
   await prisma.$transaction(
     entries.map((e) => {
       const dateLundi = new Date(e.date_lundi);
@@ -3025,7 +3075,13 @@ export async function upsertSaisiesTempsBatch(
 }
 
 export async function deleteSaisieTemps(id: string) {
-  await requireRole("Admin", "Programme_Office", "Workforce_Manager");
+  await requirePageWrite("/saisie-temps");
+  const row = await prisma.saisieTemps.findUnique({
+    where: { id },
+    select: { chantierId: true },
+  });
+  if (!row) throw new Error("Saisie introuvable.");
+  await requireChantierAccess(row.chantierId);
   await prisma.saisieTemps.delete({ where: { id } });
   revalidatePath("/saisie-temps");
   revalidatePath("/capacite");
@@ -3035,7 +3091,7 @@ export async function deleteSaisieTemps(id: string) {
 // ── Capacité & Disponibilité ────────────────────────
 
 export async function getCapaciteRessource(ressourceId: string) {
-  await requireRole("Admin", "Programme_Office", "Workforce_Manager");
+  await requirePageAccess("/ressources");
   const ressource = await prisma.ressource.findUnique({
     where: { id: ressourceId },
     include: {
@@ -3313,7 +3369,7 @@ export async function getPersonalCapacite(annee: number) {
 }
 
 export async function getBurnRateChantier(chantierId: string) {
-  await requireChantierAccess(chantierId);
+  await requireChantierAccess(chantierId, { write: false });
   const chantier = await prisma.chantier.findUnique({
     where: { id: chantierId },
     include: {
@@ -3616,7 +3672,7 @@ export async function createJalon(
   },
   options?: { motif?: string }
 ): Promise<JalonMutationResult> {
-  const session = await requireAuth();
+  const session = await requirePageWrite("/jalons");
   await requireChantierAccess(data.chantierId);
   if (
     data.date_debut &&
@@ -3710,7 +3766,7 @@ export async function updateJalon(
   },
   options?: { motif?: string }
 ): Promise<JalonMutationResult> {
-  const session = await requireAuth();
+  const session = await requirePageWrite("/jalons");
   if (
     data.date_debut &&
     new Date(data.date_debut).getTime() > new Date(data.date_cible).getTime()
@@ -3909,7 +3965,7 @@ export async function deleteJalon(
   id: string,
   options?: { motif?: string }
 ): Promise<JalonMutationResult> {
-  const session = await requireAuth();
+  const session = await requirePageWrite("/jalons");
   const existing = await prisma.jalon.findUnique({ where: { id } });
   if (!existing) throw new Error("Jalon introuvable.");
   await requireChantierAccess(existing.chantierId);
@@ -3987,7 +4043,7 @@ export async function deleteJalon(
 /** Caps + pending requests for chantier jalons UI (+ workstreams / activités). */
 export async function getJalonWorkflowUiState(chantierId: string) {
   const session = await requireAuth();
-  await requireChantierAccess(chantierId);
+  await requireChantierAccess(chantierId, { write: false });
   const {
     getSessionJalonWorkflowCaps,
     getPendingRequestsForEntities,
@@ -4062,7 +4118,7 @@ export async function getJalonWorkflowUiState(chantierId: string) {
 }
 
 export async function applyJalonTemplate(chantierId: string) {
-  const session = await requireAuth();
+  const session = await requirePageWrite("/jalons");
   await requireChantierAccess(chantierId);
   const { getSessionJalonWorkflowCaps, modeForOperation, WORKFLOW_OPERATION } =
     await import("@/lib/workflow");
@@ -4508,7 +4564,7 @@ export async function createWorkstream(
   },
   options?: { motif?: string }
 ): Promise<PlanningDetailMutationResult> {
-  const session = await requireAuth();
+  const session = await requirePageWrite("/jalons");
   const jalon = await prisma.jalon.findUnique({
     where: { id: data.jalonId },
     select: { id: true, nom: true, chantierId: true },
@@ -4596,7 +4652,7 @@ export async function updateWorkstream(
   },
   options?: { motif?: string }
 ): Promise<PlanningDetailMutationResult> {
-  const session = await requireAuth();
+  const session = await requirePageWrite("/jalons");
   const existing = await prisma.workstream.findUnique({
     where: { id },
     include: { jalon: { select: { id: true, nom: true, chantierId: true } } },
@@ -4704,7 +4760,7 @@ export async function deleteWorkstream(
   id: string,
   options?: { motif?: string }
 ): Promise<PlanningDetailMutationResult> {
-  const session = await requireAuth();
+  const session = await requirePageWrite("/jalons");
   const existing = await prisma.workstream.findUnique({
     where: { id },
     include: {
@@ -4788,7 +4844,7 @@ export async function createActivite(
   },
   options?: { motif?: string }
 ): Promise<PlanningDetailMutationResult> {
-  const session = await requireAuth();
+  const session = await requirePageWrite("/jalons");
   const ws = await prisma.workstream.findUnique({
     where: { id: data.workstreamId },
     include: {
@@ -4878,7 +4934,7 @@ export async function updateActivite(
   },
   options?: { motif?: string }
 ): Promise<PlanningDetailMutationResult> {
-  const session = await requireAuth();
+  const session = await requirePageWrite("/jalons");
   const existing = await prisma.activite.findUnique({
     where: { id },
     include: {
@@ -4984,7 +5040,7 @@ export async function deleteActivite(
   id: string,
   options?: { motif?: string }
 ): Promise<PlanningDetailMutationResult> {
-  const session = await requireAuth();
+  const session = await requirePageWrite("/jalons");
   const existing = await prisma.activite.findUnique({
     where: { id },
     include: {
@@ -5113,7 +5169,8 @@ export async function createAdherence(data: {
   contrat_interface: string;
   commentaires: string;
 }) {
-  await requireRole("Admin", "Programme_Office");
+  await requirePageWrite("/adherences");
+  await requireChantierAccess(data.chantierSourceId);
   await prisma.adherence.create({
     data: {
       code: data.code,
@@ -5156,7 +5213,8 @@ export async function updateAdherence(
     commentaires: string;
   }
 ) {
-  await requireRole("Admin", "Programme_Office");
+  await requirePageWrite("/adherences");
+  await requireChantierAccess(data.chantierSourceId);
   await prisma.adherence.update({
     where: { id },
     data: {
@@ -5182,7 +5240,13 @@ export async function updateAdherence(
 }
 
 export async function deleteAdherence(id: string) {
-  await requireRole("Admin", "Programme_Office");
+  await requirePageWrite("/adherences");
+  const existing = await prisma.adherence.findUnique({
+    where: { id },
+    select: { chantierSourceId: true },
+  });
+  if (!existing) throw new Error("Adhérence introuvable.");
+  await requireChantierAccess(existing.chantierSourceId);
   await prisma.adherence.delete({ where: { id } });
   revalidatePath("/");
   revalidatePath("/adherences");
@@ -5256,7 +5320,7 @@ export async function getConsultationQuestionById(id: string) {
     include: { chantier: { select: { id: true, code: true, nom: true } } },
   });
   if (!question) return null;
-  await requireChantierAccess(question.chantierId);
+  await requireChantierAccess(question.chantierId, { write: false });
   return question;
 }
 
@@ -5549,7 +5613,7 @@ export async function createConsultationQuestion(
   },
   options?: { motif?: string }
 ): Promise<QaMutationResult> {
-  const session = await requireAuth();
+  const session = await requirePageWrite("/consultation-backlog");
   await requireChantierAccess(data.chantierId);
 
   const {
@@ -5664,7 +5728,7 @@ export async function updateConsultationQuestion(
   },
   options?: { motif?: string }
 ): Promise<QaMutationResult> {
-  const session = await requireAuth();
+  const session = await requirePageWrite("/consultation-backlog");
   const existing = await prisma.consultationQuestion.findUnique({
     where: { id },
   });
@@ -5806,7 +5870,7 @@ export async function deleteConsultationQuestion(
   id: string,
   options?: { motif?: string }
 ): Promise<QaMutationResult> {
-  const session = await requireAuth();
+  const session = await requirePageWrite("/consultation-backlog");
   const existing = await prisma.consultationQuestion.findUnique({
     where: { id },
   });
@@ -5894,7 +5958,7 @@ export async function getConsultationQuestionHistory(questionId: string) {
     select: { id: true, chantierId: true },
   });
   if (!question) throw new Error("Question introuvable.");
-  await requireChantierAccess(question.chantierId);
+  await requireChantierAccess(question.chantierId, { write: false });
 
   const { WORKFLOW_ENTITY } = await import("@/lib/workflow-shared");
   const rows = await prisma.workflowRequest.findMany({

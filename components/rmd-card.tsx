@@ -16,6 +16,7 @@ import {
 import { RmdFormDialog } from "./rmd-form-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import { DOMAINE_LABELS, DOMAINE_COLORS } from "@/lib/chantier-labels";
+import { useCanWritePage } from "@/components/user-provider";
 
 interface RmdWithStats {
   id: string;
@@ -31,6 +32,7 @@ export function RmdCard({ rmd }: { rmd: RmdWithStats }) {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const canWrite = useCanWritePage("/rmds");
 
   return (
     <>
@@ -62,6 +64,8 @@ export function RmdCard({ rmd }: { rmd: RmdWithStats }) {
           </div>
           <div className="flex items-center justify-between pt-1">
             <div className="flex gap-1">
+              {canWrite && (
+                <>
               <Button
                 variant="ghost"
                 size="icon-xs"
@@ -79,6 +83,8 @@ export function RmdCard({ rmd }: { rmd: RmdWithStats }) {
               >
                 <Trash2 className="size-3.5 text-destructive" />
               </Button>
+                </>
+              )}
             </div>
             <Link href={`/rmds/${rmd.id}`}>
               <Button variant="outline" size="sm" className="gap-1">

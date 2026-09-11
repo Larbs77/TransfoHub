@@ -37,6 +37,10 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { deleteJalon, applyJalonTemplate } from "@/app/(app)/actions";
+import {
+  useCanWritePage,
+  useIsConsultationChantier,
+} from "@/components/user-provider";
 import { JalonFormDialog } from "@/components/jalon-form-dialog";
 import {
   ChantierJalonPlanningTree,
@@ -159,6 +163,8 @@ export function ChantierJalonsTab({
   const [expandedWorkstreams, setExpandedWorkstreams] = useState<
     Record<string, boolean>
   >({});
+  const canWriteJalons =
+    useCanWritePage("/jalons") && !useIsConsultationChantier(chantierId);
 
   /** Défaut : tout replié à l’ouverture de l’onglet. */
   function isExpanded(id: string) {
@@ -206,12 +212,20 @@ export function ChantierJalonsTab({
     setExpandedWorkstreams(nextWs);
   }
 
-  const canCreate = workflowCaps.create !== "INTERDIT";
-  const canUpdate = workflowCaps.update !== "INTERDIT";
-  const canDelete = workflowCaps.delete !== "INTERDIT";
+  const effectiveCaps = canWriteJalons
+    ? workflowCaps
+    : {
+        ...workflowCaps,
+        create: "INTERDIT" as const,
+        update: "INTERDIT" as const,
+        delete: "INTERDIT" as const,
+      };
+  const canCreate = effectiveCaps.create !== "INTERDIT";
+  const canUpdate = effectiveCaps.update !== "INTERDIT";
+  const canDelete = effectiveCaps.delete !== "INTERDIT";
   const formMode: WorkflowMode = editJalon
-    ? workflowCaps.update
-    : workflowCaps.create;
+    ? effectiveCaps.update
+    : effectiveCaps.create;
 
   // Stable "now" to avoid SSR/client hydration mismatch
   const [now] = useState(() => new Date());
@@ -278,7 +292,7 @@ export function ChantierJalonsTab({
     setDeleteError("");
     if (!deleteMotif.trim()) {
       setDeleteError(
-        workflowCaps.delete === "VALIDATION"
+        effectiveCaps.delete === "VALIDATION"
           ? "Le motif de la demande est obligatoire."
           : "Le commentaire est obligatoire pour supprimer un jalon."
       );
@@ -587,7 +601,7 @@ export function ChantierJalonsTab({
                   Planning GANTT
                 </Link>
               </Button>
-              {total === 0 && canCreate && workflowCaps.create === "DIRECT" && (
+              {total === 0 && canCreate && effectiveCaps.create === "DIRECT" && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -612,7 +626,7 @@ export function ChantierJalonsTab({
                   }}
                 >
                   <Plus className="size-4" />
-                  {workflowCaps.create === "VALIDATION"
+                  {effectiveCaps.create === "VALIDATION"
                     ? "Demander un jalon"
                     : "Nouveau jalon"}
                 </Button>
@@ -726,7 +740,7 @@ export function ChantierJalonsTab({
           {total === 0 ? (
             <div className="text-center py-8 text-sm text-muted-foreground">
               Aucun jalon.
-              {canCreate && workflowCaps.create === "DIRECT"
+              {canCreate && effectiveCaps.create === "DIRECT"
                 ? " Cliquez sur « Appliquer modèle » pour créer les jalons standard."
                 : ""}
             </div>
@@ -1008,7 +1022,7 @@ export function ChantierJalonsTab({
                                           variant="ghost"
                                           className="h-7 w-7 p-0"
                                           title={
-                                            workflowCaps.update === "VALIDATION"
+                                            effectiveCaps.update === "VALIDATION"
                                               ? "Demander une modification"
                                               : "Modifier"
                                           }
@@ -1026,7 +1040,7 @@ export function ChantierJalonsTab({
                                           variant="ghost"
                                           className="h-7 w-7 p-0 text-destructive hover:text-destructive"
                                           title={
-                                            workflowCaps.delete === "VALIDATION"
+                                            effectiveCaps.delete === "VALIDATION"
                                               ? "Demander une suppression"
                                               : "Supprimer"
                                           }
@@ -1047,7 +1061,7 @@ export function ChantierJalonsTab({
                                     <TableCell colSpan={9} className="bg-muted/10 py-3">
                                       <ChantierJalonPlanningTree
                                         jalon={j}
-                                        workflowCaps={workflowCaps}
+                                        workflowCaps={effectiveCaps}
                                         detailGouvernance={detailGouvernance}
                                         pendingByEntityId={pendingByEntityId}
                                         onToast={setToast}
@@ -1099,7 +1113,7 @@ export function ChantierJalonsTab({
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {workflowCaps.delete === "VALIDATION"
+              {effectiveCaps.delete === "VALIDATION"
                 ? "Demande de suppression"
                 : "Supprimer le jalon"}
             </DialogTitle>
@@ -1107,14 +1121,14 @@ export function ChantierJalonsTab({
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
               {deleteTarget
-                ? workflowCaps.delete === "VALIDATION"
+                ? effectiveCaps.delete === "VALIDATION"
                   ? `Soumettre une demande de suppression pour « ${deleteTarget.nom} » ?`
                   : `Confirmer la suppression de « ${deleteTarget.nom} » ? Un commentaire est obligatoire.`
                 : ""}
             </p>
             <div className="grid gap-1.5">
               <label className="text-sm font-medium">
-                {workflowCaps.delete === "VALIDATION"
+                {effectiveCaps.delete === "VALIDATION"
                   ? "Motif"
                   : "Commentaire"}{" "}
                 <span className="text-destructive">*</span>
@@ -1141,7 +1155,7 @@ export function ChantierJalonsTab({
               onClick={handleDeleteConfirm}
             >
               {deleting && <Loader2 className="size-4 animate-spin" />}
-              {workflowCaps.delete === "VALIDATION"
+              {effectiveCaps.delete === "VALIDATION"
                 ? "Soumettre"
                 : "Supprimer"}
             </Button>

@@ -32,7 +32,7 @@ import { ActionKanban } from "./action-kanban";
 import { RaidExcelExportButton } from "./raid-excel-export-button";
 import { deleteRaid, fetchRaidFormEditContext } from "@/app/(app)/actions";
 import { scoreCriticite } from "@/lib/utils-pmo";
-import { useUser } from "@/components/user-provider";
+import { useCanWritePage, useUser } from "@/components/user-provider";
 import {
   RAID_TYPE_COLORS,
   RAID_TYPE_LABELS,
@@ -49,6 +49,7 @@ import {
   getLabelsForKind,
   mergeFieldLabelsWithData,
   canEditRaidFormClient,
+  isRaidAssignee,
   isRaidOverdue,
   isRaidInitialEcheancePast,
   raidEffectiveEcheance,
@@ -275,6 +276,8 @@ function RaidTable({
   onFilteredChange?: (rows: RaidRow[]) => void;
 }) {
   const router = useRouter();
+  const canWriteRaid = useCanWritePage("/raid");
+  const { ressourceId } = useUser();
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [search, setSearch] = useState("");
@@ -904,7 +907,9 @@ function RaidTable({
                         <ExternalLink className="size-3.5" />
                       </Button>
                       {formEditCtx &&
-                        canEditRaidFormClient(r, formEditCtx) && (
+                        canEditRaidFormClient(r, formEditCtx) &&
+                        (canWriteRaid ||
+                          isRaidAssignee(ressourceId, r.responsableRessourceId)) && (
                           <Button
                             variant="ghost"
                             size="icon-xs"
@@ -914,7 +919,7 @@ function RaidTable({
                             <Pencil className="size-3.5" />
                           </Button>
                         )}
-                      {formEditCtx?.chantierScopeAll && (
+                      {formEditCtx?.chantierScopeAll && canWriteRaid && (
                         <Button
                           variant="ghost"
                           size="icon-xs"
@@ -1021,6 +1026,7 @@ function RaidScopeToggles({
 
 export function RaidList({ items, filterType, initialProbabilite, initialImpact, initialStatut, initialOverdue, initialCritical, initialRaidScope = "mine", statusConfigs, fieldOptions, chantiers = [], comites = [] }: Props) {
   const { ressourceId, displayName } = useUser();
+  const canWriteRaid = useCanWritePage("/raid");
   const filteredIdsRef = useRef<Record<string, string[]>>({});
   const [raidScope, setRaidScope] = useState<RaidScope>(
     initialRaidScope === "all" ? "all" : "mine"
@@ -1198,7 +1204,9 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
 
         {editItem &&
           formEditCtx &&
-          canEditRaidFormClient(editItem, formEditCtx) && (
+          canEditRaidFormClient(editItem, formEditCtx) &&
+          (canWriteRaid ||
+            isRaidAssignee(ressourceId, editItem.responsableRessourceId)) && (
           <RaidFormDialog
             open={!!editItem}
             onOpenChange={(open) => !open && setEditItem(null)}
@@ -1208,7 +1216,7 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
           />
         )}
         <DeleteConfirmDialog
-          open={!!deleteId && !!formEditCtx?.chantierScopeAll}
+          open={!!deleteId && !!formEditCtx?.chantierScopeAll && canWriteRaid}
           onOpenChange={(open) => !open && setDeleteId(null)}
           requireMotif
           onConfirm={async (motif) => {
@@ -1326,7 +1334,9 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
 
       {editItem &&
         formEditCtx &&
-        canEditRaidFormClient(editItem, formEditCtx) && (
+        canEditRaidFormClient(editItem, formEditCtx) &&
+        (canWriteRaid ||
+          isRaidAssignee(ressourceId, editItem.responsableRessourceId)) && (
         <RaidFormDialog
           open={!!editItem}
           onOpenChange={(open) => !open && setEditItem(null)}
@@ -1336,7 +1346,7 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
         />
       )}
       <DeleteConfirmDialog
-        open={!!deleteId && !!formEditCtx?.chantierScopeAll}
+        open={!!deleteId && !!formEditCtx?.chantierScopeAll && canWriteRaid}
         onOpenChange={(open) => !open && setDeleteId(null)}
         requireMotif
         onConfirm={async (motif) => {

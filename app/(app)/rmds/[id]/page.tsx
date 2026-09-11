@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { requirePageAccess } from "@/lib/auth";
 import { getRmdById } from "@/app/(app)/actions";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -33,6 +34,7 @@ interface Props {
 }
 
 export default async function RmdDetailPage({ params }: Props) {
+  await requirePageAccess("/rmds");
   const { id } = await params;
   const rmd = await getRmdById(id);
 

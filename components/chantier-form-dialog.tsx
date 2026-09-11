@@ -51,6 +51,7 @@ interface ChantierData {
   statut: string;
   avancement: number;
   rmds?: { rmd: { id: string } }[];
+  lien_espace_documentaire?: string;
 }
 
 interface Props {
@@ -70,6 +71,9 @@ export function ChantierFormDialog({ open, onOpenChange, chantier }: Props) {
   const [code, setCode] = useState(chantier?.code ?? "");
   const [nom, setNom] = useState(chantier?.nom ?? "");
   const [description, setDescription] = useState(chantier?.description ?? "");
+  const [lienEspaceDocumentaire, setLienEspaceDocumentaire] = useState(
+    chantier?.lien_espace_documentaire ?? ""
+  );
   const [domaine, setDomaine] = useState(chantier?.domaine ?? "Cockpit");
   const [typeChantier, setTypeChantier] = useState(chantier?.type_chantier ?? "Progiciel + Sélection");
   const [priorite, setPriorite] = useState(chantier?.priorite ?? "Fondations techniques");
@@ -119,6 +123,7 @@ export function ChantierFormDialog({ open, onOpenChange, chantier }: Props) {
       statut,
       avancement,
       rmdIds,
+      lien_espace_documentaire: lienEspaceDocumentaire,
     };
     if (isEdit) {
       await updateChantier(chantier.id, data);
@@ -179,6 +184,20 @@ export function ChantierFormDialog({ open, onOpenChange, chantier }: Props) {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
+          </div>
+          <div className="grid gap-1.5">
+            <label className="text-sm font-medium">
+              Lien Espace Documentaire
+            </label>
+            <Input
+              type="url"
+              value={lienEspaceDocumentaire}
+              onChange={(e) => setLienEspaceDocumentaire(e.target.value)}
+              placeholder="https://...sharepoint.com/..."
+            />
+            <p className="text-[10px] text-muted-foreground">
+              URL SharePoint (ou autre) de la documentation du chantier
+            </p>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-1.5">

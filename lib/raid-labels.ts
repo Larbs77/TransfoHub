@@ -106,6 +106,18 @@ export function isKanbanLeadershipRole(
   return false;
 }
 
+/** True when the session resource is the RAID responsable. */
+export function isRaidAssignee(
+  ressourceId: string | null | undefined,
+  responsableRessourceId: string | null | undefined
+): boolean {
+  return !!(
+    ressourceId &&
+    responsableRessourceId &&
+    ressourceId === responsableRessourceId
+  );
+}
+
 /**
  * Pure client-side check for full RAID form edit (table « Modifier »).
  * Mirrors canEditRaidForm server rules.

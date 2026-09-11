@@ -12,6 +12,8 @@ model Chantier {
   code                   String                 @unique
   nom                    String
   description            String                 @default("")
+  /// SharePoint (or other) documentation space URL
+  lien_espace_documentaire String               @default("")
   domaine                String
   type_chantier          String                 @default("")
   priorite               String                 @default("")
@@ -42,6 +44,7 @@ model Chantier {
   raids                  Raid[]
   saisiesTemps           SaisieTemps[]
   comites                Comite[]
+  consultationUsers      UserChantierConsultation[]
   /// Functional (programme) team for this chantier — auto-created 1:1.
   equipeFonctionnelle    Equipe?
 }
@@ -146,6 +149,18 @@ model User {
   updatedAt       DateTime   @updatedAt
   ressource       Ressource? @relation(fields: [ressourceId], references: [id])
   notifications   Notification[]
+  consultationChantiers UserChantierConsultation[]
+}
+
+/// Extra chantiers the user may consult (read-only). Membership still wins.
+model UserChantierConsultation {
+  userId     String
+  chantierId String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chantier   Chantier @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+
+  @@id([userId, chantierId])
+  @@index([chantierId])
 }
 
 /// Per-user in-app notifications (persistent, mark-as-read). Not email.

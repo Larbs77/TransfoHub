@@ -5,6 +5,11 @@ import { requirePageAccess } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { ALL_PAGE_PATHS } from "@/lib/app-pages";
 import {
+  grantsToModeMap,
+  parsePageGrants,
+  serializePageGrants,
+} from "@/lib/page-access";
+import {
   normalizeRaidCreateScope,
   parsePages,
   slugifyRoleCode,
@@ -55,6 +60,7 @@ export async function getRolesForAdmin() {
     workflow_can_view_history: !!r.workflow_can_view_history,
     workflow_can_view_kpi: !!r.workflow_can_view_kpi,
     pages: parsePages(r.pages),
+    pageModes: grantsToModeMap(parsePageGrants(r.pages)),
     userCount: usageMap[r.code] ?? 0,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
@@ -118,6 +124,7 @@ export async function createRole(data: {
   workflow_can_view_history?: boolean;
   workflow_can_view_kpi?: boolean;
   pages: string[];
+  pageModes?: Record<string, "read" | "write">;
   code?: string;
 }) {
   await requireRolesAdmin();
@@ -136,7 +143,10 @@ export async function createRole(data: {
     code = `${code}_${Date.now().toString(36)}`;
   }
 
-  const pages = normalizePages(data.pages);
+  const pages = serializePageGrants(
+    normalizePages(data.pages),
+    data.pageModes ?? {}
+  );
   if (pages.length === 0) {
     throw new Error("Sélectionnez au moins une page autorisée.");
   }
@@ -211,6 +221,7 @@ export async function updateRole(
     workflow_can_view_history?: boolean;
     workflow_can_view_kpi?: boolean;
     pages: string[];
+    pageModes?: Record<string, "read" | "write">;
   }
 ) {
   await requireRolesAdmin();
@@ -221,10 +232,13 @@ export async function updateRole(
   const label = data.label.trim();
   if (!label) throw new Error("Le libellé est obligatoire.");
 
-  let pages = normalizePages(data.pages);
+  let pages = serializePageGrants(
+    normalizePages(data.pages),
+    data.pageModes ?? {}
+  );
   // Admin always keeps full access
   if (role.code === "Admin") {
-    pages = [...ALL_PAGE_PATHS];
+    pages = serializePageGrants([...ALL_PAGE_PATHS], {});
   }
   if (pages.length === 0) {
     throw new Error("Sélectionnez au moins une page autorisée.");

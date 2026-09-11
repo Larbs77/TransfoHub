@@ -28,6 +28,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ChevronLeft, ChevronRight, Loader2, Save, CalendarDays } from "lucide-react";
 import { getRAGColor, getRAGStatus, RAG_LABELS } from "@/lib/capacite-labels";
+import { useCanWritePage } from "@/components/user-provider";
 import { format, startOfWeek, addWeeks, subWeeks } from "date-fns";
 import { fr } from "date-fns/locale";
 
@@ -56,6 +57,7 @@ export function SaisieTempsGrid({ ressources }: Props) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const canWrite = useCanWritePage("/saisie-temps");
 
   const friday = useMemo(() => {
     const d = new Date(monday);
@@ -192,10 +194,12 @@ export function SaisieTempsGrid({ ressources }: Props) {
               {saved && (
                 <span className="text-xs text-emerald-600 font-medium">Enregistré</span>
               )}
+              {canWrite && (
               <Button size="sm" onClick={handleSave} disabled={saving || loading || rows.length === 0} className="gap-1.5">
                 {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
                 Enregistrer
               </Button>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -247,6 +251,7 @@ export function SaisieTempsGrid({ ressources }: Props) {
                           step={0.5}
                           value={row.jours_travailles}
                           onChange={(e) => updateRow(i, "jours_travailles", parseFloat(e.target.value) || 0)}
+                          disabled={!canWrite}
                           className="w-20 mx-auto text-center text-sm tabular-nums"
                         />
                       </TableCell>
@@ -260,6 +265,7 @@ export function SaisieTempsGrid({ ressources }: Props) {
                           value={row.commentaire}
                           onChange={(e) => updateRow(i, "commentaire", e.target.value)}
                           placeholder="—"
+                          disabled={!canWrite}
                           className="text-xs"
                         />
                       </TableCell>

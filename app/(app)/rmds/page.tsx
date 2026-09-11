@@ -1,8 +1,10 @@
+import { requirePageAccess } from "@/lib/auth";
 import { getRmds } from "@/app/(app)/actions";
 import { RmdsList } from "@/components/rmds-list";
 import { AddRmdButton } from "@/components/add-rmd-button";
 
 export default async function RmdsPage() {
+  await requirePageAccess("/rmds");
   const rmds = await getRmds();
 
   return (

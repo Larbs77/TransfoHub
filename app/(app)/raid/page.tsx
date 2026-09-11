@@ -1,3 +1,4 @@
+import { requirePageAccess } from "@/lib/auth";
 import { getRaidItems, getStatusConfigs, getRaidFieldOptions, getChantiersForSelect, getComitesForSelect } from "@/app/(app)/actions";
 import { Card, CardContent } from "@/components/ui/card";
 import { RaidList } from "@/components/raid-list";
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export default async function RaidPage({ searchParams }: Props) {
+  await requirePageAccess("/raid");
   const params = await searchParams;
   const [items, statusConfigs, fieldOptions, chantiers, comites] = await Promise.all([
     getRaidItems(),

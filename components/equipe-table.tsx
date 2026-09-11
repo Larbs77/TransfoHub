@@ -18,6 +18,10 @@ import { MembreEquipeFormDialog } from "./membre-equipe-form-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import { EQUIPE_LABELS, EQUIPE_COLORS } from "@/lib/equipe-labels";
 import { OrganigrammeChantier } from "./organigramme-chantier";
+import {
+  useCanWritePage,
+  useIsConsultationChantier,
+} from "@/components/user-provider";
 
 interface Membre {
   id: string;
@@ -52,6 +56,8 @@ export function EquipeTable({ membres, chantierId, directeur, rmds }: Props) {
   const [addOpen, setAddOpen] = useState(false);
   const [editMembre, setEditMembre] = useState<Membre | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const canWrite =
+    useCanWritePage("/chantiers") && !useIsConsultationChantier(chantierId);
 
   // Group by equipe
   const grouped = new Map<string, Membre[]>();
@@ -84,10 +90,12 @@ export function EquipeTable({ membres, chantierId, directeur, rmds }: Props) {
             {allEquipes.filter((e) => grouped.has(e)).length} équipe(s)
           </span>
         </div>
+        {canWrite && (
         <Button size="sm" onClick={() => setAddOpen(true)}>
           <Plus className="size-4" />
           Ajouter un membre
         </Button>
+        )}
       </div>
 
       <Tabs
@@ -142,7 +150,7 @@ export function EquipeTable({ membres, chantierId, directeur, rmds }: Props) {
                         <TableHead>Rôle</TableHead>
                         <TableHead>Ressource</TableHead>
                         <TableHead>Commentaires</TableHead>
-                        <TableHead className="w-[80px]">Actions</TableHead>
+                        {canWrite && <TableHead className="w-[80px]">Actions</TableHead>}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -169,6 +177,7 @@ export function EquipeTable({ membres, chantierId, directeur, rmds }: Props) {
                           <TableCell className="text-sm text-muted-foreground max-w-[220px] truncate">
                             {m.commentaires?.trim() || "—"}
                           </TableCell>
+                          {canWrite && (
                           <TableCell>
                             <div className="flex gap-1">
                               <Button
@@ -187,6 +196,7 @@ export function EquipeTable({ membres, chantierId, directeur, rmds }: Props) {
                               </Button>
                             </div>
                           </TableCell>
+                          )}
                         </TableRow>
                       ))}
                     </TableBody>

@@ -64,11 +64,53 @@ export async function getUsers() {
           equipesFonctionnelles: {
             select: { equipe: { select: { id: true, name: true } } },
           },
+          membres: { select: { chantierId: true } },
+        },
+      },
+      consultationChantiers: {
+        select: {
+          chantierId: true,
+          chantier: { select: { id: true, code: true, nom: true } },
         },
       },
       createdAt: true,
       updatedAt: true,
     },
+  });
+}
+
+export async function getChantiersForConsultationGrant() {
+  await requireUsersAdmin();
+  return prisma.chantier.findMany({
+    orderBy: { code: "asc" },
+    select: { id: true, code: true, nom: true },
+  });
+}
+
+async function replaceConsultationChantiers(
+  // Interactive transaction client (Prisma.TransactionClient after generate)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any,
+  userId: string,
+  chantierIds: string[] | undefined,
+  ressourceId: string | null
+) {
+  const memberRows = ressourceId
+    ? await tx.membreEquipe.findMany({
+        where: { ressourceId },
+        select: { chantierId: true },
+      })
+    : [];
+  const memberSet = new Set(
+    memberRows.map((m: { chantierId: string }) => m.chantierId)
+  );
+  const unique = [
+    ...new Set((chantierIds ?? []).filter((id) => id && !memberSet.has(id))),
+  ];
+  await tx.userChantierConsultation.deleteMany({ where: { userId } });
+  if (unique.length === 0) return;
+  await tx.userChantierConsultation.createMany({
+    data: unique.map((chantierId) => ({ userId, chantierId })),
   });
 }
 
@@ -110,6 +152,7 @@ export async function createUser(data: {
   ressourceId?: string | null;
   /** Create a new resource and attach the account. */
   newRessource?: NewRessourcePayload | null;
+  consultationChantierIds?: string[];
 }) {
   await requireUsersAdmin();
 
@@ -206,7 +249,7 @@ export async function createUser(data: {
       identity = identityFromRessource(created);
     }
 
-    await tx.user.create({
+    const createdUser = await tx.user.create({
       data: {
         username,
         password_hash,
@@ -216,6 +259,12 @@ export async function createUser(data: {
         ...identity,
       },
     });
+    await replaceConsultationChantiers(
+      tx,
+      createdUser.id,
+      data.consultationChantierIds,
+      ressourceId
+    );
   });
 
   revalidatePath("/admin/users");
@@ -233,6 +282,7 @@ export async function updateUserProfile(
     dashboard_type?: "complete" | "limited";
     /** Changing linked resource is not supported when identity lives on ressource. */
     ressourceId?: string | null;
+    consultationChantierIds?: string[];
   }
 ) {
   await requireUsersAdmin();
@@ -293,6 +343,13 @@ export async function updateUserProfile(
         },
       });
     }
+
+    await replaceConsultationChantiers(
+      tx,
+      id,
+      data.consultationChantierIds,
+      current?.ressourceId ?? null
+    );
   });
 
   revalidatePath("/admin/users");

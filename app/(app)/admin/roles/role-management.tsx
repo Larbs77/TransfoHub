@@ -48,6 +48,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { AppPage } from "@/lib/app-pages";
 import { CHANTIER_SCOPES, RAID_CREATE_SCOPES } from "@/lib/app-pages";
+import { showsPageAccessMode } from "@/lib/page-access";
 import { WORKFLOW_MODE_OPTIONS } from "@/lib/workflow-shared";
 import { createRole, updateRole, setRoleActive } from "./actions";
 
@@ -73,6 +74,7 @@ type RoleRow = {
   workflow_can_view_history: boolean;
   workflow_can_view_kpi: boolean;
   pages: string[];
+  pageModes: Record<string, "read" | "write">;
   userCount: number;
   createdAt: Date;
   updatedAt: Date;
@@ -108,6 +110,7 @@ const emptyForm = {
   workflow_can_view_history: false,
   workflow_can_view_kpi: false,
   pages: [] as string[],
+  pageModes: {} as Record<string, "read" | "write">,
 };
 
 export function RoleManagement({
@@ -163,6 +166,7 @@ export function RoleManagement({
     setForm({
       ...emptyForm,
       pages: ["/", "/chantiers"],
+      pageModes: { "/": "read", "/chantiers": "write" },
     });
     setDialogTab("general");
     setError("");
@@ -201,6 +205,7 @@ export function RoleManagement({
       workflow_can_view_kpi:
         role.code === "Admin" ? true : !!role.workflow_can_view_kpi,
       pages: [...role.pages],
+      pageModes: { ...(role.pageModes ?? {}) },
     });
     setDialogTab("general");
     setError("");
@@ -209,11 +214,21 @@ export function RoleManagement({
 
   const togglePage = (path: string) => {
     if (editing?.code === "Admin") return;
+    setForm((f) => {
+      const on = f.pages.includes(path);
+      const pages = on ? f.pages.filter((p) => p !== path) : [...f.pages, path];
+      const pageModes = { ...f.pageModes };
+      if (on) delete pageModes[path];
+      else pageModes[path] = "write";
+      return { ...f, pages, pageModes };
+    });
+  };
+
+  const setPageMode = (path: string, mode: "read" | "write") => {
+    if (editing?.code === "Admin") return;
     setForm((f) => ({
       ...f,
-      pages: f.pages.includes(path)
-        ? f.pages.filter((p) => p !== path)
-        : [...f.pages, path],
+      pageModes: { ...f.pageModes, [path]: mode },
     }));
   };
 
@@ -221,11 +236,17 @@ export function RoleManagement({
     if (editing?.code === "Admin") return;
     setForm((f) => {
       const set = new Set(f.pages);
+      const pageModes = { ...f.pageModes };
       for (const p of paths) {
-        if (checked) set.add(p);
-        else set.delete(p);
+        if (checked) {
+          set.add(p);
+          if (!pageModes[p]) pageModes[p] = "write";
+        } else {
+          set.delete(p);
+          delete pageModes[p];
+        }
       }
-      return { ...f, pages: [...set] };
+      return { ...f, pages: [...set], pageModes };
     });
   };
 
@@ -695,7 +716,9 @@ export function RoleManagement({
                       Pages autorisées
                     </h3>
                     <p className="text-xs text-muted-foreground">
-                      Cochez les écrans visibles dans le menu pour ce rôle.
+                      Cochez les écrans visibles dans le menu. Lecture / Écriture
+                      s&apos;applique au suivi métier, y compris RAID (3 surfaces),
+                      Chantiers et Comités.
                     </p>
                   </div>
                   <Badge variant="secondary" className="tabular-nums">
@@ -749,23 +772,67 @@ export function RoleManagement({
                           </span>
                         </label>
                         <div className="space-y-0.5">
-                          {pages.map((page) => (
-                            <label
-                              key={page.path}
-                              className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 text-sm hover:bg-accent/50"
-                            >
-                              <input
-                                type="checkbox"
-                                className="size-3.5 shrink-0 rounded border"
-                                checked={form.pages.includes(page.path)}
-                                disabled={isAdminRole}
-                                onChange={() => togglePage(page.path)}
-                              />
-                              <span className="min-w-0 leading-snug">
-                                {page.label}
-                              </span>
-                            </label>
-                          ))}
+                          {pages.map((page) => {
+                            const checked = form.pages.includes(page.path);
+                            const showMode =
+                              checked &&
+                              page.writeable &&
+                              showsPageAccessMode(page.path);
+                            const mode = form.pageModes[page.path] ?? "write";
+                            return (
+                              <div
+                                key={page.path}
+                                className="flex items-center gap-2 rounded-md px-1.5 py-1.5 text-sm hover:bg-accent/50"
+                              >
+                                <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                                  <input
+                                    type="checkbox"
+                                    className="size-3.5 shrink-0 rounded border"
+                                    checked={checked}
+                                    disabled={isAdminRole}
+                                    onChange={() => togglePage(page.path)}
+                                  />
+                                  <span className="min-w-0 leading-snug">
+                                    {page.label}
+                                  </span>
+                                </label>
+                                {showMode && (
+                                  <div
+                                    className="flex shrink-0 rounded-md border p-0.5"
+                                    role="group"
+                                    aria-label={`Mode d'accès ${page.label}`}
+                                  >
+                                    <button
+                                      type="button"
+                                      disabled={isAdminRole}
+                                      onClick={() => setPageMode(page.path, "read")}
+                                      className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                                        mode === "read"
+                                          ? "bg-[#0A3C74] text-white"
+                                          : "text-muted-foreground hover:bg-muted"
+                                      }`}
+                                    >
+                                      Lecture
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={isAdminRole}
+                                      onClick={() =>
+                                        setPageMode(page.path, "write")
+                                      }
+                                      className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                                        mode === "write"
+                                          ? "bg-[#0A3C74] text-white"
+                                          : "text-muted-foreground hover:bg-muted"
+                                      }`}
+                                    >
+                                      Écriture
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     );

@@ -1,8 +1,10 @@
+import { requirePageAccess } from "@/lib/auth";
 import { getAdherences, getChantiersForSelect, getNextAdherenceCode } from "@/app/(app)/actions";
 import { AdherencesRegistre } from "@/components/adherences-registre";
 import { Link2 } from "lucide-react";
 
 export default async function AdherencesPage() {
+  await requirePageAccess("/adherences");
   const [adherences, chantiers, nextCode] = await Promise.all([
     getAdherences(),
     getChantiersForSelect(),

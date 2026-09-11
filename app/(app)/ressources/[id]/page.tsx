@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
+import { requirePageAccess } from "@/lib/auth";
 import { getRessourceById, getCapaciteRessource } from "@/app/(app)/actions";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -39,6 +40,7 @@ interface Props {
 }
 
 export default async function RessourceDetailPage({ params }: Props) {
+  await requirePageAccess("/ressources");
   const { id } = await params;
   const [ressource, capacite] = await Promise.all([
     getRessourceById(id),

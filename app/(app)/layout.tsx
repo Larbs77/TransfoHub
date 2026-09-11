@@ -7,8 +7,10 @@ import { UserThemeSync } from "@/components/user-theme-sync";
 import {
   getRoleByCode,
   resolveAllowedPages,
+  resolveAllowedWritePages,
   resolveRaidCreateScope,
 } from "@/lib/roles";
+import { getUserConsultationChantierIds } from "@/lib/auth";
 import {
   LEGACY_ROLE_COLORS,
   LEGACY_ROLE_LABELS,
@@ -52,12 +54,15 @@ export default async function AppLayout({
   ]);
 
   const allowedPages = resolveAllowedPages(role);
+  const allowedWritePages = resolveAllowedWritePages(role);
+  const canUseApp = !!role?.is_active;
+  const consultationChantierIds = canUseApp
+    ? await getUserConsultationChantierIds(session)
+    : [];
   const roleLabel =
     role?.label ?? LEGACY_ROLE_LABELS[session.role] ?? session.role;
   const roleColor =
     role?.color ?? LEGACY_ROLE_COLORS[session.role] ?? "#6b7280";
-
-  const canUseApp = !!role?.is_active;
   const fullName = `${dbUser?.first_name ?? ""} ${dbUser?.last_name ?? ""}`.trim();
   const displayName = fullName || dbUser?.username || session.username;
   const themePreference: Theme =
@@ -77,6 +82,7 @@ export default async function AppLayout({
         roleLabel,
         roleColor,
         allowedPages: canUseApp ? allowedPages : [],
+        allowedWritePages: canUseApp ? allowedWritePages : [],
         ressourceId: session.ressourceId,
         dashboardType: session.dashboardType || "complete",
         raidCreateScope: canUseApp ? resolveRaidCreateScope(role) : "none",
@@ -88,6 +94,7 @@ export default async function AppLayout({
               ? role.chantier_scope
               : "none"
           : "none",
+        consultationChantierIds: canUseApp ? consultationChantierIds : [],
       }}
     >
       <UserThemeSync preference={themePreference} />

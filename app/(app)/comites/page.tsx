@@ -1,3 +1,4 @@
+import { requirePageAccess } from "@/lib/auth";
 import { getComites } from "@/app/(app)/actions";
 import { getComiteParametresForSelect } from "@/app/(app)/admin/comites-parametres/actions";
 import { ComitesList } from "@/components/comites-list";
@@ -6,6 +7,7 @@ import { CalendarDays, CalendarClock, History, MailX } from "lucide-react";
 import { startOfWeek, endOfWeek, isWithinInterval, isBefore, isAfter } from "date-fns";
 
 export default async function ComitesPage() {
+  await requirePageAccess("/comites");
   const [allComites, instances] = await Promise.all([
     getComites(),
     getComiteParametresForSelect().catch(() => []),

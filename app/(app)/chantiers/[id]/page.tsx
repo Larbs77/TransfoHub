@@ -11,6 +11,7 @@ import {
   getComitesForSelect,
 } from "@/app/(app)/actions";
 import { AccessDenied } from "@/components/access-denied";
+import { requirePageAccess } from "@/lib/auth";
 import {
   DOMAINE_LABELS,
   DOMAINE_COLORS,
@@ -35,7 +36,10 @@ import { EquipeTable } from "@/components/equipe-table";
 import { RaidList } from "@/components/raid-list";
 import { AddRaidButton } from "@/components/add-raid-button";
 import { ChantierDetailTabs } from "@/components/chantier-detail-tabs";
-import { ChantierDetailActions } from "@/components/chantier-detail-actions";
+import {
+  ChantierDetailActions,
+  ConsultationChantierBadge,
+} from "@/components/chantier-detail-actions";
 import { ChantierKpiTab } from "@/components/chantier-kpi-tab";
 import { ChantierCapaciteTab } from "@/components/chantier-capacite-tab";
 import { ChantierJalonsTab } from "@/components/chantier-jalons-tab";
@@ -43,7 +47,7 @@ import { ChantierAdherencesTab } from "@/components/chantier-adherences-tab";
 import { ChantierConsultationTab } from "@/components/chantier-consultation-tab";
 import { formatMAD, formatJH } from "@/lib/utils-pmo";
 import Link from "next/link";
-import { FileText } from "lucide-react";
+import { FileText, Library } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface Props {
@@ -51,6 +55,7 @@ interface Props {
 }
 
 export default async function ChantierDetailPage({ params }: Props) {
+  await requirePageAccess("/chantiers");
   const { id } = await params;
 
   let chantier, burnRate, consultationQuestions, jalonWorkflow, statusConfigs, fieldOptions, comites;
@@ -89,8 +94,21 @@ export default async function ChantierDetailPage({ params }: Props) {
               <Badge style={{ backgroundColor: STATUT_CHANTIER_COLORS[chantier.statut], color: "white" }}>
                 {STATUT_CHANTIER_LABELS[chantier.statut] ?? chantier.statut}
               </Badge>
+              <ConsultationChantierBadge chantierId={chantier.id} />
             </div>
             <div className="flex items-center gap-2">
+              {chantier.lien_espace_documentaire ? (
+                <a
+                  href={chantier.lien_espace_documentaire}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Button variant="outline" size="sm" className="gap-2">
+                    <Library className="size-4" />
+                    Espace Documentaire
+                  </Button>
+                </a>
+              ) : null}
               <Link href={`/rapport/${chantier.id}`} target="_blank">
                 <Button variant="outline" size="sm" className="gap-2">
                   <FileText className="size-4" />

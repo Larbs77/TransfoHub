@@ -10,7 +10,7 @@ const globalForPrisma = globalThis as unknown as {
  * Bump whenever the Prisma schema gains fields/models so HMR drops a stale
  * singleton (otherwise findUnique/update rejects unknown fields).
  */
-const PRISMA_MODEL_STAMP = "raid-audit-delete-setnull-v1";
+const PRISMA_MODEL_STAMP = "chantier-lien-espace-documentaire-v1";
 
 function clientLooksCurrent(client: PrismaClient): boolean {
   try {
@@ -32,6 +32,7 @@ function clientLooksCurrent(client: PrismaClient): boolean {
       activiteTemplate?: { findMany?: unknown };
       workstream?: { findMany?: unknown };
       activite?: { findMany?: unknown };
+      userChantierConsultation?: { findMany?: unknown };
       _runtimeDataModel?: {
         models?: Record<
           string,
@@ -57,6 +58,7 @@ function clientLooksCurrent(client: PrismaClient): boolean {
     if (typeof c.activiteTemplate?.findMany !== "function") return false;
     if (typeof c.workstream?.findMany !== "function") return false;
     if (typeof c.activite?.findMany !== "function") return false;
+    if (typeof c.userChantierConsultation?.findMany !== "function") return false;
 
     const comiteModel = c._runtimeDataModel?.models?.Comite;
     if (comiteModel?.fields) {
@@ -73,6 +75,15 @@ function clientLooksCurrent(client: PrismaClient): boolean {
         ? fields.some((f) => f.name === "niveau")
         : "niveau" in fields;
       if (!hasNiveau) return false;
+    }
+
+    const chantierModel = c._runtimeDataModel?.models?.Chantier;
+    if (chantierModel?.fields) {
+      const fields = chantierModel.fields;
+      const hasLien = Array.isArray(fields)
+        ? fields.some((f) => f.name === "lien_espace_documentaire")
+        : "lien_espace_documentaire" in fields;
+      if (!hasLien) return false;
     }
 
     const raidModel = c._runtimeDataModel?.models?.Raid;

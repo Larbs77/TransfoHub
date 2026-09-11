@@ -7,6 +7,7 @@ import {
   getRoleByCode,
   resolveRaidCreateScope,
   roleCanAccessPage,
+  roleCanWritePage,
   type RaidCreateScope,
 } from "@/lib/roles";
 
@@ -222,11 +223,84 @@ export async function requirePageAccess(
   throw new Error("Accès non autorisé");
 }
 
-export async function requireChantierAccess(
-  chantierId: string
+/** Enter the page (read or write). Mutations must use requirePageWrite. */
+export async function requirePageWrite(
+  ...paths: string[]
 ): Promise<SessionData> {
   const session = await requireAuth();
   const role = await getRoleByCode(session.role);
+
+  for (const path of paths) {
+    if (roleCanWritePage(role, path)) {
+      return session;
+    }
+  }
+
+  throw new Error("Action non autorisée : accès en lecture seule.");
+}
+
+export function isRaidAssigneeSession(
+  session: SessionData,
+  raid: { responsableRessourceId?: string | null } | null | undefined
+): boolean {
+  return !!(
+    session.ressourceId &&
+    raid?.responsableRessourceId &&
+    session.ressourceId === raid.responsableRessourceId
+  );
+}
+
+/**
+ * RAID mutations: page Écriture, or Lecture + RAID assigned to the user.
+ * Create / delete / reassign must use requirePageWrite("/raid") instead.
+ */
+export async function requireRaidWriteOrAssignee(raid: {
+  responsableRessourceId?: string | null;
+}): Promise<SessionData> {
+  const session = await requireAuth();
+  const role = await getRoleByCode(session.role);
+  if (roleCanWritePage(role, "/raid")) return session;
+  if (roleCanAccessPage(role, "/raid") && isRaidAssigneeSession(session, raid)) {
+    return session;
+  }
+  throw new Error("Action non autorisée : accès en lecture seule.");
+}
+
+async function userIsChantierMember(
+  session: SessionData,
+  chantierId: string
+): Promise<boolean> {
+  if (!session.ressourceId) return false;
+  const membre = await prisma.membreEquipe.findFirst({
+    where: { chantierId, ressourceId: session.ressourceId },
+    select: { id: true },
+  });
+  return !!membre;
+}
+
+async function userHasChantierConsultation(
+  session: SessionData,
+  chantierId: string
+): Promise<boolean> {
+  const row = await prisma.userChantierConsultation.findUnique({
+    where: { userId_chantierId: { userId: session.userId, chantierId } },
+    select: { userId: true },
+  });
+  return !!row;
+}
+
+/**
+ * View access: tous / membre / chantier extra en consultation.
+ * Write access (opts.write, default true): membre or tous — pas les extras,
+ * sauf RAID déjà couvert par requireRaidWriteOrAssignee (ne pas passer write ici).
+ */
+export async function requireChantierAccess(
+  chantierId: string,
+  opts?: { write?: boolean }
+): Promise<SessionData> {
+  const session = await requireAuth();
+  const role = await getRoleByCode(session.role);
+  const write = opts?.write !== false;
 
   if (!role || !role.is_active) {
     throw new Error("Accès au chantier non autorisé");
@@ -236,25 +310,21 @@ export async function requireChantierAccess(
     return session;
   }
 
-  if (role.chantier_scope === "assigned" && session.ressourceId) {
-    const membre = await prisma.membreEquipe.findFirst({
-      where: {
-        chantierId,
-        ressourceId: session.ressourceId,
-      },
-    });
-    if (membre) return session;
-  }
-
-  // Legacy fallback for known codes if role row missing scope
   if (session.role === "Admin" || session.role === "Programme_Office") {
     return session;
   }
-  if (session.role === "PMO_Chantier" && session.ressourceId) {
-    const membre = await prisma.membreEquipe.findFirst({
-      where: { chantierId, ressourceId: session.ressourceId },
-    });
-    if (membre) return session;
+
+  const isMember = await userIsChantierMember(session, chantierId);
+  if (isMember) return session;
+
+  if (!write && (await userHasChantierConsultation(session, chantierId))) {
+    return session;
+  }
+
+  if (write && (await userHasChantierConsultation(session, chantierId))) {
+    throw new Error(
+      "Action non autorisée : accès en consultation uniquement sur ce chantier."
+    );
   }
 
   throw new Error("Accès au chantier non autorisé");
@@ -316,11 +386,10 @@ export async function getRaidCreateScopeForSession(): Promise<RaidCreateScope> {
 
 // ── Helper: get user's accessible chantier IDs ─────────
 
-export async function getUserChantierIds(
+export async function getUserMemberChantierIds(
   session: SessionData
 ): Promise<string[] | "all"> {
   const role = await getRoleByCode(session.role);
-
   const scope =
     role?.chantier_scope ??
     (session.role === "Admin" || session.role === "Programme_Office"
@@ -329,15 +398,39 @@ export async function getUserChantierIds(
         ? "assigned"
         : "none");
 
-  if (scope === "all") return "all";
+  if (scope === "all" || session.role === "Admin") return "all";
 
-  if (scope === "assigned" && session.ressourceId) {
-    const membres = await prisma.membreEquipe.findMany({
-      where: { ressourceId: session.ressourceId },
-      select: { chantierId: true },
-    });
-    return membres.map((m) => m.chantierId);
-  }
+  if (!session.ressourceId) return [];
+  if (scope !== "assigned" && session.role !== "PMO_Chantier") return [];
 
-  return [];
+  const membres = await prisma.membreEquipe.findMany({
+    where: { ressourceId: session.ressourceId },
+    select: { chantierId: true },
+  });
+  return membres.map((m) => m.chantierId);
+}
+
+export async function getUserConsultationChantierIds(
+  session: SessionData
+): Promise<string[]> {
+  const memberIds = await getUserMemberChantierIds(session);
+  if (memberIds === "all") return [];
+
+  const extras = await prisma.userChantierConsultation.findMany({
+    where: { userId: session.userId },
+    select: { chantierId: true },
+  });
+  const memberSet = new Set(memberIds);
+  return extras
+    .map((e) => e.chantierId)
+    .filter((id) => !memberSet.has(id));
+}
+
+export async function getUserChantierIds(
+  session: SessionData
+): Promise<string[] | "all"> {
+  const memberIds = await getUserMemberChantierIds(session);
+  if (memberIds === "all") return "all";
+  const extras = await getUserConsultationChantierIds(session);
+  return [...new Set([...memberIds, ...extras])];
 }

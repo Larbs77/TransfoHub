@@ -1,7 +1,9 @@
+import { requirePageAccess } from "@/lib/auth";
 import { getRessourcesForSelect } from "@/app/(app)/actions";
 import { SaisieTempsGrid } from "@/components/saisie-temps-grid";
 
 export default async function SaisieTempsPage() {
+  await requirePageAccess("/saisie-temps");
   const ressources = await getRessourcesForSelect();
 
   return (

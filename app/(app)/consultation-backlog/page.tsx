@@ -1,3 +1,4 @@
+import { requirePageAccess } from "@/lib/auth";
 import { getConsultationQuestions } from "@/app/(app)/actions";
 import { ConsultationBacklogList } from "@/components/consultation-backlog-list";
 
@@ -6,6 +7,7 @@ export default async function ConsultationBacklogPage({
 }: {
   searchParams: Promise<{ priorite?: string; statut?: string }>;
 }) {
+  await requirePageAccess("/consultation-backlog");
   const params = await searchParams;
   const questions = await getConsultationQuestions();
 

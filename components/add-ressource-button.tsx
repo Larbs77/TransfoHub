@@ -8,6 +8,7 @@ import {
   type EquipeOption,
   type ActiveRoleOption,
 } from "./ressource-form-dialog";
+import { useCanWritePage } from "@/components/user-provider";
 
 export function AddRessourceButton({
   equipes = [],
@@ -19,6 +20,8 @@ export function AddRessourceButton({
   canCreateAccount?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const canWrite = useCanWritePage("/ressources");
+  if (!canWrite) return null;
 
   return (
     <>

@@ -26,9 +26,16 @@ export function canActOnComiteSeance(
   ctx: {
     chantierScope: "all" | "assigned" | "none";
     instances?: { name: string; niveau?: string }[];
+    consultationChantierIds?: string[];
   }
 ): boolean {
   if (ctx.chantierScope === "all") return true;
+  if (
+    comite.chantierId &&
+    ctx.consultationChantierIds?.includes(comite.chantierId)
+  ) {
+    return false;
+  }
   if (ctx.chantierScope !== "assigned") return false;
   const param = ctx.instances?.find((p) => p.name === comite.instance);
   return isComiteNiveauOperationnel(param?.niveau) && !!comite.chantierId;

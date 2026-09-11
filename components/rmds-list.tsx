@@ -27,6 +27,7 @@ import { RmdFormDialog } from "./rmd-form-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import { deleteRmd } from "@/app/(app)/actions";
 import { DOMAINE_LABELS, DOMAINE_COLORS } from "@/lib/chantier-labels";
+import { useCanWritePage } from "@/components/user-provider";
 
 interface RmdWithStats {
   id: string;
@@ -163,6 +164,7 @@ export function RmdsList({ rmds }: Props) {
   const [editRmd, setEditRmd] = useState<RmdWithStats | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const canWrite = useCanWritePage("/rmds");
 
   function handleSort(field: SortField) {
     if (sortField === field) {
@@ -350,12 +352,16 @@ export function RmdsList({ rmds }: Props) {
                     <TableCell className="text-center">{r._count.chantiers}</TableCell>
                     <TableCell>
                       <div className="flex gap-1">
+                        {canWrite && (
+                          <>
                         <Button variant="ghost" size="icon-xs" onClick={() => setEditRmd(r)}>
                           <Pencil className="size-3.5" />
                         </Button>
                         <Button variant="ghost" size="icon-xs" onClick={() => { setDeleteError(null); setDeleteId(r.id); }}>
                           <Trash2 className="size-3.5 text-destructive" />
                         </Button>
+                          </>
+                        )}
                         <Link href={`/rmds/${r.id}`}>
                           <Button variant="ghost" size="icon-xs">
                             <ArrowRight className="size-3.5" />

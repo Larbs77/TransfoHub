@@ -37,7 +37,12 @@ import { RaidFormDialog } from "./raid-form-dialog";
 import { RaidExcelExportOnceButton } from "./raid-excel-export-button";
 import { CalendarView, type CalendarEvent } from "./calendar-view";
 import { deleteComite, deleteRaid } from "@/app/(app)/actions";
-import { useCanCreateRaid, useUser } from "@/components/user-provider";
+import {
+  useCanCreateRaid,
+  useCanWritePage,
+  useUser,
+} from "@/components/user-provider";
+import { isRaidAssignee } from "@/lib/raid-labels";
 import {
   STATUT_COMITE_LABELS,
   STATUT_COMITE_COLORS,
@@ -177,11 +182,15 @@ function RaidDetailField({
 function ComiteRaidRow({
   raid: r,
   canActOn,
+  canWriteRaid,
+  ressourceId,
   onEditRaid,
   onDeleteRaid,
 }: {
   raid: RaidItem;
   canActOn: boolean;
+  canWriteRaid: boolean;
+  ressourceId: string | null;
   onEditRaid: (raid: RaidItem) => void;
   onDeleteRaid: (id: string) => void;
 }) {
@@ -231,23 +240,24 @@ function ComiteRaidRow({
               <ChevronRight className="size-3" />
             )}
           </Button>
-          {canActOn && (
-            <>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => onEditRaid(r)}
-              >
-                <Pencil className="size-3" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => onDeleteRaid(r.id)}
-              >
-                <Trash2 className="size-3 text-destructive" />
-              </Button>
-            </>
+          {(canWriteRaid && canActOn) ||
+          isRaidAssignee(ressourceId, r.responsableRessourceId) ? (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => onEditRaid(r)}
+            >
+              <Pencil className="size-3" />
+            </Button>
+          ) : null}
+          {canWriteRaid && canActOn && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => onDeleteRaid(r.id)}
+            >
+              <Trash2 className="size-3 text-destructive" />
+            </Button>
           )}
         </div>
       </div>
@@ -321,12 +331,16 @@ function ComiteRaidSection({
   onDeleteRaid,
   onAddRaid,
   canActOn,
+  canWriteRaid,
+  ressourceId,
 }: {
   comite: ComiteRow;
   onEditRaid: (r: RaidItem) => void;
   onDeleteRaid: (id: string) => void;
   onAddRaid?: (comiteId: string) => void;
   canActOn: boolean;
+  canWriteRaid: boolean;
+  ressourceId: string | null;
 }) {
   const raids = comite.raids;
   const raidsByType = useMemo(() => {
@@ -388,6 +402,8 @@ function ComiteRaidSection({
                       key={r.id}
                       raid={r}
                       canActOn={canActOn}
+                      canWriteRaid={canWriteRaid}
+                      ressourceId={ressourceId}
                       onEditRaid={onEditRaid}
                       onDeleteRaid={onDeleteRaid}
                     />
@@ -410,6 +426,9 @@ function InstanceTable({
   onDeleteRaid,
   onAddRaid,
   canActOn,
+  canManageRaidSeance,
+  canWriteRaid,
+  ressourceId,
 }: {
   comites: ComiteRow[];
   onEdit: (c: ComiteRow) => void;
@@ -418,6 +437,9 @@ function InstanceTable({
   onDeleteRaid: (id: string) => void;
   onAddRaid?: (comiteId: string) => void;
   canActOn: (c: ComiteRow) => boolean;
+  canManageRaidSeance: (c: ComiteRow) => boolean;
+  canWriteRaid: boolean;
+  ressourceId: string | null;
 }) {
   const [sortField, setSortField] = useState<SortField | null>("date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -558,7 +580,9 @@ function InstanceTable({
             onEditRaid={onEditRaid}
             onDeleteRaid={onDeleteRaid}
             onAddRaid={onAddRaid}
-            canActOn={canActOn(c)}
+            canActOn={canManageRaidSeance(c)}
+            canWriteRaid={canWriteRaid}
+            ressourceId={ressourceId}
           />
         );
       })}
@@ -568,9 +592,17 @@ function InstanceTable({
 
 export function ComitesList({ comites, instances = [] }: Props) {
   const canCreateRaid = useCanCreateRaid();
-  const { chantierScope } = useUser();
+  const canWriteComites = useCanWritePage("/comites");
+  const canWriteRaid = useCanWritePage("/raid");
+  const { chantierScope, ressourceId, consultationChantierIds } = useUser();
+  const canManageRaidSeance = (c: ComiteRow) =>
+    canActOnComiteSeance(c, {
+      chantierScope,
+      instances,
+      consultationChantierIds,
+    });
   const canActOn = (c: ComiteRow) =>
-    canActOnComiteSeance(c, { chantierScope, instances });
+    canWriteComites && canManageRaidSeance(c);
   const [viewFilter, setViewFilter] = useState<ViewFilter>("week");
   const [niveauFilter, setNiveauFilter] = useState<string>("__all__");
   const [editComite, setEditComite] = useState<ComiteRow | null>(null);
@@ -769,6 +801,9 @@ export function ComitesList({ comites, instances = [] }: Props) {
                     onDeleteRaid={(id) => { setDeleteError(null); setDeleteRaidId(id); }}
                     onAddRaid={canCreateRaid ? setAddRaidComiteId : undefined}
                     canActOn={canActOn}
+                    canManageRaidSeance={canManageRaidSeance}
+                    canWriteRaid={canWriteRaid}
+                    ressourceId={ressourceId}
                   />
                 </div>
               </TabsContent>

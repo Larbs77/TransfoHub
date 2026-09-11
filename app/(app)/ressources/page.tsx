@@ -1,10 +1,11 @@
 import { getRessources } from "@/app/(app)/actions";
 import { getEquipesForSelect } from "@/app/(app)/admin/equipes/actions";
 import { getActiveRolesForSelect } from "@/app/(app)/admin/roles/actions";
-import { getSession } from "@/lib/auth";
+import { getSession, requirePageAccess } from "@/lib/auth";
 import { RessourcesList } from "@/components/ressources-list";
 
 export default async function RessourcesPage() {
+  await requirePageAccess("/ressources");
   const session = await getSession();
   const canCreateAccount = session.role === "Admin";
 

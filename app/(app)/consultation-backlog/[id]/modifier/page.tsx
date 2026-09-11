@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { requirePageWrite } from "@/lib/auth";
 import { getConsultationQuestionById } from "@/app/(app)/actions";
 import { ConsultationQuestionForm } from "@/components/consultation-question-form";
 
@@ -18,6 +19,7 @@ export default async function ModifierConsultationQuestionPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ retour?: string }>;
 }) {
+  await requirePageWrite("/consultation-backlog");
   const { id } = await params;
   const sp = await searchParams;
   const backHref = safeRetour(sp.retour);

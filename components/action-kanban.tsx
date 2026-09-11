@@ -38,6 +38,8 @@ import {
   changeRaidKanbanStatus,
   fetchKanbanMoveContext,
 } from "@/app/(app)/raid/[id]/actions";
+import { useCanWritePage } from "@/components/user-provider";
+import { isRaidAssignee } from "@/lib/raid-labels";
 import {
   Dialog,
   DialogContent,
@@ -366,6 +368,7 @@ export function ActionKanban({ items: propItems, statusConfigs }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [now] = useState(() => new Date());
+  const canWriteRaid = useCanWritePage("/raid");
 
   useEffect(() => {
     setItems(propItems);
@@ -415,6 +418,12 @@ export function ActionKanban({ items: propItems, statusConfigs }: Props) {
 
   const canMoveItem = (item: ActionItem) => {
     if (!moveCtx) return false;
+    if (
+      !canWriteRaid &&
+      !isRaidAssignee(moveCtx.ressourceId, item.responsableRessourceId)
+    ) {
+      return false;
+    }
     return canMoveRaidKanbanClient(item, moveCtx);
   };
 

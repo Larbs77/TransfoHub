@@ -1,6 +1,13 @@
 import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { ALL_PAGE_PATHS, getOwningAppPagePath } from "@/lib/app-pages";
+import {
+  grantsToPaths,
+  isPageWriteEnforced,
+  pageGrantMode,
+  parsePageGrants,
+  type PageGrant,
+} from "@/lib/page-access";
 
 export type RaidCreateScope = "none" | "chantier" | "programme";
 
@@ -29,6 +36,7 @@ export type RoleRecord = {
   workflow_can_view_history: boolean;
   workflow_can_view_kpi: boolean;
   pages: string[];
+  pageGrants: PageGrant[];
   createdAt: Date;
   updatedAt: Date;
 };
@@ -53,20 +61,7 @@ export function resolveRaidCreateScope(
 }
 
 export function parsePages(pages: unknown): string[] {
-  if (Array.isArray(pages)) {
-    return pages.filter((p): p is string => typeof p === "string");
-  }
-  if (typeof pages === "string") {
-    try {
-      const parsed = JSON.parse(pages) as unknown;
-      return Array.isArray(parsed)
-        ? parsed.filter((p): p is string => typeof p === "string")
-        : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
+  return grantsToPaths(parsePageGrants(pages));
 }
 
 function mapRole(row: {
@@ -116,6 +111,7 @@ function mapRole(row: {
     workflow_can_view_history: !!row.workflow_can_view_history,
     workflow_can_view_kpi: !!row.workflow_can_view_kpi,
     pages: parsePages(row.pages),
+    pageGrants: parsePageGrants(row.pages),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -165,6 +161,22 @@ export function resolveAllowedPages(role: RoleRecord | null): string[] {
   if (!role || !role.is_active) return [];
   if (role.code === "Admin") return [...ALL_PAGE_PATHS];
   return role.pages;
+}
+
+export function roleCanWritePage(
+  role: RoleRecord | null | undefined,
+  path: string
+): boolean {
+  if (!roleCanAccessPage(role, path)) return false;
+  if (role!.code === "Admin") return true;
+  if (!isPageWriteEnforced(path)) return true;
+  return pageGrantMode(role!.pageGrants, path) === "write";
+}
+
+export function resolveAllowedWritePages(role: RoleRecord | null): string[] {
+  if (!role || !role.is_active) return [];
+  if (role.code === "Admin") return [...ALL_PAGE_PATHS];
+  return role.pages.filter((path) => roleCanWritePage(role, path));
 }
 
 export function slugifyRoleCode(label: string): string {

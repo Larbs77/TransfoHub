@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect } from "react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { LayoutGrid, TableIcon, GanttChart, Pencil, Trash2, ArrowRight, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, Search, SlidersHorizontal, CalendarRange, RotateCcw } from "lucide-react";
+import { useCanWritePage, useUser } from "@/components/user-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -188,6 +189,8 @@ const PRIORITE_OPTIONS = Object.entries(PRIORITE_CHANTIER_LABELS).map(([k, v]) =
 const STATUT_OPTIONS = Object.entries(STATUT_CHANTIER_LABELS).map(([k, v]) => ({ value: k, label: v }));
 
 export function ChantiersList({ chantiers, favoris = [] }: Props) {
+  const canWrite = useCanWritePage("/chantiers");
+  const { consultationChantierIds } = useUser();
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
 
   // Filters
@@ -602,12 +605,17 @@ export function ChantiersList({ chantiers, favoris = [] }: Props) {
                     <TableCell className="text-xs text-center">{c.duree_mois}m</TableCell>
                     <TableCell>
                       <div className="flex gap-1">
+                        {canWrite &&
+                          !consultationChantierIds.includes(c.id) && (
+                          <>
                         <Button variant="ghost" size="icon-xs" onClick={() => setEditChantier(c)}>
                           <Pencil className="size-3.5" />
                         </Button>
                         <Button variant="ghost" size="icon-xs" onClick={() => { setDeleteError(null); setDeleteId(c.id); }}>
                           <Trash2 className="size-3.5 text-destructive" />
                         </Button>
+                          </>
+                        )}
                         <Link href={`/chantiers/${c.id}`}>
                           <Button variant="ghost" size="icon-xs">
                             <ArrowRight className="size-3.5" />

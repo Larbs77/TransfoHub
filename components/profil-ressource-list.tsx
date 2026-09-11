@@ -31,6 +31,7 @@ import {
 import { ProfilRessourceFormDialog } from "./profil-ressource-form-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import { deleteProfilRessource } from "@/app/(app)/actions";
+import { useCanWritePage } from "@/components/user-provider";
 import {
   RESSOURCE_TYPE_LABELS,
   RESSOURCE_TYPE_COLORS,
@@ -102,6 +103,7 @@ function ProfilTable({
   onSort,
   onEdit,
   onDelete,
+  canWrite,
 }: {
   items: ProfilWithCount[];
   sortField: SortField | null;
@@ -109,6 +111,7 @@ function ProfilTable({
   onSort: (f: SortField) => void;
   onEdit: (p: ProfilWithCount) => void;
   onDelete: (id: string) => void;
+  canWrite: boolean;
 }) {
   const sorted = useMemo(() => {
     if (!sortField) return items;
@@ -154,7 +157,7 @@ function ProfilTable({
           <TableHead className="text-center">Ordre</TableHead>
           <TableHead className="text-center">Ressources</TableHead>
           <TableHead>Statut</TableHead>
-          <TableHead className="w-[80px]">Actions</TableHead>
+          {canWrite && <TableHead className="w-[80px]">Actions</TableHead>}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -180,6 +183,7 @@ function ProfilTable({
                 {p.actif ? "Actif" : "Inactif"}
               </Badge>
             </TableCell>
+            {canWrite && (
             <TableCell>
               <div className="flex gap-1">
                 <Button
@@ -198,6 +202,7 @@ function ProfilTable({
                 </Button>
               </div>
             </TableCell>
+            )}
           </TableRow>
         ))}
       </TableBody>
@@ -217,6 +222,7 @@ export function ProfilRessourceList({ profils }: Props) {
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const canWrite = useCanWritePage("/profils");
 
   function handleSort(field: SortField) {
     if (sortField === field) {
@@ -328,10 +334,12 @@ export function ProfilRessourceList({ profils }: Props) {
           <span className="text-xs text-muted-foreground">
             {filtered.length} / {profils.length} profil(s)
           </span>
+          {canWrite && (
           <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
             <Plus className="size-4" />
             Nouveau profil
           </Button>
+          )}
         </div>
       </div>
 
@@ -364,6 +372,7 @@ export function ProfilRessourceList({ profils }: Props) {
               onSort={handleSort}
               onEdit={setEditProfil}
               onDelete={handleDelete}
+              canWrite={canWrite}
             />
           </TabsContent>
         ))}

@@ -1,3 +1,4 @@
+import { requirePageAccess } from "@/lib/auth";
 import { getAllProfilsRessource } from "@/app/(app)/actions";
 import {
   Card,
@@ -9,6 +10,7 @@ import {
 import { ProfilRessourceList } from "@/components/profil-ressource-list";
 
 export default async function ProfilsPage() {
+  await requirePageAccess("/profils");
   const profils = await getAllProfilsRessource();
 
   return (

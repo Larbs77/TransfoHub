@@ -53,6 +53,7 @@ import {
 import { formatAffecteeADisplay } from "@/lib/consultation-affectation";
 import { isQuestionEnRetard } from "@/lib/consultation-labels";
 import Link from "next/link";
+import { useCanWritePage, useUser } from "@/components/user-provider";
 
 interface QuestionItem {
   id: string;
@@ -217,6 +218,13 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
     update: "DIRECT",
     delete: "DIRECT",
   });
+  const canWriteQa = useCanWritePage("/consultation-backlog");
+  const { consultationChantierIds } = useUser();
+  const effectiveQa = {
+    create: canWriteQa ? qaModes.create : "INTERDIT",
+    update: canWriteQa ? qaModes.update : "INTERDIT",
+    delete: canWriteQa ? qaModes.delete : "INTERDIT",
+  };
 
   const [sortField, setSortField] = useState<SortField>("createdAt");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -426,7 +434,7 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
   }
 
   function handleAdd() {
-    if (qaModes.create === "INTERDIT") {
+    if (effectiveQa.create === "INTERDIT") {
       alert("Vous n'êtes pas habilité à créer une question Q&A.");
       return;
     }
@@ -434,11 +442,11 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
   }
 
   async function handleDelete(id: string) {
-    if (qaModes.delete === "INTERDIT") {
+    if (effectiveQa.delete === "INTERDIT") {
       alert("Vous n'êtes pas habilité à supprimer une question Q&A.");
       return;
     }
-    if (qaModes.delete === "VALIDATION") {
+    if (effectiveQa.delete === "VALIDATION") {
       const motif = window.prompt(
         "Motif de suppression (demande workflow) :"
       );
@@ -520,7 +528,7 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
             {filtered.length} question(s) sur {total}
           </CardDescription>
           <CardAction>
-            {qaModes.create !== "INTERDIT" && (
+            {effectiveQa.create !== "INTERDIT" && (
               <Button size="sm" onClick={handleAdd}>
                 <Plus className="size-4" />
                 Ajouter une question
@@ -765,7 +773,8 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
                           >
                             <Eye className="size-3.5 text-[#0A3C74]" />
                           </Button>
-                          {qaModes.update !== "INTERDIT" && (
+                          {effectiveQa.update !== "INTERDIT" &&
+                            !consultationChantierIds.includes(q.chantierId) && (
                             <Button
                               size="sm"
                               variant="ghost"
@@ -781,7 +790,8 @@ export function ConsultationBacklogList({ items, initialPriorite, initialStatut 
                               </Link>
                             </Button>
                           )}
-                          {qaModes.delete !== "INTERDIT" && (
+                          {effectiveQa.delete !== "INTERDIT" &&
+                            !consultationChantierIds.includes(q.chantierId) && (
                             <Button
                               size="sm"
                               variant="ghost"

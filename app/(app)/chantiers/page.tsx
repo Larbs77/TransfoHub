@@ -1,9 +1,11 @@
+import { requirePageAccess } from "@/lib/auth";
 import { getChantiers, getFavoris } from "@/app/(app)/actions";
 import { ChantiersList } from "@/components/chantiers-list";
 import { AddChantierButton } from "@/components/add-chantier-button";
 import { BatchRapportButton } from "@/components/batch-rapport-button";
 
 export default async function ChantiersPage() {
+  await requirePageAccess("/chantiers");
   const [chantiers, favoris] = await Promise.all([getChantiers(), getFavoris()]);
 
   const chantiersForSelect = chantiers.map((c) => ({

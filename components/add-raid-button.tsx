@@ -4,7 +4,10 @@ import { useState } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RaidFormDialog } from "./raid-form-dialog";
-import { useCanCreateRaid } from "@/components/user-provider";
+import {
+  useCanCreateRaid,
+  useIsConsultationChantier,
+} from "@/components/user-provider";
 
 interface Props {
   defaultType?: string;
@@ -21,8 +24,9 @@ export function AddRaidButton({
 }: Props) {
   const [open, setOpen] = useState(false);
   const canCreate = useCanCreateRaid();
+  const consultationOnly = useIsConsultationChantier(defaultChantierId);
 
-  if (!canCreate) return null;
+  if (!canCreate || consultationOnly) return null;
 
   return (
     <>

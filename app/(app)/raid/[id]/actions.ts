@@ -2,7 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, type SessionData } from "@/lib/auth";
+import {
+  requireAuth,
+  requirePageWrite,
+  requireRaidWriteOrAssignee,
+  type SessionData,
+} from "@/lib/auth";
+import { getRoleByCode, roleCanWritePage } from "@/lib/roles";
+import { isRaidAssignee } from "@/lib/raid-labels";
 import {
   canAssignRaid,
   canCollaborateOnRaid,
@@ -142,8 +149,15 @@ export async function getRaidDetail(id: string) {
 
   if (!raid) return null;
 
-  const canCollaborate = await canCollaborateOnRaid(session, raid);
-  const canAssign = await canAssignRaid(session, raid);
+  const role = await getRoleByCode(session.role);
+  const raidPageWrite = roleCanWritePage(role, "/raid");
+  const assigned = isRaidAssignee(
+    session.ressourceId,
+    raid.responsableRessourceId
+  );
+  const canCollaborate =
+    (raidPageWrite || assigned) && (await canCollaborateOnRaid(session, raid));
+  const canAssign = raidPageWrite && (await canAssignRaid(session, raid));
 
   // Allow view if page/role grants access OR user can manage (assignee / institutional peers / chantier)
   let canView = canCollaborate || canAssign;
@@ -180,6 +194,7 @@ export async function addRaidComment(raidId: string, body: string) {
 
   const raid = await loadRaidForCollab(raidId);
   if (!raid) throw new Error("Entrée RAID introuvable.");
+  await requireRaidWriteOrAssignee(raid);
 
   const allowed = await canCollaborateOnRaid(session, raid);
   // Comments: allow if collaborator OR has view access on chantier/assigned scope
@@ -335,6 +350,7 @@ export async function changeRaidStatus(
 
   const raid = await loadRaidForCollab(raidId);
   if (!raid) throw new Error("Entrée RAID introuvable.");
+  await requireRaidWriteOrAssignee(raid);
 
   const allowed = await canCollaborateOnRaid(session, raid);
   if (!allowed) throw new Error("Modification non autorisée sur cette entrée.");
@@ -365,6 +381,7 @@ export async function changeRaidKanbanStatus(
 
   const raid = await loadRaidForCollab(raidId);
   if (!raid) throw new Error("Entrée RAID introuvable.");
+  await requireRaidWriteOrAssignee(raid);
 
   const allowed = await canMoveRaidOnKanban(session, raid);
   if (!allowed) {
@@ -388,7 +405,7 @@ export async function assignRaidToRessource(
   raidId: string,
   ressourceId: string | null
 ) {
-  const session = await requireAuth();
+  const session = await requirePageWrite("/raid");
   const raid = await loadRaidForCollab(raidId);
   if (!raid) throw new Error("Entrée RAID introuvable.");
 
@@ -496,7 +513,7 @@ export async function assignRaidToRessource(
 }
 
 export async function autoAssignRaidToMe(raidId: string) {
-  const session = await requireAuth();
+  const session = await requirePageWrite("/raid");
   if (!session.ressourceId) {
     throw new Error(
       "Votre compte n'est lié à aucune ressource : impossible de s'assigner."

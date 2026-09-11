@@ -27,6 +27,7 @@ import {
   RESSOURCE_TYPE_LABELS,
   RESSOURCE_TYPE_COLORS,
 } from "@/lib/ressource-labels";
+import { useCanWritePage } from "@/components/user-provider";
 
 interface RessourceWithStats {
   id: string;
@@ -70,6 +71,7 @@ export function RessourceCard({
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const canWrite = useCanWritePage("/ressources");
 
   return (
     <>
@@ -151,6 +153,8 @@ export function RessourceCard({
           )}
           <div className="flex items-center justify-between pt-1">
             <div className="flex gap-1">
+              {canWrite && (
+                <>
               <Button
                 variant="ghost"
                 size="icon-xs"
@@ -168,6 +172,8 @@ export function RessourceCard({
               >
                 <Trash2 className="size-3.5 text-destructive" />
               </Button>
+                </>
+              )}
             </div>
             <Link href={`/ressources/${ressource.id}`}>
               <Button variant="outline" size="sm" className="gap-1">

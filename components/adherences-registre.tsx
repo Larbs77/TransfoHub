@@ -37,6 +37,7 @@ import {
   ArrowUpDown,
 } from "lucide-react";
 import { deleteAdherence } from "@/app/(app)/actions";
+import { useCanWritePage, useUser } from "@/components/user-provider";
 import { AdherenceFormDialog } from "@/components/adherence-form-dialog";
 import { AdherenceGraph } from "@/components/adherence-graph";
 import {
@@ -190,6 +191,8 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
   // Pagination
   const [pageSize, setPageSize] = useState<number>(10);
   const [currentPage, setCurrentPage] = useState(1);
+  const canWrite = useCanWritePage("/adherences");
+  const { consultationChantierIds } = useUser();
 
   // Sort
   const [sortField, setSortField] = useState<SortField>("code");
@@ -312,6 +315,7 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
           <CardDescription>
             {filtered.length} adhérence(s) sur {total}
           </CardDescription>
+          {canWrite && (
           <CardAction>
             <Button
               size="sm"
@@ -324,6 +328,7 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
               Nouvelle adhérence
             </Button>
           </CardAction>
+          )}
         </CardHeader>
         <CardContent>
           {/* Filters + Page size */}
@@ -400,7 +405,7 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
                   <SortableHead field="statut" className="w-[80px]">Statut</SortableHead>
                   <SortableHead field="echeance" className="w-[100px]">Échéance</SortableHead>
                   <SortableHead field="responsable" className="w-[100px]">Responsable</SortableHead>
-                  <TableHead className="w-[70px]" />
+                  {canWrite && <TableHead className="w-[70px]" />}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -479,6 +484,8 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
                           : "—"}
                       </TableCell>
                       <TableCell className="text-xs">{a.responsable}</TableCell>
+                      {canWrite &&
+                        !consultationChantierIds.includes(a.chantierSourceId) && (
                       <TableCell>
                         <div className="flex gap-1">
                           <Button
@@ -502,6 +509,7 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
                           </Button>
                         </div>
                       </TableCell>
+                      )}
                     </TableRow>
                   ))
                 )}

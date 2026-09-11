@@ -22,6 +22,10 @@ import {
   KpiHoverGlow,
   kpiHoverCardShellClass,
 } from "@/components/kpi-hover-card";
+import {
+  useCanWritePage,
+  useIsConsultationChantier,
+} from "@/components/user-provider";
 import { ChantierFormDialog } from "./chantier-form-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import {
@@ -73,6 +77,8 @@ export function ChantierCard({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [favori, setFavori] = useState(isFavori);
+  const consultationOnly = useIsConsultationChantier(chantier.id);
+  const canWrite = useCanWritePage("/chantiers") && !consultationOnly;
 
   const directeurName =
     chantier.membres
@@ -96,6 +102,11 @@ export function ChantierCard({
                 <Badge className="shrink-0" style={{ backgroundColor: STATUT_CHANTIER_COLORS[chantier.statut], color: "white" }}>
                   {STATUT_CHANTIER_LABELS[chantier.statut] ?? chantier.statut}
                 </Badge>
+                {consultationOnly && (
+                  <Badge variant="secondary" className="text-[10px]">
+                    Consultation
+                  </Badge>
+                )}
               </CardDescription>
               <CardTitle className="text-sm leading-snug line-clamp-2">{chantier.nom}</CardTitle>
             </div>
@@ -165,6 +176,8 @@ export function ChantierCard({
           </div>
           <div className="flex items-center justify-between pt-1">
             <div className="flex gap-1">
+              {canWrite && (
+                <>
               <Button
                 variant="ghost"
                 size="icon-xs"
@@ -182,6 +195,8 @@ export function ChantierCard({
               >
                 <Trash2 className="size-3.5 text-destructive" />
               </Button>
+                </>
+              )}
             </div>
             <Link href={`/chantiers/${chantier.id}`}>
               <Button variant="outline" size="sm" className="gap-1">

@@ -86,7 +86,12 @@ type UserRow = {
     telephone?: string;
     equipeHierarchie?: { id: string; name: string } | null;
     equipesFonctionnelles?: { equipe: { id: string; name: string } }[];
+    membres?: { chantierId: string }[];
   } | null;
+  consultationChantiers?: {
+    chantierId: string;
+    chantier: { id: string; code: string; nom: string };
+  }[];
   createdAt: Date;
   updatedAt: Date;
 };
@@ -111,6 +116,12 @@ type EquipeOption = {
   id: string;
   name: string;
   is_active: boolean;
+};
+
+type ChantierOption = {
+  id: string;
+  code: string;
+  nom: string;
 };
 
 type ProfileForm = {
@@ -212,11 +223,13 @@ export function UserManagement({
   ressourcesDisponibles,
   equipes,
   activeRoles,
+  chantiers = [],
 }: {
   initialUsers: UserRow[];
   ressourcesDisponibles: RessourceOption[];
   equipes: EquipeOption[];
   activeRoles: ActiveRole[];
+  chantiers?: ChantierOption[];
 }) {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
@@ -260,6 +273,8 @@ export function UserManagement({
     activeEquipes[0]?.id ?? ""
   );
   const [newResEquipeFn, setNewResEquipeFn] = useState<string[]>([]);
+  const [newConsultationIds, setNewConsultationIds] = useState<string[]>([]);
+  const [editConsultationIds, setEditConsultationIds] = useState<string[]>([]);
   const [resetPwdValue, setResetPwdValue] = useState("");
   const [error, setError] = useState("");
 
@@ -361,6 +376,7 @@ export function UserManagement({
     setNewResType("Interne");
     setNewResEquipeHier(activeEquipes[0]?.id ?? "");
     setNewResEquipeFn([]);
+    setNewConsultationIds([]);
   };
 
   const openEdit = (user: UserRow) => {
@@ -373,6 +389,9 @@ export function UserManagement({
       role: user.role,
       dashboard_type: (user.dashboard_type as "complete" | "limited") || "complete",
     });
+    setEditConsultationIds(
+      (user.consultationChantiers ?? []).map((c) => c.chantierId)
+    );
     setError("");
   };
 
@@ -397,6 +416,7 @@ export function UserManagement({
                   equipeFonctionnelleIds: newResEquipeFn,
                 }
               : null,
+          consultationChantierIds: newConsultationIds,
         });
         setShowAdd(false);
         resetAddForm();
@@ -419,6 +439,7 @@ export function UserManagement({
           email: editForm.email,
           role: editForm.role,
           dashboard_type: editForm.dashboard_type,
+          consultationChantierIds: editConsultationIds,
         });
         setShowEdit(null);
         window.location.reload();
@@ -1029,6 +1050,28 @@ export function UserManagement({
               )}
             </div>
 
+            {activeRoles.find((r) => r.code === newRole)?.chantier_scope !==
+              "all" && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  Chantiers en consultation
+                </label>
+                <p className="text-[11px] text-muted-foreground">
+                  Lecture seule, hors chantiers déjà membres. Un RAID affecté
+                  reste actionnable.
+                </p>
+                <MultiSelect
+                  options={chantiers.map((c) => ({
+                    value: c.id,
+                    label: `${c.code} — ${c.nom}`,
+                  }))}
+                  selected={newConsultationIds}
+                  onChange={setNewConsultationIds}
+                  placeholder="Aucun chantier extra"
+                />
+              </div>
+            )}
+
             {error && (
               <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {error}
@@ -1205,6 +1248,39 @@ export function UserManagement({
                 </p>
               </div>
             )}
+            {showEdit &&
+              activeRoles.find((r) => r.code === editForm.role)
+                ?.chantier_scope !== "all" &&
+              showEdit.role !== "Admin" && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Chantiers en consultation
+                  </label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Lecture seule. Les chantiers où la ressource est membre
+                    gardent les droits du rôle. Un RAID affecté reste
+                    actionnable.
+                  </p>
+                  <MultiSelect
+                    options={chantiers
+                      .filter((c) => {
+                        const memberIds = new Set(
+                          (showEdit.ressource?.membres ?? []).map(
+                            (m) => m.chantierId
+                          )
+                        );
+                        return !memberIds.has(c.id);
+                      })
+                      .map((c) => ({
+                        value: c.id,
+                        label: `${c.code} — ${c.nom}`,
+                      }))}
+                    selected={editConsultationIds}
+                    onChange={setEditConsultationIds}
+                    placeholder="Aucun chantier extra"
+                  />
+                </div>
+              )}
             {error && (
               <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {error}
