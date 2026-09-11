@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import Image from "next/image";
 import { Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,12 +13,14 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { changePasswordAction } from "./actions";
+import { PasswordRulesHint } from "@/components/password-rules-hint";
 
 export default function ChangePasswordPage() {
   const [state, formAction, isPending] = useActionState(
     changePasswordAction,
     null
   );
+  const [newPassword, setNewPassword] = useState("");
 
   return (
     <Card className="w-full overflow-hidden border border-[#0A3C74]/10 bg-white shadow-[0_20px_50px_-20px_rgba(10,60,116,0.28)]">
@@ -83,8 +85,11 @@ export default function ChangePasswordPage() {
               type="password"
               autoComplete="new-password"
               required
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
               className="border-[#0A3C74]/15 bg-white text-[#0A3C74] focus-visible:border-[#00BDBB] focus-visible:ring-[#00BDBB]/30"
             />
+            <PasswordRulesHint password={newPassword} />
           </div>
 
           <div className="space-y-2">
@@ -103,11 +108,6 @@ export default function ChangePasswordPage() {
               className="border-[#0A3C74]/15 bg-white text-[#0A3C74] focus-visible:border-[#00BDBB] focus-visible:ring-[#00BDBB]/30"
             />
           </div>
-
-          <p className="text-[10px] leading-relaxed text-[#0A3C74]/50">
-            Min. 8 caractères, une majuscule, une minuscule, un chiffre et un
-            caractère spécial.
-          </p>
 
           {state?.error && (
             <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">

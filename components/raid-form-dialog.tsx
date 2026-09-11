@@ -6,7 +6,7 @@ import {
   updateRaid,
   getChantiersForSelect,
   getChantiersForRaidCreate,
-  getComitesForSelect,
+  getComitesForRaidCreate,
   getRessourcesForSelect,
   getRaidFieldOptions,
 } from "@/app/(app)/actions";
@@ -47,6 +47,7 @@ import {
   getCriticiteLabel,
   CRITICITE_COLORS,
   getLabelsForKind,
+  actionRequiresEcheance,
   type StatusConfigItem,
   type RaidFieldOptionItem,
 } from "@/lib/raid-labels";
@@ -86,6 +87,8 @@ interface Props {
   defaultType?: string;
   defaultChantierId?: string;
   defaultComiteId?: string;
+  /** When the RAID comes from an operational committee, chantier is fixed. */
+  lockChantier?: boolean;
   statusConfigs?: StatusConfigItem[];
   fieldOptions?: RaidFieldOptionItem[];
 }
@@ -102,6 +105,7 @@ export function RaidFormDialog({
   defaultType,
   defaultChantierId,
   defaultComiteId,
+  lockChantier = false,
   statusConfigs,
   fieldOptions: fieldOptionsProp,
 }: Props) {
@@ -110,7 +114,9 @@ export function RaidFormDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chantiers, setChantiers] = useState<{ id: string; code: string; nom: string }[]>([]);
-  const [comites, setComites] = useState<{ id: string; instance: string; numero: number; date: Date }[]>([]);
+  const [comites, setComites] = useState<
+    { id: string; instance: string; numero: number; date: Date; chantierId?: string | null }[]
+  >([]);
   const [fieldOptions, setFieldOptions] = useState<RaidFieldOptionItem[]>(
     fieldOptionsProp ?? []
   );
@@ -148,7 +154,11 @@ export function RaidFormDialog({
   const isRisque = type === "Risque";
   const score = isRisque && probabilite && impact ? scoreCriticite(Number(impact), Number(probabilite)) : null;
   const criticiteLabel = score ? getCriticiteLabel(score) : null;
-  const chantierRequiredOnCreate = !isEdit && raidCreateScope === "chantier";
+  const selectedComite = comites.find((c) => c.id === comiteId);
+  const chantierLocked =
+    lockChantier || !!(selectedComite?.chantierId);
+  const chantierRequiredOnCreate =
+    (!isEdit && raidCreateScope === "chantier") || chantierLocked;
 
   const categorieOptions = (() => {
     const labels = getLabelsForKind("categorie", fieldOptions);
@@ -166,7 +176,7 @@ export function RaidFormDialog({
       setError(null);
       Promise.all([
         isEdit ? getChantiersForSelect() : getChantiersForRaidCreate(),
-        getComitesForSelect(),
+        getComitesForRaidCreate(isEdit ? raid?.comiteId : null),
         getRessourcesForSelect(),
         fieldOptionsProp?.length
           ? Promise.resolve(fieldOptionsProp)
@@ -178,7 +188,13 @@ export function RaidFormDialog({
         setFieldOptions(fo);
       });
     }
-  }, [open, isEdit, fieldOptionsProp]);
+  }, [open, isEdit, fieldOptionsProp, raid?.comiteId]);
+
+  useEffect(() => {
+    if (selectedComite?.chantierId) {
+      setChantierId(selectedComite.chantierId);
+    }
+  }, [selectedComite?.chantierId]);
 
   function handleResponsableRessourceChange(newId: string) {
     setResponsableRessourceId(newId);
@@ -209,6 +225,17 @@ export function RaidFormDialog({
       );
       return;
     }
+    const initialeVide = isEdit && !raid?.date_echeance;
+    if (
+      type === "Action" &&
+      actionRequiresEcheance(statut) &&
+      !(dateEcheance || (isEdit && raid?.date_echeance))
+    ) {
+      setError(
+        "Une date d'échéance est obligatoire dès que l'action n'est plus « A planifier »."
+      );
+      return;
+    }
     setLoading(true);
     const data = {
       type,
@@ -227,18 +254,20 @@ export function RaidFormDialog({
       statut,
       date_identification: dateIdent || null,
       date_revision: dateRev || null,
-      // Création : date_echeance = engagement (copié en actualisée côté serveur)
-      // Édition : date_echeance ignorée (figée) ; seule actualisée est mise à jour
+      // Création : engagement. Édition : initiale seulement si encore vide (premier remplissage).
       date_echeance:
         type === "Action"
           ? isEdit
-            ? null
+            ? initialeVide
+              ? dateEcheance || null
+              : null
             : dateEcheance || null
           : null,
       date_echeance_actualisee:
         type === "Action"
           ? isEdit
-            ? dateEcheanceActualisee || null
+            ? dateEcheanceActualisee ||
+              (initialeVide ? dateEcheance || null : null)
             : dateEcheance || null
           : null,
       commentaires,
@@ -452,7 +481,11 @@ export function RaidFormDialog({
                       <span className="text-destructive"> *</span>
                     )}
                   </label>
-                  <Select value={chantierId} onValueChange={setChantierId}>
+                  <Select
+                    value={chantierId}
+                    onValueChange={setChantierId}
+                    disabled={chantierLocked}
+                  >
                     <SelectTrigger className="w-full overflow-hidden">
                       <span className="truncate">
                         <SelectValue
@@ -475,12 +508,16 @@ export function RaidFormDialog({
                       ))}
                     </SelectContent>
                   </Select>
-                  {chantierRequiredOnCreate && (
+                  {chantierLocked ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      Chantier hérité du comité opérationnel.
+                    </p>
+                  ) : chantierRequiredOnCreate ? (
                     <p className="text-[11px] text-muted-foreground">
                       Niveau Chantier : uniquement les chantiers auxquels vous
                       êtes rattaché.
                     </p>
-                  )}
+                  ) : null}
                 </div>
                 <div className="grid min-w-0 gap-1.5">
                   <label className="text-sm font-medium">Comité</label>
@@ -667,16 +704,26 @@ export function RaidFormDialog({
                       <div className="grid gap-1.5">
                         <label className="text-sm font-medium">
                           Échéance initiale
+                          {actionRequiresEcheance(statut) && !raid?.date_echeance
+                            ? " *"
+                            : ""}
                         </label>
                         <Input
                           type="date"
                           value={dateEcheance}
-                          disabled
-                          className="bg-muted/50"
-                          title="Figée à la création — non modifiable"
+                          disabled={!!raid?.date_echeance}
+                          className={raid?.date_echeance ? "bg-muted/50" : undefined}
+                          title={
+                            raid?.date_echeance
+                              ? "Figée une fois renseignée — non modifiable"
+                              : "Premier remplissage : cette date sera ensuite figée"
+                          }
+                          onChange={(e) => setDateEcheance(e.target.value)}
                         />
                         <p className="text-[11px] text-muted-foreground">
-                          Engagement d&apos;origine — non modifiable.
+                          {raid?.date_echeance
+                            ? "Engagement d'origine — non modifiable."
+                            : "Vide tant que l'action n'est pas planifiée. Une fois saisie, elle est figée."}
                         </p>
                       </div>
                       <div className="grid gap-1.5">
@@ -718,6 +765,7 @@ export function RaidFormDialog({
                     <div className="grid gap-1.5 sm:col-span-2 sm:max-w-xs">
                       <label className="text-sm font-medium">
                         Date d&apos;échéance
+                        {actionRequiresEcheance(statut) ? " *" : ""}
                       </label>
                       <Input
                         type="date"
@@ -725,8 +773,9 @@ export function RaidFormDialog({
                         onChange={(e) => setDateEcheance(e.target.value)}
                       />
                       <p className="text-[11px] text-muted-foreground">
-                        Engagement initial — figée après création ; l&apos;échéance
-                        actualisée pourra évoluer ensuite.
+                        Optionnelle tant que le statut est « A planifier ».
+                        Obligatoire ensuite, puis figée. L&apos;actualisée pourra
+                        évoluer sans workflow.
                       </p>
                     </div>
                   )}

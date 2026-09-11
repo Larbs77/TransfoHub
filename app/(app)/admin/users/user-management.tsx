@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useTransition } from "react";
+import { useState, useMemo, useEffect, useTransition } from "react";
 import {
   Users,
   UserPlus,
@@ -17,8 +17,11 @@ import {
   Pencil,
   Mail,
   Phone,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PasswordRulesHint } from "@/components/password-rules-hint";
 import { Input } from "@/components/ui/input";
 import {
   Card,
@@ -124,6 +127,86 @@ function displayName(u: Pick<UserRow, "first_name" | "last_name" | "username">) 
   return full || u.username;
 }
 
+function PaginationControls({
+  currentPage,
+  totalPages,
+  onPageChange,
+  totalItems,
+  pageSize,
+}: {
+  currentPage: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+  totalItems: number;
+  pageSize: number;
+}) {
+  const from = (currentPage - 1) * pageSize + 1;
+  const to = Math.min(currentPage * pageSize, totalItems);
+
+  return (
+    <div className="flex items-center justify-between mt-4">
+      <span className="text-xs text-muted-foreground">
+        {from}–{to} sur {totalItems}
+      </span>
+      <div className="flex items-center gap-1">
+        <Button
+          variant="outline"
+          size="icon-xs"
+          disabled={currentPage <= 1}
+          onClick={() => onPageChange(currentPage - 1)}
+        >
+          <ChevronLeft className="size-4" />
+        </Button>
+        {(() => {
+          const pages: (number | "...")[] = [];
+          if (totalPages <= 7) {
+            for (let i = 1; i <= totalPages; i++) pages.push(i);
+          } else {
+            pages.push(1);
+            if (currentPage > 3) pages.push("...");
+            for (
+              let i = Math.max(2, currentPage - 1);
+              i <= Math.min(totalPages - 1, currentPage + 1);
+              i++
+            )
+              pages.push(i);
+            if (currentPage < totalPages - 2) pages.push("...");
+            pages.push(totalPages);
+          }
+          return pages.map((page, idx) =>
+            page === "..." ? (
+              <span
+                key={`ellipsis-${idx}`}
+                className="px-1 text-xs text-muted-foreground"
+              >
+                ...
+              </span>
+            ) : (
+              <Button
+                key={page}
+                variant={page === currentPage ? "default" : "outline"}
+                size="sm"
+                className="h-7 w-7 p-0 text-xs"
+                onClick={() => onPageChange(page)}
+              >
+                {page}
+              </Button>
+            )
+          );
+        })()}
+        <Button
+          variant="outline"
+          size="icon-xs"
+          disabled={currentPage >= totalPages}
+          onClick={() => onPageChange(currentPage + 1)}
+        >
+          <ChevronRight className="size-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function UserManagement({
   initialUsers,
   ressourcesDisponibles,
@@ -141,6 +224,8 @@ export function UserManagement({
     "username" | "role" | "last_login" | "createdAt" | "name"
   >("username");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [pageSize, setPageSize] = useState<number>(10);
+  const [currentPage, setCurrentPage] = useState(1);
   const [isPending, startTransition] = useTransition();
 
   // Dialogs
@@ -244,6 +329,17 @@ export function UserManagement({
     });
     return list;
   }, [initialUsers, search, roleFilter, sortKey, sortDir]);
+
+  const totalPages = pageSize === 0 ? 1 : Math.ceil(filtered.length / pageSize);
+  const safePage = Math.min(currentPage, totalPages || 1);
+  const paginated =
+    pageSize === 0
+      ? filtered
+      : filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, roleFilter]);
 
   const total = initialUsers.length;
   const active = initialUsers.filter((u) => u.is_active).length;
@@ -436,6 +532,30 @@ export function UserManagement({
                 ))}
               </SelectContent>
             </Select>
+            <div className="flex items-center gap-2 ml-auto">
+              <label className="text-xs text-muted-foreground whitespace-nowrap">
+                Afficher
+              </label>
+              <Select
+                value={pageSize === 0 ? "all" : String(pageSize)}
+                onValueChange={(v) => {
+                  setPageSize(v === "all" ? 0 : Number(v));
+                  setCurrentPage(1);
+                }}
+              >
+                <SelectTrigger className="w-20 h-8" size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[5, 10, 15, 20, 30].map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {n}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="all">Tout</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <div className="overflow-x-auto rounded-md border">
@@ -468,9 +588,6 @@ export function UserManagement({
                     </button>
                   </th>
                   <th className="px-3 py-2 text-left font-medium">Dashboard</th>
-                  <th className="px-3 py-2 text-left font-medium">
-                    Ressource liée
-                  </th>
                   <th className="px-3 py-2 text-center font-medium">Statut</th>
                   <th className="px-3 py-2 text-left font-medium">
                     <button
@@ -484,7 +601,7 @@ export function UserManagement({
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((user) => {
+                {paginated.map((user) => {
                   const isLocked =
                     user.locked_until && user.locked_until > new Date();
                   return (
@@ -598,9 +715,6 @@ export function UserManagement({
                           </SelectContent>
                         </Select>
                       </td>
-                      <td className="px-3 py-2 text-muted-foreground">
-                        {user.ressource?.nom_complet ?? "—"}
-                      </td>
                       <td className="px-3 py-2 text-center">
                         {isLocked ? (
                           <Badge
@@ -704,7 +818,7 @@ export function UserManagement({
                 {filtered.length === 0 && (
                   <tr>
                     <td
-                      colSpan={9}
+                      colSpan={8}
                       className="px-3 py-8 text-center text-muted-foreground"
                     >
                       Aucun utilisateur trouvé.
@@ -714,6 +828,15 @@ export function UserManagement({
               </tbody>
             </table>
           </div>
+          {pageSize > 0 && totalPages > 1 && (
+            <PaginationControls
+              currentPage={safePage}
+              totalPages={totalPages}
+              onPageChange={setCurrentPage}
+              totalItems={filtered.length}
+              pageSize={pageSize}
+            />
+          )}
         </CardContent>
       </Card>
 
@@ -751,6 +874,7 @@ export function UserManagement({
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="Min. 8 car., maj., min., chiffre, spécial"
               />
+              <PasswordRulesHint password={newPassword} />
               <p className="text-[10px] text-muted-foreground">
                 L&apos;utilisateur devra le changer à la première connexion.
               </p>
@@ -1121,6 +1245,7 @@ export function UserManagement({
                 onChange={(e) => setResetPwdValue(e.target.value)}
                 placeholder="Min. 8 car., maj., min., chiffre, spécial"
               />
+              <PasswordRulesHint password={resetPwdValue} />
             </div>
             {error && (
               <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">

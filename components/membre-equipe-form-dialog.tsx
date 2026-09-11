@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   createMembreEquipe,
   updateMembreEquipe,
   getRessourcesForSelect,
+  getRessourceChargeTotale,
 } from "@/app/(app)/actions";
 import {
   Dialog,
@@ -22,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Loader2, Crown } from "lucide-react";
 import { EQUIPE_LABELS, ROLE_PAR_EQUIPE } from "@/lib/equipe-labels";
 
@@ -52,6 +55,7 @@ export function MembreEquipeFormDialog({
   defaultEquipe,
 }: Props) {
   const isEdit = !!membre;
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,11 +74,13 @@ export function MembreEquipeFormDialog({
   const [ressources, setRessources] = useState<
     { id: string; nom_complet: string; type: string; organisation: string }[]
   >([]);
+  const [chargeWarning, setChargeWarning] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
       getRessourcesForSelect().then(setRessources);
       setError(null);
+      setChargeWarning(null);
       if (membre) {
         setEquipe(membre.equipe);
         setRole(membre.role);
@@ -94,6 +100,38 @@ export function MembreEquipeFormDialog({
       }
     }
   }, [open, membre, defaultEquipe]);
+
+  useEffect(() => {
+    if (!open || !ressourceId) {
+      setChargeWarning(null);
+      return;
+    }
+    let cancelled = false;
+    getRessourceChargeTotale(ressourceId, isEdit ? chantierId : undefined)
+      .then((info) => {
+        if (cancelled) return;
+        const projected = info.total + (chargePourcentage || 0);
+        if (projected > 100) {
+          const detail =
+            info.details.length > 0
+              ? ` (déjà ${info.total} % : ${info.details
+                  .map((d) => `${d.code} ${d.charge}%`)
+                  .join(", ")})`
+              : "";
+          setChargeWarning(
+            `Attention : charge projetée ${projected} %${detail}. La ressource serait surchargée.`
+          );
+        } else {
+          setChargeWarning(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setChargeWarning(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, ressourceId, chargePourcentage, chantierId, isEdit]);
 
   const roles = ROLE_PAR_EQUIPE[equipe] ?? [];
 
@@ -134,6 +172,7 @@ export function MembreEquipeFormDialog({
           ressourceId,
         });
       }
+      router.refresh();
       onOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur lors de l'enregistrement.");
@@ -188,19 +227,18 @@ export function MembreEquipeFormDialog({
             <label className="text-sm font-medium">
               Ressource <span className="text-destructive">*</span>
             </label>
-            <Select value={ressourceId || undefined} onValueChange={setRessourceId}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Sélectionner une ressource" />
-              </SelectTrigger>
-              <SelectContent>
-                {ressources.map((r) => (
-                  <SelectItem key={r.id} value={r.id}>
-                    {r.nom_complet}
-                    {r.organisation ? ` (${r.organisation})` : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              value={ressourceId}
+              onChange={setRessourceId}
+              placeholder="Sélectionner une ressource"
+              searchPlaceholder="Taper un nom…"
+              emptyText="Aucune ressource ne correspond"
+              options={ressources.map((r) => ({
+                value: r.id,
+                label: r.nom_complet,
+                description: r.organisation || undefined,
+              }))}
+            />
             <p className="text-xs text-muted-foreground">
               Le membre doit exister dans le catalogue Ressources.
             </p>
@@ -230,6 +268,11 @@ export function MembreEquipeFormDialog({
               />
             </div>
           </div>
+          {chargeWarning && (
+            <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+              {chargeWarning}
+            </p>
+          )}
 
           <label className="flex items-center gap-2 cursor-pointer select-none rounded-md border px-3 py-2 hover:bg-accent/50 transition-colors">
             <input
@@ -241,6 +284,9 @@ export function MembreEquipeFormDialog({
             <Crown className="size-4 text-primary" />
             <span className="text-sm font-medium">Directeur de chantier</span>
           </label>
+          <p className="-mt-2 text-[11px] text-muted-foreground">
+            Plusieurs directeurs sont possibles ; tous apparaissent dans la couronne de l&apos;organigramme.
+          </p>
 
           {error && (
             <p className="text-sm text-destructive" role="alert">

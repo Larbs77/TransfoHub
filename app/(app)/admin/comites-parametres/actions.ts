@@ -3,6 +3,12 @@
 import { prisma } from "@/lib/prisma";
 import { requireRole, requirePageAccess } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
+import {
+  COMITE_NIVEAU_GOUVERNANCE,
+  COMITE_NIVEAU_OPERATIONNEL,
+  COMITE_OWNER_EQUIPE_CHANTIER,
+  isComiteNiveauOperationnel,
+} from "@/lib/comite-niveau";
 
 async function requireComiteParametresAdmin() {
   await requireRole("Admin");
@@ -29,10 +35,17 @@ async function resolveOwnerFromEquipe(equipeId: string | null | undefined) {
   return { equipeId: equipe.id, owner: equipe.name };
 }
 
+function normalizeNiveau(niveau?: string | null): string {
+  return isComiteNiveauOperationnel(niveau)
+    ? COMITE_NIVEAU_OPERATIONNEL
+    : COMITE_NIVEAU_GOUVERNANCE;
+}
+
 function validatePayload(data: {
   name: string;
   description?: string;
   frequency?: string;
+  niveau?: string | null;
   equipeId?: string | null;
   short_label?: string;
   color?: string;
@@ -57,6 +70,7 @@ function validatePayload(data: {
     name,
     description: (data.description ?? "").trim(),
     frequency: (data.frequency ?? "").trim(),
+    niveau: normalizeNiveau(data.niveau),
     equipeId: data.equipeId?.trim() || null,
     short_label: (data.short_label ?? "").trim(),
     color,
@@ -94,6 +108,7 @@ export async function getComiteParametresForSelect(opts?: {
       name: true,
       description: true,
       frequency: true,
+      niveau: true,
       owner: true,
       equipeId: true,
       short_label: true,
@@ -108,6 +123,7 @@ export async function createComiteParametre(data: {
   name: string;
   description?: string;
   frequency?: string;
+  niveau?: string | null;
   equipeId?: string | null;
   short_label?: string;
   color?: string;
@@ -117,10 +133,6 @@ export async function createComiteParametre(data: {
   await requireComiteParametresAdmin();
   const base = validatePayload(data);
 
-  if (!base.equipeId) {
-    throw new Error("Le propriétaire (équipe) est obligatoire.");
-  }
-
   const existing = await prisma.comiteParametre.findUnique({
     where: { name: base.name },
   });
@@ -128,13 +140,22 @@ export async function createComiteParametre(data: {
     throw new Error("Un type de comité avec ce nom existe déjà.");
   }
 
-  const equipe = await prisma.equipe.findUnique({
-    where: { id: base.equipeId },
-  });
-  if (!equipe || !equipe.is_active) {
-    throw new Error(
-      "Sélectionnez une équipe active (Administration → Équipes)."
-    );
+  let equipeId: string | null = null;
+  let owner = COMITE_OWNER_EQUIPE_CHANTIER;
+  if (base.niveau === COMITE_NIVEAU_GOUVERNANCE) {
+    if (!base.equipeId) {
+      throw new Error("Le propriétaire (équipe institutionnelle) est obligatoire.");
+    }
+    const equipe = await prisma.equipe.findUnique({
+      where: { id: base.equipeId },
+    });
+    if (!equipe || !equipe.is_active) {
+      throw new Error(
+        "Sélectionnez une équipe active (Administration → Équipes)."
+      );
+    }
+    equipeId = equipe.id;
+    owner = equipe.name;
   }
 
   // Default position = end of list
@@ -152,12 +173,13 @@ export async function createComiteParametre(data: {
       name: base.name,
       description: base.description,
       frequency: base.frequency,
+      niveau: base.niveau,
       short_label: base.short_label,
       color: base.color,
       position,
       is_active: base.is_active,
-      equipeId: equipe.id,
-      owner: equipe.name,
+      equipeId,
+      owner,
     },
   });
   revalidatePath("/admin/comites-parametres");
@@ -171,6 +193,7 @@ export async function updateComiteParametre(
     name: string;
     description?: string;
     frequency?: string;
+    niveau?: string | null;
     equipeId?: string | null;
     short_label?: string;
     color?: string;
@@ -184,8 +207,23 @@ export async function updateComiteParametre(
   const current = await prisma.comiteParametre.findUnique({ where: { id } });
   if (!current) throw new Error("Type de comité introuvable.");
 
-  if (!base.equipeId) {
-    throw new Error("Le propriétaire (équipe) est obligatoire.");
+  let equipeId: string | null = null;
+  let owner = COMITE_OWNER_EQUIPE_CHANTIER;
+  if (base.niveau === COMITE_NIVEAU_GOUVERNANCE) {
+    if (!base.equipeId) {
+      throw new Error("Le propriétaire (équipe institutionnelle) est obligatoire.");
+    }
+    const resolved = await resolveOwnerFromEquipe(base.equipeId);
+    equipeId = resolved.equipeId;
+    owner = resolved.owner;
+    if (equipeId && equipeId !== current.equipeId) {
+      const equipe = await prisma.equipe.findUnique({ where: { id: equipeId } });
+      if (!equipe?.is_active) {
+        throw new Error(
+          "Sélectionnez une équipe active (Administration → Équipes)."
+        );
+      }
+    }
   }
 
   const clash = await prisma.comiteParametre.findFirst({
@@ -195,17 +233,6 @@ export async function updateComiteParametre(
     throw new Error("Un type de comité avec ce nom existe déjà.");
   }
 
-  const { equipeId, owner } = await resolveOwnerFromEquipe(base.equipeId);
-  // When changing team, require active; when keeping same inactive team, allow
-  if (equipeId && equipeId !== current.equipeId) {
-    const equipe = await prisma.equipe.findUnique({ where: { id: equipeId } });
-    if (!equipe?.is_active) {
-      throw new Error(
-        "Sélectionnez une équipe active (Administration → Équipes)."
-      );
-    }
-  }
-
   await prisma.$transaction(async (tx) => {
     await tx.comiteParametre.update({
       where: { id },
@@ -213,6 +240,7 @@ export async function updateComiteParametre(
         name: base.name,
         description: base.description,
         frequency: base.frequency,
+        niveau: base.niveau,
         short_label: base.short_label,
         color: base.color,
         position: base.position,

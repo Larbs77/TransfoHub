@@ -18,15 +18,50 @@ interface Props {
   consultationCount?: number;
 }
 
-const TAB_COLORS = {
-  equipe: "#2563eb",
-  raid: "#7c3aed",
-  kpi: "#10b981",
-  capacite: "#f59e0b",
-  jalons: "#6366f1",
-  adherences: "#f97316",
-  consultation: "#0ea5e9",
-} as const;
+const TAB_TRIGGER_CLASS = [
+  "group/tab relative h-auto flex-none overflow-hidden rounded-xl border bg-card/95 px-3 py-2 shadow-sm",
+  "text-sm font-medium text-foreground/70",
+  "transition-[transform,box-shadow,border-color,background-color,color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+  "hover:-translate-y-1 hover:scale-[1.03] hover:border-[#00BDBB]/55 hover:text-[#0A3C74]",
+  "hover:shadow-lg hover:shadow-[#0A3C74]/12",
+  "data-[state=active]:border-[#0A3C74]/40 data-[state=active]:bg-[#0A3C74]/[0.06]",
+  "data-[state=active]:text-[#0A3C74] data-[state=active]:shadow-md",
+  "dark:hover:text-[#5ad4d2] dark:data-[state=active]:text-[#5ad4d2]",
+  "dark:data-[state=active]:border-[#00BDBB]/40 dark:data-[state=active]:bg-[#00BDBB]/10",
+  "after:hidden",
+].join(" ");
+
+function TabShine() {
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent opacity-50 dark:via-white/20"
+    />
+  );
+}
+
+function TabGlow() {
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute -inset-px z-0 rounded-[inherit] bg-gradient-to-b from-[#00BDBB]/18 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover/tab:opacity-100 group-data-[state=active]/tab:opacity-70"
+    />
+  );
+}
+
+function TabCount({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="relative z-10 ml-0.5 inline-flex min-w-5 items-center justify-center rounded-full bg-[#0A3C74]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#0A3C74] transition-colors duration-300 group-hover/tab:bg-[#00BDBB]/20 dark:bg-[#00BDBB]/15 dark:text-[#5ad4d2] group-data-[state=active]/tab:bg-[#0A3C74] group-data-[state=active]/tab:text-white dark:group-data-[state=active]/tab:bg-[#00BDBB] dark:group-data-[state=active]/tab:text-[#0A3C74]">
+      {children}
+    </span>
+  );
+}
+
+function TabIcon({ icon: Icon }: { icon: React.ComponentType<{ className?: string }> }) {
+  return (
+    <Icon className="relative z-10 size-3.5 shrink-0 text-[#0A3C74] transition-transform duration-300 group-hover/tab:scale-110 dark:text-[#5ad4d2]" />
+  );
+}
 
 export function ChantierDetailTabs({
   equipeTab,
@@ -44,75 +79,64 @@ export function ChantierDetailTabs({
 }: Props) {
   return (
     <Tabs defaultValue="kpi" className="space-y-4">
-      <TabsList>
-        <TabsTrigger value="kpi" className="gap-2">
-          <BarChart3 className="size-4" style={{ color: TAB_COLORS.kpi }} />
-          Indicateurs
+      <TabsList className="h-auto w-full flex-wrap justify-start gap-2 overflow-visible bg-transparent p-0 py-1">
+        <TabsTrigger value="kpi" className={`${TAB_TRIGGER_CLASS} gap-2`}>
+          <TabShine />
+          <TabGlow />
+          <TabIcon icon={BarChart3} />
+          <span className="relative z-10">Indicateurs</span>
         </TabsTrigger>
-        <TabsTrigger value="equipe" className="gap-2">
-          <Users className="size-4" style={{ color: TAB_COLORS.equipe }} />
-          Équipe Chantier
-          <span
-            className="ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white"
-            style={{ backgroundColor: TAB_COLORS.equipe }}
-          >
-            {membresCount}
-          </span>
+        <TabsTrigger value="equipe" className={`${TAB_TRIGGER_CLASS} gap-2`}>
+          <TabShine />
+          <TabGlow />
+          <TabIcon icon={Users} />
+          <span className="relative z-10">Équipe Chantier</span>
+          <TabCount>{membresCount}</TabCount>
         </TabsTrigger>
-        <TabsTrigger value="raid" className="gap-2">
-          <ShieldAlert className="size-4" style={{ color: TAB_COLORS.raid }} />
-          RAID
-          <span
-            className="ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white"
-            style={{ backgroundColor: TAB_COLORS.raid }}
-          >
-            {raidCount}
-          </span>
+        <TabsTrigger value="raid" className={`${TAB_TRIGGER_CLASS} gap-2`}>
+          <TabShine />
+          <TabGlow />
+          <TabIcon icon={ShieldAlert} />
+          <span className="relative z-10">RAID</span>
+          <TabCount>{raidCount}</TabCount>
         </TabsTrigger>
         {consultationTab && (
-          <TabsTrigger value="consultation" className="gap-2">
-            <HelpCircle className="size-4" style={{ color: TAB_COLORS.consultation }} />
-            Backlog Consultation
+          <TabsTrigger value="consultation" className={`${TAB_TRIGGER_CLASS} gap-2`}>
+            <TabShine />
+            <TabGlow />
+            <TabIcon icon={HelpCircle} />
+            <span className="relative z-10">Backlog Consultation</span>
             {(consultationCount ?? 0) > 0 && (
-              <span
-                className="ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white"
-                style={{ backgroundColor: TAB_COLORS.consultation }}
-              >
-                {consultationCount}
-              </span>
+              <TabCount>{consultationCount}</TabCount>
             )}
           </TabsTrigger>
         )}
         {adherencesTab && (
-          <TabsTrigger value="adherences" className="gap-2">
-            <Link2 className="size-4" style={{ color: TAB_COLORS.adherences }} />
-            Adhérences
+          <TabsTrigger value="adherences" className={`${TAB_TRIGGER_CLASS} gap-2`}>
+            <TabShine />
+            <TabGlow />
+            <TabIcon icon={Link2} />
+            <span className="relative z-10">Adhérences</span>
             {(adherencesCount ?? 0) > 0 && (
-              <span
-                className="ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white"
-                style={{ backgroundColor: TAB_COLORS.adherences }}
-              >
-                {adherencesCount}
-              </span>
+              <TabCount>{adherencesCount}</TabCount>
             )}
           </TabsTrigger>
         )}
         {capaciteTab && (
-          <TabsTrigger value="capacite" className="gap-2">
-            <Coins className="size-4" style={{ color: TAB_COLORS.capacite }} />
-            Capacité & Coûts
+          <TabsTrigger value="capacite" className={`${TAB_TRIGGER_CLASS} gap-2`}>
+            <TabShine />
+            <TabGlow />
+            <TabIcon icon={Coins} />
+            <span className="relative z-10">Capacité & Coûts</span>
           </TabsTrigger>
         )}
         {jalonsTab && (
-          <TabsTrigger value="jalons" className="gap-2">
-            <Milestone className="size-4" style={{ color: TAB_COLORS.jalons }} />
-            Jalons
-            <span
-              className="ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white"
-              style={{ backgroundColor: TAB_COLORS.jalons }}
-            >
-              {jalonsCount ?? 0}
-            </span>
+          <TabsTrigger value="jalons" className={`${TAB_TRIGGER_CLASS} gap-2`}>
+            <TabShine />
+            <TabGlow />
+            <TabIcon icon={Milestone} />
+            <span className="relative z-10">Jalons</span>
+            <TabCount>{jalonsCount ?? 0}</TabCount>
           </TabsTrigger>
         )}
       </TabsList>

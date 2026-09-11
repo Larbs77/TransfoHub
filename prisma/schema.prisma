@@ -41,6 +41,7 @@ model Chantier {
   membres                MembreEquipe[]
   raids                  Raid[]
   saisiesTemps           SaisieTemps[]
+  comites                Comite[]
   /// Functional (programme) team for this chantier — auto-created 1:1.
   equipeFonctionnelle    Equipe?
 }
@@ -340,8 +341,8 @@ model RaidComment {
 /// Immutable audit trail for RAID collaboration (status, assignment, fields, comments).
 model RaidAuditLog {
   id                String   @id @default(uuid())
-  raidId            String
-  /// created | status_changed | assigned | auto_assigned | unassigned | commented | field_updated
+  raidId            String?
+  /// created | status_changed | assigned | auto_assigned | unassigned | commented | field_updated | deleted
   action            String
   field             String   @default("")
   oldValue          String   @default("")
@@ -352,24 +353,30 @@ model RaidAuditLog {
   actorName         String   @default("")
   actorRessourceId  String?
   createdAt         DateTime @default(now())
-  raid              Raid     @relation(fields: [raidId], references: [id], onDelete: Cascade)
+  raid              Raid?    @relation(fields: [raidId], references: [id], onDelete: SetNull)
 
   @@index([raidId, createdAt])
 }
 
 model Comite {
-  id                 String   @id @default(uuid())
+  id                 String    @id @default(uuid())
   instance           String
   numero             Int
   date               DateTime
-  heure_casablanca   String   @default("")
-  heure_belgique     String   @default("")
-  statut             String   @default("A planifier")
-  ordre_du_jour      String   @default("")
-  invitation_envoyee Boolean  @default(false)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  heure_casablanca   String    @default("")
+  heure_belgique     String    @default("")
+  statut             String    @default("A planifier")
+  ordre_du_jour      String    @default("")
+  invitation_envoyee Boolean   @default(false)
+  /// Required for operational meetings (Weekly, CoSuivi…); null for gouvernance.
+  chantierId         String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  chantier           Chantier? @relation(fields: [chantierId], references: [id], onDelete: Restrict)
   raids              Raid[]
+
+  @@index([chantierId])
+  @@index([instance, chantierId])
 }
 
 /// Teams catalog — two kinds:
@@ -422,7 +429,10 @@ model ComiteParametre {
   name        String   @unique
   description String   @default("")
   frequency   String   @default("")
+  /// gouvernance | operationnel
+  niveau      String   @default("gouvernance")
   /// Denormalized team name (kept in sync with Equipe for display / legacy).
+  /// Operational types store « Équipe chantier ».
   owner       String   @default("")
   equipeId    String?
   /// Short label for tabs / filters (e.g. CTR). Falls back to name in UI if empty.
@@ -437,6 +447,7 @@ model ComiteParametre {
   @@index([position])
   @@index([is_active])
   @@index([equipeId])
+  @@index([niveau])
 }
 
 model Settings {

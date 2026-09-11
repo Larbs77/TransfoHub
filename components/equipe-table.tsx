@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Plus, Pencil, Trash2, Users, Crown, Network } from "lucide-react";
 import { deleteMembreEquipe } from "@/app/(app)/actions";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,7 @@ function membreDisplayName(m: Membre): string {
 }
 
 export function EquipeTable({ membres, chantierId, directeur, rmds }: Props) {
+  const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
   const [editMembre, setEditMembre] = useState<Membre | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -65,11 +67,12 @@ export function EquipeTable({ membres, chantierId, directeur, rmds }: Props) {
     allEquipes.find((e) => (grouped.get(e)?.length ?? 0) > 0) ?? allEquipes[0];
   const [activeTab, setActiveTab] = useState(firstWithMembers);
 
-  // Find directeur from membres
-  const directeurMembre = membres.find((m) => m.is_directeur);
-  const directeurName = directeurMembre
-    ? membreDisplayName(directeurMembre)
-    : directeur;
+  const directeurNames = membres
+    .filter((m) => m.is_directeur)
+    .map(membreDisplayName)
+    .filter((n) => n && n !== "—");
+  const directeurName =
+    directeurNames.length > 0 ? directeurNames.join(" · ") : directeur;
 
   return (
     <div className="space-y-4">
@@ -225,7 +228,10 @@ export function EquipeTable({ membres, chantierId, directeur, rmds }: Props) {
         open={!!deleteId}
         onOpenChange={(o) => !o && setDeleteId(null)}
         onConfirm={async () => {
-          if (deleteId) await deleteMembreEquipe(deleteId);
+          if (deleteId) {
+            await deleteMembreEquipe(deleteId);
+            router.refresh();
+          }
         }}
         title="Supprimer le membre"
       />

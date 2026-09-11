@@ -10,7 +10,7 @@ const globalForPrisma = globalThis as unknown as {
  * Bump whenever the Prisma schema gains fields/models so HMR drops a stale
  * singleton (otherwise findUnique/update rejects unknown fields).
  */
-const PRISMA_MODEL_STAMP = "raid-echeance-actualisee-v1";
+const PRISMA_MODEL_STAMP = "raid-audit-delete-setnull-v1";
 
 function clientLooksCurrent(client: PrismaClient): boolean {
   try {
@@ -57,6 +57,23 @@ function clientLooksCurrent(client: PrismaClient): boolean {
     if (typeof c.activiteTemplate?.findMany !== "function") return false;
     if (typeof c.workstream?.findMany !== "function") return false;
     if (typeof c.activite?.findMany !== "function") return false;
+
+    const comiteModel = c._runtimeDataModel?.models?.Comite;
+    if (comiteModel?.fields) {
+      const fields = comiteModel.fields;
+      const hasChantierId = Array.isArray(fields)
+        ? fields.some((f) => f.name === "chantierId")
+        : "chantierId" in fields;
+      if (!hasChantierId) return false;
+    }
+    const comiteParamModel = c._runtimeDataModel?.models?.ComiteParametre;
+    if (comiteParamModel?.fields) {
+      const fields = comiteParamModel.fields;
+      const hasNiveau = Array.isArray(fields)
+        ? fields.some((f) => f.name === "niveau")
+        : "niveau" in fields;
+      if (!hasNiveau) return false;
+    }
 
     const raidModel = c._runtimeDataModel?.models?.Raid;
     if (raidModel?.fields) {

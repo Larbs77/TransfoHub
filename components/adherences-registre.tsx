@@ -377,7 +377,7 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {[10, 15, 20, 30].map((n) => (
+                  {[5, 10, 15, 20, 30].map((n) => (
                     <SelectItem key={n} value={String(n)}>{n}</SelectItem>
                   ))}
                   <SelectItem value="all">Tout</SelectItem>

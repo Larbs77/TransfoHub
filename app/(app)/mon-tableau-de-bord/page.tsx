@@ -3,6 +3,9 @@ import {
   getPersonalDashboard,
   getPersonalCapacite,
   getStatusConfigs,
+  getRaidFieldOptions,
+  getChantiersForSelect,
+  getComitesForSelect,
 } from "@/app/(app)/actions";
 import { MonTableauDeBordClient } from "@/components/mon-tableau-de-bord-client";
 
@@ -14,10 +17,13 @@ export default async function MonTableauDeBordPage() {
   // Year scroll on Capacité page starts at 2026
   const capaciteYear = Math.max(2026, Math.min(2030, currentYear));
 
-  const [data, statusConfigs, capacite] = await Promise.all([
+  const [data, statusConfigs, capacite, fieldOptions, chantiers, comites] = await Promise.all([
     getPersonalDashboard(),
     getStatusConfigs().catch(() => []),
     getPersonalCapacite(capaciteYear).catch(() => null),
+    getRaidFieldOptions().catch(() => []),
+    getChantiersForSelect().catch(() => []),
+    getComitesForSelect().catch(() => []),
   ]);
 
   return (
@@ -26,6 +32,9 @@ export default async function MonTableauDeBordPage() {
         <MonTableauDeBordClient
           data={data}
           statusConfigs={statusConfigs}
+          fieldOptions={fieldOptions}
+          chantiers={chantiers}
+          comites={comites}
           capacite={capacite}
           capaciteYear={capaciteYear}
         />

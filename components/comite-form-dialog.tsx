@@ -1,7 +1,17 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { createComite, updateComite, getNextComiteNumero } from "@/app/(app)/actions";
+import {
+  createComite,
+  updateComite,
+  getNextComiteNumero,
+  getChantiersForSelect,
+} from "@/app/(app)/actions";
+import {
+  COMITE_NIVEAU_GOUVERNANCE,
+  COMITE_OWNER_EQUIPE_CHANTIER,
+  isComiteNiveauOperationnel,
+} from "@/lib/comite-niveau";
 import {
   Dialog,
   DialogContent,
@@ -19,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
+import { useUser } from "@/components/user-provider";
 import {
   INSTANCE_LABELS,
   STATUT_COMITE_LABELS,
@@ -35,6 +46,8 @@ interface ComiteData {
   statut: string;
   ordre_du_jour: string;
   invitation_envoyee: boolean;
+  chantierId?: string | null;
+  chantier?: { id: string; code: string; nom: string } | null;
 }
 
 interface Props {
@@ -58,13 +71,22 @@ export function ComiteFormDialog({
   instances,
 }: Props) {
   const isEdit = !!comite;
+  const { chantierScope } = useUser();
+  const assignedOnly = chantierScope !== "all";
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState("");
 
   const instanceOptions = useMemo(() => {
     if (instances && instances.length > 0) {
       return instances
-        .filter((p) => p.is_active || p.name === comite?.instance)
+        .filter((p) => {
+          const allowed = p.is_active || p.name === comite?.instance;
+          if (!allowed) return false;
+          if (assignedOnly && !isComiteNiveauOperationnel(p.niveau)) {
+            return false;
+          }
+          return true;
+        })
         .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
     }
     // Fallback if catalog not loaded
@@ -74,12 +96,13 @@ export function ComiteFormDialog({
       description: "",
       frequency: "",
       owner: "",
+      niveau: COMITE_NIVEAU_GOUVERNANCE,
       short_label: INSTANCE_LABELS[name] ?? name,
       color: "#6b7280",
       position: i,
       is_active: true,
     }));
-  }, [instances, comite?.instance]);
+  }, [instances, comite?.instance, isEdit, assignedOnly]);
 
   const defaultInst =
     comite?.instance ??
@@ -89,21 +112,47 @@ export function ComiteFormDialog({
 
   const [instance, setInstance] = useState(defaultInst);
   const [numero, setNumero] = useState(comite?.numero ?? 1);
+  const [chantierId, setChantierId] = useState(
+    comite?.chantierId ?? comite?.chantier?.id ?? ""
+  );
+  const [chantiers, setChantiers] = useState<
+    { id: string; code: string; nom: string }[]
+  >([]);
 
   const selectedParam = instanceOptions.find((p) => p.name === instance);
+  const isOperationnel = isComiteNiveauOperationnel(selectedParam?.niveau);
 
-  const fetchNextNumero = useCallback(async (inst: string) => {
-    if (isEdit) return;
-    const next = await getNextComiteNumero(inst);
-    setNumero(next);
-  }, [isEdit]);
+  const fetchNextNumero = useCallback(
+    async (inst: string, chId: string | null) => {
+      if (isEdit) return;
+      try {
+        const next = await getNextComiteNumero(inst, chId);
+        setNumero(next);
+      } catch {
+        /* keep current numero if lookup fails */
+      }
+    },
+    [isEdit]
+  );
 
   useEffect(() => {
-    fetchNextNumero(instance);
-  }, [instance, fetchNextNumero]);
+    if (open) {
+      getChantiersForSelect()
+        .then(setChantiers)
+        .catch(() => setChantiers([]));
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!isOperationnel) {
+      if (!isEdit) setChantierId("");
+      fetchNextNumero(instance, null);
+      return;
+    }
+    fetchNextNumero(instance, chantierId || null);
+  }, [instance, chantierId, isOperationnel, isEdit, fetchNextNumero]);
   const [date, setDate] = useState(comite ? toDateInput(comite.date) : "");
   const [heureCasa, setHeureCasa] = useState(comite?.heure_casablanca ?? "");
-  const [heureBelgique, setHeureBelgique] = useState(comite?.heure_belgique ?? "");
   const [statut, setStatut] = useState(comite?.statut ?? "A planifier");
   const [ordreDuJour, setOrdreDuJour] = useState(comite?.ordre_du_jour ?? "");
   const [invitationEnvoyee, setInvitationEnvoyee] = useState(comite?.invitation_envoyee ?? false);
@@ -115,6 +164,10 @@ export function ComiteFormDialog({
       setFormError("Sélectionnez un type d'instance de comité.");
       return;
     }
+    if (isOperationnel && !chantierId) {
+      setFormError("Sélectionnez un chantier pour ce comité opérationnel.");
+      return;
+    }
     setLoading(true);
     try {
       const data = {
@@ -122,10 +175,11 @@ export function ComiteFormDialog({
         numero,
         date,
         heure_casablanca: heureCasa,
-        heure_belgique: heureBelgique,
+        heure_belgique: "",
         statut,
         ordre_du_jour: ordreDuJour,
         invitation_envoyee: invitationEnvoyee,
+        chantierId: isOperationnel ? chantierId : null,
       };
       if (isEdit) {
         await updateComite(comite.id, data);
@@ -171,22 +225,19 @@ export function ComiteFormDialog({
                 </SelectContent>
               </Select>
               {selectedParam &&
-                (selectedParam.frequency ||
-                  selectedParam.owner ||
-                  selectedParam.description) && (
+                (selectedParam.frequency || selectedParam.owner || isOperationnel) && (
                   <p className="text-[11px] leading-snug text-muted-foreground">
                     {[
+                      isOperationnel ? "Niveau : Opérationnel" : "Niveau : Gouvernance",
                       selectedParam.frequency && `Fréquence : ${selectedParam.frequency}`,
-                      selectedParam.owner && `Propriétaire : ${selectedParam.owner}`,
+                      `Propriétaire : ${
+                        isOperationnel
+                          ? COMITE_OWNER_EQUIPE_CHANTIER
+                          : selectedParam.owner || "—"
+                      }`,
                     ]
                       .filter(Boolean)
                       .join(" · ")}
-                    {selectedParam.description ? (
-                      <>
-                        {(selectedParam.frequency || selectedParam.owner) && <br />}
-                        {selectedParam.description}
-                      </>
-                    ) : null}
                   </p>
                 )}
             </div>
@@ -201,7 +252,34 @@ export function ComiteFormDialog({
               />
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          {isOperationnel && (
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">
+                Chantier <span className="text-destructive">*</span>
+              </label>
+              <Select
+                value={chantierId || undefined}
+                onValueChange={setChantierId}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Choisir un chantier" />
+                </SelectTrigger>
+                <SelectContent>
+                  {chantiers.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.code} — {c.nom}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {chantiers.length === 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  Aucun chantier accessible pour votre profil.
+                </p>
+              )}
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-1.5">
               <label className="text-sm font-medium">Date</label>
               <Input
@@ -212,19 +290,11 @@ export function ComiteFormDialog({
               />
             </div>
             <div className="grid gap-1.5">
-              <label className="text-sm font-medium">Heure Casablanca</label>
+              <label className="text-sm font-medium">Heure</label>
               <Input
                 value={heureCasa}
                 onChange={(e) => setHeureCasa(e.target.value)}
                 placeholder="14H00"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <label className="text-sm font-medium">Heure Belgique</label>
-              <Input
-                value={heureBelgique}
-                onChange={(e) => setHeureBelgique(e.target.value)}
-                placeholder="15H00"
               />
             </div>
           </div>

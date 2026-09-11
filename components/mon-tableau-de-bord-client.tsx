@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
@@ -19,7 +19,15 @@ import {
   Calendar,
   TableIcon,
   Columns3,
+  ChevronLeft,
+  ChevronRight,
+  Search,
+  AlertTriangle,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { MultiSelect } from "@/components/ui/multi-select";
+import { RaidExcelExportButton } from "@/components/raid-excel-export-button";
+import { INSTANCE_LABELS } from "@/lib/comite-labels";
 import {
   Card,
   CardContent,
@@ -54,15 +62,662 @@ import {
   RAID_TYPE_COLORS,
   getStatutColor,
   isRaidOverdue,
+  isRaidInitialEcheancePast,
   raidEffectiveEcheance,
+  getLabelsForKind,
+  mergeFieldLabelsWithData,
+  getStatutsFromConfig,
+  getStatutsForType,
+  PROBABILITE_LABELS,
+  IMPACT_LABELS,
   type StatusConfigItem,
+  type RaidFieldOptionItem,
 } from "@/lib/raid-labels";
+import { scoreCriticite } from "@/lib/utils-pmo";
 
 const RAID_TYPE_ORDER = ["Action", "Risque", "Information", "Décision"] as const;
 
 export type PersonalDashboardData = Awaited<
   ReturnType<typeof import("@/app/(app)/actions").getPersonalDashboard>
 >;
+
+type PersonalRaidRow = PersonalDashboardData["raids"][number];
+type ChantierFilterOption = { id: string; code: string; nom: string };
+type ComiteFilterOption = {
+  id: string;
+  instance: string;
+  numero: number;
+  date?: Date | string | null;
+};
+
+const EMPTY_CHANTIERS: ChantierFilterOption[] = [];
+const EMPTY_COMITES: ComiteFilterOption[] = [];
+
+function comiteSelectLabel(co: { instance: string; numero: number }) {
+  return `${INSTANCE_LABELS[co.instance] ?? co.instance} #${co.numero}`;
+}
+
+function comiteSelectDate(d: Date | string | null | undefined) {
+  if (d == null || d === "") return "";
+  const date = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(date.getTime())) return "";
+  return format(date, "dd MMM yyyy", { locale: fr });
+}
+
+function PaginationControls({
+  currentPage,
+  totalPages,
+  onPageChange,
+  totalItems,
+  pageSize,
+}: {
+  currentPage: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+  totalItems: number;
+  pageSize: number;
+}) {
+  const from = (currentPage - 1) * pageSize + 1;
+  const to = Math.min(currentPage * pageSize, totalItems);
+
+  return (
+    <div className="flex items-center justify-between mt-4">
+      <span className="text-xs text-muted-foreground">
+        {from}–{to} sur {totalItems}
+      </span>
+      <div className="flex items-center gap-1">
+        <Button
+          variant="outline"
+          size="icon-xs"
+          disabled={currentPage <= 1}
+          onClick={() => onPageChange(currentPage - 1)}
+        >
+          <ChevronLeft className="size-4" />
+        </Button>
+        {(() => {
+          const pages: (number | "...")[] = [];
+          if (totalPages <= 7) {
+            for (let i = 1; i <= totalPages; i++) pages.push(i);
+          } else {
+            pages.push(1);
+            if (currentPage > 3) pages.push("...");
+            for (
+              let i = Math.max(2, currentPage - 1);
+              i <= Math.min(totalPages - 1, currentPage + 1);
+              i++
+            )
+              pages.push(i);
+            if (currentPage < totalPages - 2) pages.push("...");
+            pages.push(totalPages);
+          }
+          return pages.map((page, idx) =>
+            page === "..." ? (
+              <span
+                key={`ellipsis-${idx}`}
+                className="px-1 text-xs text-muted-foreground"
+              >
+                ...
+              </span>
+            ) : (
+              <Button
+                key={page}
+                variant={page === currentPage ? "default" : "outline"}
+                size="sm"
+                className="h-7 w-7 p-0 text-xs"
+                onClick={() => onPageChange(page)}
+              >
+                {page}
+              </Button>
+            )
+          );
+        })()}
+        <Button
+          variant="outline"
+          size="icon-xs"
+          disabled={currentPage >= totalPages}
+          onClick={() => onPageChange(currentPage + 1)}
+        >
+          <ChevronRight className="size-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function PersonalRaidTypeTable({
+  items,
+  raidType,
+  statusConfigs = [],
+  fieldOptions = [],
+  chantiers = EMPTY_CHANTIERS,
+  comites = EMPTY_COMITES,
+  onFilteredChange,
+}: {
+  items: PersonalRaidRow[];
+  raidType: string;
+  statusConfigs?: StatusConfigItem[];
+  fieldOptions?: RaidFieldOptionItem[];
+  chantiers?: ChantierFilterOption[];
+  comites?: ComiteFilterOption[];
+  onFilteredChange?: (rows: PersonalRaidRow[]) => void;
+}) {
+  const router = useRouter();
+  const [search, setSearch] = useState("");
+  const [filterCategorie, setFilterCategorie] = useState<string[]>([]);
+  const [filterDomaine, setFilterDomaine] = useState<string[]>([]);
+  const [filterProb, setFilterProb] = useState<string[]>([]);
+  const [filterImpact, setFilterImpact] = useState<string[]>([]);
+  const [filterStatut, setFilterStatut] = useState<string[]>([]);
+  const [filterOverdue, setFilterOverdue] = useState(false);
+  const [filterCritical, setFilterCritical] = useState(false);
+  const [filterChantier, setFilterChantier] = useState<string[]>([]);
+  const [filterComite, setFilterComite] = useState<string[]>([]);
+  const [pageSize, setPageSize] = useState<number>(10);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [now] = useState(() => new Date());
+
+  const isRisqueView = raidType === "Risque";
+  const isActionView = raidType === "Action";
+
+  const categorieFilterOptions = useMemo(
+    () =>
+      mergeFieldLabelsWithData(
+        getLabelsForKind("categorie", fieldOptions),
+        items.map((i) => i.categorie)
+      ),
+    [fieldOptions, items]
+  );
+  const domaineFilterOptions = useMemo(
+    () =>
+      mergeFieldLabelsWithData(
+        getLabelsForKind("domaine", fieldOptions),
+        items.map((i) => i.domaine)
+      ),
+    [fieldOptions, items]
+  );
+
+  const chantierFilterOptions = useMemo(() => {
+    const source =
+      chantiers.length > 0
+        ? chantiers
+        : (() => {
+            const map = new Map<string, ChantierFilterOption>();
+            for (const r of items) {
+              if (r.chantier?.id) {
+                map.set(r.chantier.id, {
+                  id: r.chantier.id,
+                  code: r.chantier.code,
+                  nom: r.chantier.nom,
+                });
+              }
+            }
+            return [...map.values()];
+          })();
+    return [...source].sort((a, b) => a.code.localeCompare(b.code, "fr"));
+  }, [chantiers, items]);
+
+  const accessibleChantierIds = useMemo(
+    () => new Set(chantierFilterOptions.map((c) => c.id)),
+    [chantierFilterOptions]
+  );
+
+  const comiteFilterOptions = useMemo(() => {
+    const source =
+      comites.length > 0
+        ? comites
+        : (() => {
+            const map = new Map<string, ComiteFilterOption>();
+            for (const r of items) {
+              if (r.comite?.id) {
+                map.set(r.comite.id, {
+                  id: r.comite.id,
+                  instance: r.comite.instance,
+                  numero: r.comite.numero,
+                  date: r.comite.date,
+                });
+              }
+            }
+            return [...map.values()];
+          })();
+    return [...source].sort((a, b) => {
+      const inst = (INSTANCE_LABELS[a.instance] ?? a.instance).localeCompare(
+        INSTANCE_LABELS[b.instance] ?? b.instance,
+        "fr"
+      );
+      if (inst !== 0) return inst;
+      return b.numero - a.numero;
+    });
+  }, [comites, items]);
+
+  const filtered = useMemo(() => {
+    let result = items;
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter((r) => {
+        const comiteLabel = r.comite ? comiteSelectLabel(r.comite) : "";
+        const textMatch =
+          r.intitule.toLowerCase().includes(q) ||
+          (r.responsable ?? "").toLowerCase().includes(q) ||
+          (r.description ?? "").toLowerCase().includes(q) ||
+          (r.code ?? "").toLowerCase().includes(q) ||
+          (r.categorie ?? "").toLowerCase().includes(q) ||
+          (r.domaine ?? "").toLowerCase().includes(q) ||
+          comiteLabel.toLowerCase().includes(q) ||
+          (r.comite?.instance ?? "").toLowerCase().includes(q);
+        const chantierAccessible =
+          !!r.chantier?.id && accessibleChantierIds.has(r.chantier.id);
+        const chantierMatch =
+          chantierAccessible &&
+          ((r.chantier?.code ?? "").toLowerCase().includes(q) ||
+            (r.chantier?.nom ?? "").toLowerCase().includes(q));
+        return textMatch || chantierMatch;
+      });
+    }
+    if (filterCategorie.length > 0) {
+      result = result.filter((r) => filterCategorie.includes(r.categorie ?? ""));
+    }
+    if (filterDomaine.length > 0) {
+      result = result.filter((r) => filterDomaine.includes(r.domaine ?? ""));
+    }
+    if (filterProb.length > 0) {
+      result = result.filter(
+        (r) => r.probabilite != null && filterProb.includes(String(r.probabilite))
+      );
+    }
+    if (filterImpact.length > 0) {
+      result = result.filter(
+        (r) => r.impact != null && filterImpact.includes(String(r.impact))
+      );
+    }
+    if (filterStatut.length > 0) {
+      result = result.filter((r) =>
+        filterStatut.some((s) => {
+          if (s === "__active__") return r.statut !== "Clôturé" && r.statut !== "Abandonné";
+          if (s === "__open__") return r.statut !== "Clos";
+          return r.statut === s;
+        })
+      );
+    }
+    if (filterChantier.length > 0) {
+      result = result.filter(
+        (r) =>
+          !!r.chantierId &&
+          accessibleChantierIds.has(r.chantierId) &&
+          filterChantier.includes(r.chantierId)
+      );
+    }
+    if (filterComite.length > 0) {
+      result = result.filter((r) =>
+        filterComite.some((id) =>
+          id === "__none__" ? !r.comiteId : r.comiteId === id
+        )
+      );
+    }
+    if (filterOverdue) {
+      result = result.filter((r) =>
+        isRaidOverdue(
+          r.statut,
+          r.date_echeance_actualisee,
+          r.date_echeance,
+          now
+        )
+      );
+    }
+    if (filterCritical) {
+      result = result.filter(
+        (r) =>
+          r.probabilite &&
+          r.impact &&
+          scoreCriticite(r.impact, r.probabilite) >= 12
+      );
+    }
+    return result;
+  }, [
+    items,
+    search,
+    filterCategorie,
+    filterDomaine,
+    filterProb,
+    filterImpact,
+    filterStatut,
+    filterChantier,
+    filterComite,
+    filterOverdue,
+    filterCritical,
+    now,
+    accessibleChantierIds,
+  ]);
+
+  const totalPages = pageSize === 0 ? 1 : Math.ceil(filtered.length / pageSize);
+  const safePage = Math.min(currentPage, totalPages || 1);
+  const paginated =
+    pageSize === 0
+      ? filtered
+      : filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  const onFilteredChangeRef = useRef(onFilteredChange);
+  onFilteredChangeRef.current = onFilteredChange;
+  useEffect(() => {
+    onFilteredChangeRef.current?.(filtered);
+  }, [filtered]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    search,
+    filterCategorie,
+    filterDomaine,
+    filterProb,
+    filterImpact,
+    filterStatut,
+    filterChantier,
+    filterComite,
+    filterOverdue,
+    filterCritical,
+    items.length,
+  ]);
+
+  const statutList = statusConfigs.length
+    ? getStatutsFromConfig(raidType, statusConfigs)
+    : getStatutsForType(raidType);
+  const statutOptions = [
+    ...(isActionView
+      ? [{ value: "__active__", label: "Actives (non clôturées)" }]
+      : []),
+    ...(isRisqueView
+      ? [{ value: "__open__", label: "Ouverts (non clos)" }]
+      : []),
+    ...statutList.map((s) => ({ value: s, label: s })),
+  ];
+  const hasActiveFilters =
+    filterCategorie.length > 0 ||
+    filterDomaine.length > 0 ||
+    filterProb.length > 0 ||
+    filterImpact.length > 0 ||
+    filterStatut.length > 0 ||
+    filterChantier.length > 0 ||
+    filterComite.length > 0 ||
+    filterOverdue ||
+    filterCritical;
+
+  return (
+    <div>
+      <div className="mb-3 space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+            <Input
+              placeholder="Rechercher (code, intitulé, chantier, comité…)"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8"
+            />
+          </div>
+          {chantierFilterOptions.length > 0 && (
+            <MultiSelect
+              options={chantierFilterOptions.map((c) => ({
+                value: c.id,
+                label: c.nom ? `${c.code} — ${c.nom}` : c.code,
+              }))}
+              selected={filterChantier}
+              onChange={setFilterChantier}
+              placeholder="Chantier"
+              className="w-1/2 min-w-0"
+              chips={false}
+              truncate
+            />
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+        <MultiSelect
+          options={categorieFilterOptions.map((c) => ({ value: c, label: c }))}
+          selected={filterCategorie}
+          onChange={setFilterCategorie}
+          placeholder="Catégorie"
+          className="w-[180px]"
+          chips={false}
+        />
+        <MultiSelect
+          options={domaineFilterOptions.map((d) => ({ value: d, label: d }))}
+          selected={filterDomaine}
+          onChange={setFilterDomaine}
+          placeholder="Domaine"
+          className="w-[200px]"
+          chips={false}
+        />
+        <MultiSelect
+          options={statutOptions}
+          selected={filterStatut}
+          onChange={setFilterStatut}
+          placeholder="Statut"
+          className="w-[200px]"
+          chips={false}
+        />
+        <MultiSelect
+          options={[
+            { value: "__none__", label: "Aucun" },
+            ...comiteFilterOptions.map((co) => ({
+              value: co.id,
+              label: comiteSelectLabel(co),
+              description: comiteSelectDate(co.date) || undefined,
+            })),
+          ]}
+          selected={filterComite}
+          onChange={setFilterComite}
+          placeholder="Comité"
+          className="w-[18rem] min-w-0"
+          chips={false}
+          truncate
+        />
+        {isActionView && (
+          <Button
+            variant={filterOverdue ? "default" : "outline"}
+            size="sm"
+            onClick={() => setFilterOverdue((v) => !v)}
+            className="h-9 text-xs gap-1"
+          >
+            <Clock className="size-3.5" />
+            Échues
+          </Button>
+        )}
+        {isRisqueView && (
+          <>
+            <Button
+              variant={filterCritical ? "default" : "outline"}
+              size="sm"
+              onClick={() => setFilterCritical((v) => !v)}
+              className="h-9 text-xs gap-1"
+            >
+              <ShieldAlert className="size-3.5" />
+              Critiques
+            </Button>
+            <MultiSelect
+              options={Object.entries(PROBABILITE_LABELS).map(([k, label]) => ({
+                value: k,
+                label: `${k} - ${label}`,
+              }))}
+              selected={filterProb}
+              onChange={setFilterProb}
+              placeholder="Probabilité"
+              className="w-[180px]"
+              chips={false}
+            />
+            <MultiSelect
+              options={Object.entries(IMPACT_LABELS).map(([k, label]) => ({
+                value: k,
+                label: `${k} - ${label}`,
+              }))}
+              selected={filterImpact}
+              onChange={setFilterImpact}
+              placeholder="Impact"
+              className="w-[160px]"
+              chips={false}
+            />
+          </>
+        )}
+        {hasActiveFilters && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-9 text-xs"
+            onClick={() => {
+              setFilterCategorie([]);
+              setFilterDomaine([]);
+              setFilterProb([]);
+              setFilterImpact([]);
+              setFilterStatut([]);
+              setFilterChantier([]);
+              setFilterComite([]);
+              setFilterOverdue(false);
+              setFilterCritical(false);
+            }}
+          >
+            Effacer filtres
+          </Button>
+        )}
+        <div className="flex items-center gap-2 ml-auto">
+          <label className="text-xs text-muted-foreground whitespace-nowrap">
+            Afficher
+          </label>
+          <Select
+            value={pageSize === 0 ? "all" : String(pageSize)}
+            onValueChange={(v) => {
+              setPageSize(v === "all" ? 0 : Number(v));
+              setCurrentPage(1);
+            }}
+          >
+            <SelectTrigger className="w-20 h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {[5, 10, 15, 20, 30].map((n) => (
+                <SelectItem key={n} value={String(n)}>
+                  {n}
+                </SelectItem>
+              ))}
+              <SelectItem value="all">Tout</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        </div>
+      </div>
+      {filtered.length === 0 ? (
+        <p className="py-8 text-center text-sm text-muted-foreground">
+          Aucun élément trouvé
+        </p>
+      ) : (
+        <>
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 font-medium">Intitulé</th>
+              <th className="px-3 py-2 font-medium">Catégorie</th>
+              <th className="px-3 py-2 font-medium">Statut</th>
+              <th className="px-3 py-2 font-medium">Chantier</th>
+              <th className="px-3 py-2 font-medium">Échéance</th>
+              <th className="px-3 py-2 font-medium">Périmètre</th>
+            </tr>
+          </thead>
+          <tbody>
+            {paginated.map((r) => (
+              <tr
+                key={r.id}
+                className="border-t hover:bg-muted/30 cursor-pointer"
+                onClick={() => router.push(`/raid/${r.id}`)}
+              >
+                <td className="px-3 py-2 max-w-[280px]">
+                  {r.code ? (
+                    <span className="mb-0.5 block font-mono text-[11px] font-semibold text-[#0A3C74] dark:text-foreground">
+                      {r.code}
+                    </span>
+                  ) : null}
+                  <span className="line-clamp-2 font-medium text-primary hover:underline">
+                    {r.intitule}
+                  </span>
+                  {r.domaine ? (
+                    <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                      {r.domaine}
+                    </span>
+                  ) : null}
+                  {isRaidInitialEcheancePast(
+                    r.statut,
+                    r.date_echeance,
+                    now
+                  ) &&
+                    r.date_echeance && (
+                      <span
+                        className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+                        title={`Échéance initiale dépassée : ${format(new Date(r.date_echeance), "dd/MM/yyyy")}`}
+                      >
+                        <AlertTriangle className="size-3 shrink-0 text-amber-500" />
+                        <span className="truncate">
+                          Échéance initiale{" "}
+                          {format(new Date(r.date_echeance), "dd/MM/yy")}{" "}
+                          · dépassée
+                        </span>
+                      </span>
+                    )}
+                </td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {r.categorie || "—"}
+                </td>
+                <td className="px-3 py-2">
+                  <Badge
+                    variant="outline"
+                    className="text-[10px]"
+                    style={{
+                      borderColor: getStatutColor(r.type, r.statut),
+                      color: getStatutColor(r.type, r.statut),
+                    }}
+                  >
+                    {r.statut}
+                  </Badge>
+                </td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {r.chantierCode ?? "—"}
+                </td>
+                <td className="px-3 py-2 tabular-nums text-muted-foreground">
+                  {(() => {
+                    const ech = raidEffectiveEcheance(
+                      r.date_echeance_actualisee,
+                      r.date_echeance
+                    );
+                    return ech
+                      ? format(ech, "dd MMM yyyy", { locale: fr })
+                      : "—";
+                  })()}
+                </td>
+                <td className="px-3 py-2">
+                  {r.isMine ? (
+                    <Badge className="bg-[#00BDBB]/15 text-[10px] text-[#0A3C74] hover:bg-[#00BDBB]/15">
+                      M&apos;est assigné
+                    </Badge>
+                  ) : (
+                    <span className="text-[11px] text-muted-foreground">
+                      Chantier
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {pageSize > 0 && totalPages > 1 && (
+        <PaginationControls
+          currentPage={safePage}
+          totalPages={totalPages}
+          onPageChange={setCurrentPage}
+          totalItems={filtered.length}
+          pageSize={pageSize}
+        />
+      )}
+        </>
+      )}
+    </div>
+  );
+}
 
 function KpiTile({
   icon: Icon,
@@ -120,15 +775,21 @@ function KpiTile({
 export function MonTableauDeBordClient({
   data,
   statusConfigs = [],
+  fieldOptions = [],
+  chantiers = EMPTY_CHANTIERS,
+  comites = EMPTY_COMITES,
   capacite = null,
   capaciteYear,
 }: {
   data: PersonalDashboardData;
   statusConfigs?: StatusConfigItem[];
+  fieldOptions?: RaidFieldOptionItem[];
+  chantiers?: ChantierFilterOption[];
+  comites?: ComiteFilterOption[];
   capacite?: PersonalCapaciteData | null;
   capaciteYear: number;
 }) {
-  const router = useRouter();
+  const filteredIdsRef = useRef<Record<string, string[]>>({});
   const [chantierFilter, setChantierFilter] = useState<string>("__all__");
   const [teamFilter, setTeamFilter] = useState<string>("__all__");
   /** Mon RAID = assigned to me; all = équipes & chantiers scope. */
@@ -661,6 +1322,7 @@ export function MonTableauDeBordClient({
                     return (
                       <TabsContent key={t} value={t} className="space-y-3">
                         <Tabs defaultValue="table" className="space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
                           <TabsList>
                             <TabsTrigger value="table" className="gap-2">
                               <TableIcon className="size-3.5" />
@@ -683,6 +1345,13 @@ export function MonTableauDeBordClient({
                               Calendrier
                             </TabsTrigger>
                           </TabsList>
+                          <RaidExcelExportButton
+                            allIds={filteredRaids.map((r) => r.id)}
+                            getSelectedIds={() =>
+                              filteredIdsRef.current[t] ?? items.map((r) => r.id)
+                            }
+                          />
+                          </div>
 
                           <TabsContent value="table">
                             {items.length === 0 ? (
@@ -690,107 +1359,18 @@ export function MonTableauDeBordClient({
                                 Aucun élément « {RAID_TYPE_LABELS[t] ?? t} »
                               </p>
                             ) : (
-                              <div className="overflow-x-auto rounded-lg border">
-                                <table className="w-full text-sm">
-                                  <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
-                                    <tr>
-                                      <th className="px-3 py-2 font-medium">
-                                        Intitulé
-                                      </th>
-                                      <th className="px-3 py-2 font-medium">
-                                        Catégorie
-                                      </th>
-                                      <th className="px-3 py-2 font-medium">
-                                        Statut
-                                      </th>
-                                      <th className="px-3 py-2 font-medium">
-                                        Chantier
-                                      </th>
-                                      <th className="px-3 py-2 font-medium">
-                                        Échéance
-                                      </th>
-                                      <th className="px-3 py-2 font-medium">
-                                        Périmètre
-                                      </th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {items.map((r) => (
-                                      <tr
-                                        key={r.id}
-                                        className="border-t hover:bg-muted/30 cursor-pointer"
-                                        onClick={() =>
-                                          router.push(`/raid/${r.id}`)
-                                        }
-                                      >
-                                        <td className="px-3 py-2 max-w-[280px]">
-                                          {r.code ? (
-                                            <span className="mb-0.5 block font-mono text-[11px] font-semibold text-[#0A3C74] dark:text-foreground">
-                                              {r.code}
-                                            </span>
-                                          ) : null}
-                                          <span className="line-clamp-2 font-medium text-primary hover:underline">
-                                            {r.intitule}
-                                          </span>
-                                          {r.domaine ? (
-                                            <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                                              {r.domaine}
-                                            </span>
-                                          ) : null}
-                                        </td>
-                                        <td className="px-3 py-2 text-muted-foreground">
-                                          {r.categorie || "—"}
-                                        </td>
-                                        <td className="px-3 py-2">
-                                          <Badge
-                                            variant="outline"
-                                            className="text-[10px]"
-                                            style={{
-                                              borderColor: getStatutColor(
-                                                r.type,
-                                                r.statut
-                                              ),
-                                              color: getStatutColor(
-                                                r.type,
-                                                r.statut
-                                              ),
-                                            }}
-                                          >
-                                            {r.statut}
-                                          </Badge>
-                                        </td>
-                                        <td className="px-3 py-2 text-muted-foreground">
-                                          {r.chantierCode ?? "—"}
-                                        </td>
-                                        <td className="px-3 py-2 tabular-nums text-muted-foreground">
-                                          {(() => {
-                                            const ech = raidEffectiveEcheance(
-                                              r.date_echeance_actualisee,
-                                              r.date_echeance
-                                            );
-                                            return ech
-                                              ? format(ech, "dd MMM yyyy", {
-                                                  locale: fr,
-                                                })
-                                              : "—";
-                                          })()}
-                                        </td>
-                                        <td className="px-3 py-2">
-                                          {r.isMine ? (
-                                            <Badge className="bg-[#00BDBB]/15 text-[10px] text-[#0A3C74] hover:bg-[#00BDBB]/15">
-                                              M&apos;est assigné
-                                            </Badge>
-                                          ) : (
-                                            <span className="text-[11px] text-muted-foreground">
-                                              Chantier
-                                            </span>
-                                          )}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
+                              <PersonalRaidTypeTable
+                                key={`${t}-${raidScope}-${chantierFilter}`}
+                                items={items}
+                                raidType={t}
+                                statusConfigs={statusConfigs}
+                                fieldOptions={fieldOptions}
+                                chantiers={chantiers}
+                                comites={comites}
+                                onFilteredChange={(rows) => {
+                                  filteredIdsRef.current[t] = rows.map((r) => r.id);
+                                }}
+                              />
                             )}
                           </TabsContent>
 

@@ -1,7 +1,5 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
 import {
   ClipboardList,
   ShieldAlert,
@@ -30,6 +28,7 @@ import {
   ActionCompletionByDomaineChart,
 } from "@/components/dashboard-charts";
 import { ChantierTimelinePMO } from "@/components/chantier-timeline-pmo";
+import { KpiHoverCard } from "@/components/kpi-hover-card";
 
 interface PMODashboardStats {
   totalActions: number;
@@ -60,112 +59,6 @@ interface PMODashboardStats {
   }[];
 }
 
-const VARIANT_HOVER: Record<
-  "default" | "destructive" | "warning" | "success",
-  string
-> = {
-  default:
-    "group-hover:border-[#00BDBB]/55 dark:group-hover:border-[#00BDBB]/40",
-  destructive:
-    "group-hover:border-destructive/55 dark:group-hover:border-destructive/45",
-  warning:
-    "group-hover:border-amber-400/60 dark:group-hover:border-amber-400/45",
-  success:
-    "group-hover:border-emerald-400/60 dark:group-hover:border-emerald-400/45",
-};
-
-function KpiCard({
-  icon: Icon,
-  label,
-  value,
-  subtitle,
-  variant = "default",
-  href,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  value: React.ReactNode;
-  subtitle: string;
-  variant?: "default" | "destructive" | "warning" | "success";
-  href: string;
-}) {
-  const colorClass =
-    variant === "destructive"
-      ? "text-destructive"
-      : variant === "warning"
-        ? "text-amber-500"
-        : variant === "success"
-          ? "text-emerald-500"
-          : "text-[#0A3C74] dark:text-[#5ad4d2]";
-  const hasColor = variant !== "default";
-
-  return (
-    <Link
-      href={href}
-      className="group block h-full rounded-xl outline-none transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-2 hover:scale-[1.03] active:-translate-y-0.5 active:scale-[1.01] focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-    >
-      <Card
-        className={[
-          "relative h-full cursor-pointer overflow-hidden",
-          "border bg-card/95 backdrop-blur-[2px]",
-          "shadow-sm transition-[box-shadow,border-color,background-color] duration-300 ease-out",
-          "group-hover:shadow-xl group-hover:shadow-[#0A3C74]/12",
-          "dark:group-hover:shadow-2xl dark:group-hover:shadow-black/50",
-          VARIANT_HOVER[variant],
-        ].join(" ")}
-      >
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent opacity-60 dark:via-white/20"
-        />
-        <div
-          aria-hidden
-          className={[
-            "pointer-events-none absolute -inset-px z-0 rounded-[inherit] opacity-0 transition-opacity duration-300 group-hover:opacity-100",
-            variant === "destructive"
-              ? "bg-gradient-to-b from-destructive/15 via-transparent to-transparent"
-              : variant === "warning"
-                ? "bg-gradient-to-b from-amber-400/15 via-transparent to-transparent"
-                : variant === "success"
-                  ? "bg-gradient-to-b from-emerald-400/15 via-transparent to-transparent"
-                  : "bg-gradient-to-b from-[#00BDBB]/18 via-transparent to-transparent",
-          ].join(" ")}
-        />
-
-        <CardHeader className="relative z-10 pb-2">
-          <CardDescription className="flex items-center gap-2">
-            <span
-              className={[
-                "flex size-8 shrink-0 items-center justify-center rounded-lg border shadow-sm",
-                "bg-background transition-transform duration-300 ease-out",
-                "group-hover:scale-110 group-hover:shadow-md",
-                hasColor ? "border-current/15" : "border-border",
-              ].join(" ")}
-            >
-              <Icon className={`size-3.5 ${colorClass}`} />
-            </span>
-            <span className="truncate font-medium">{label}</span>
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="relative z-10 text-center">
-          <div
-            className={[
-              "text-2xl font-bold tracking-tight whitespace-nowrap",
-              "transition-transform duration-300 ease-out group-hover:scale-105",
-              hasColor ? colorClass : "text-foreground",
-            ].join(" ")}
-          >
-            {value}
-          </div>
-          <p className="mt-0.5 text-xs text-muted-foreground transition-colors duration-300 group-hover:text-foreground/75">
-            {subtitle}
-          </p>
-        </CardContent>
-      </Card>
-    </Link>
-  );
-}
-
 export function DashboardPMO({
   stats,
   dashboardType,
@@ -188,21 +81,21 @@ export function DashboardPMO({
 
       {/* KPI Cards */}
       <section className="grid grid-cols-2 gap-4 overflow-visible py-2 sm:grid-cols-3 lg:grid-cols-7">
-        <KpiCard
+        <KpiHoverCard
           icon={FolderKanban}
           label="Mes Chantiers"
           value={String(stats.totalChantiers)}
           subtitle="Actifs"
           href="/chantiers"
         />
-        <KpiCard
+        <KpiHoverCard
           icon={ClipboardList}
           label="Actions Actives"
           value={String(stats.totalActions)}
           subtitle="Non clôturées"
           href="/raid/actions?scope=all"
         />
-        <KpiCard
+        <KpiHoverCard
           icon={Clock}
           label="Actions Échues"
           value={String(stats.overdueActions)}
@@ -210,14 +103,14 @@ export function DashboardPMO({
           variant={stats.overdueActions > 0 ? "destructive" : "default"}
           href="/raid/actions?overdue=true&scope=all"
         />
-        <KpiCard
+        <KpiHoverCard
           icon={ShieldCheck}
           label="Risques Ouverts"
           value={String(stats.totalRisks)}
           subtitle="Non clos"
           href="/raid/risques?scope=all"
         />
-        <KpiCard
+        <KpiHoverCard
           icon={ShieldAlert}
           label="Risques Critiques"
           value={String(stats.criticalRisks)}
@@ -225,7 +118,7 @@ export function DashboardPMO({
           variant={stats.criticalRisks > 0 ? "destructive" : "default"}
           href="/raid/risques?critical=true&scope=all"
         />
-        <KpiCard
+        <KpiHoverCard
           icon={Gavel}
           label="Décisions en attente"
           value={String(stats.pendingDecisions)}
@@ -233,7 +126,7 @@ export function DashboardPMO({
           variant={stats.pendingDecisions > 0 ? "warning" : "default"}
           href="/raid/decisions?statut=En+attente&scope=all"
         />
-        <KpiCard
+        <KpiHoverCard
           icon={TrendingUp}
           label="Taux Clôture"
           value={`${stats.actionCloseRate}%`}

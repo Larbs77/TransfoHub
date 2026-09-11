@@ -212,6 +212,18 @@ export const STATUT_ACTION_LIST = [
   "Doublon",
 ] as const;
 
+/** Actions still unplanned (or discarded) may exist without a due date. */
+export const ACTION_STATUTS_SANS_ECHEANCE = [
+  "A planifier",
+  "Abandonné",
+  "NA",
+  "Doublon",
+] as const;
+
+export function actionRequiresEcheance(statut: string): boolean {
+  return !(ACTION_STATUTS_SANS_ECHEANCE as readonly string[]).includes(statut);
+}
+
 export const STATUT_RISQUE_LIST = [
   "Ouvert",
   "En mitigation",

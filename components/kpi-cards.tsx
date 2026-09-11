@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
   ClipboardList,
   ShieldAlert,
@@ -15,12 +14,7 @@ import {
   MessageCircleQuestion,
   Shield,
 } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardDescription,
-} from "@/components/ui/card";
+import { KpiHoverCard } from "@/components/kpi-hover-card";
 
 interface Stats {
   totalActions: number;
@@ -52,21 +46,21 @@ function formatBudget(amount: number): { num: string; unit: string } {
 export function KpiCards({ stats }: { stats: Stats }) {
   return (
     <section className="grid grid-cols-2 gap-4 overflow-visible py-2 sm:grid-cols-3 lg:grid-cols-6">
-      <KpiCard
+      <KpiHoverCard
         icon={FolderKanban}
         label="Lancés / total"
         value={`${stats.activeChantiers}/${stats.totalChantiers}`}
         subtitle="Chantiers démarrés"
         href="/chantiers"
       />
-      <KpiCard
+      <KpiHoverCard
         icon={ClipboardList}
         label="Actions Actives"
         value={String(stats.totalActions)}
         subtitle="Non clôturées"
         href="/raid/actions?statut=active&scope=all"
       />
-      <KpiCard
+      <KpiHoverCard
         icon={Clock}
         label="Actions Échues"
         value={String(stats.overdueActions)}
@@ -74,14 +68,14 @@ export function KpiCards({ stats }: { stats: Stats }) {
         variant={stats.overdueActions > 0 ? "destructive" : "default"}
         href="/raid/actions?overdue=true&scope=all"
       />
-      <KpiCard
+      <KpiHoverCard
         icon={ShieldCheck}
         label="Risques Ouverts"
         value={String(stats.totalRisks)}
         subtitle="Non clos"
         href="/raid/risques?statut=open&scope=all"
       />
-      <KpiCard
+      <KpiHoverCard
         icon={ShieldAlert}
         label="Risques Critiques"
         value={String(stats.criticalRisks)}
@@ -89,7 +83,7 @@ export function KpiCards({ stats }: { stats: Stats }) {
         variant={stats.criticalRisks > 0 ? "destructive" : "default"}
         href="/raid/risques?critical=true&scope=all"
       />
-      <KpiCard
+      <KpiHoverCard
         icon={Gavel}
         label="Décisions en attente"
         value={String(stats.pendingDecisions)}
@@ -97,7 +91,7 @@ export function KpiCards({ stats }: { stats: Stats }) {
         variant={stats.pendingDecisions > 0 ? "warning" : "default"}
         href="/raid/decisions?statut=En+attente&scope=all"
       />
-      <KpiCard
+      <KpiHoverCard
         icon={CalendarCheck}
         label="Comités à venir"
         value={String(stats.upcomingComites)}
@@ -107,7 +101,7 @@ export function KpiCards({ stats }: { stats: Stats }) {
       {(() => {
         const b = formatBudget(stats.totalBudget);
         return (
-          <KpiCard
+          <KpiHoverCard
             icon={DollarSign}
             label="Budget Total"
             value={b.num}
@@ -116,7 +110,7 @@ export function KpiCards({ stats }: { stats: Stats }) {
           />
         );
       })()}
-      <KpiCard
+      <KpiHoverCard
         icon={TrendingUp}
         label="Taux Clôture"
         value={`${stats.actionCloseRate}%`}
@@ -124,7 +118,7 @@ export function KpiCards({ stats }: { stats: Stats }) {
         variant={stats.actionCloseRate >= 50 ? "success" : "default"}
         href="/raid/actions?statut=Clôturé&scope=all"
       />
-      <KpiCard
+      <KpiHoverCard
         icon={Activity}
         label="Avancement Moyen"
         value={`${stats.averageProgress}%`}
@@ -132,7 +126,7 @@ export function KpiCards({ stats }: { stats: Stats }) {
         variant={stats.averageProgress >= 50 ? "success" : "default"}
         href="/chantiers"
       />
-      <KpiCard
+      <KpiHoverCard
         icon={MessageCircleQuestion}
         label="Q&A Critiques"
         value={String(stats.criticalQABacklog)}
@@ -140,7 +134,7 @@ export function KpiCards({ stats }: { stats: Stats }) {
         variant={stats.criticalQABacklog > 0 ? "destructive" : "default"}
         href="/consultation-backlog?priorite=Critique&statut=Ouverte"
       />
-      <KpiCard
+      <KpiHoverCard
         icon={Shield}
         label="Risques Mitigés"
         value={`${stats.riskMitigationRate}%`}
@@ -149,115 +143,5 @@ export function KpiCards({ stats }: { stats: Stats }) {
         href="/raid/risques?scope=all"
       />
     </section>
-  );
-}
-
-const VARIANT_HOVER: Record<
-  "default" | "destructive" | "warning" | "success",
-  string
-> = {
-  default:
-    "group-hover:border-[#00BDBB]/55 dark:group-hover:border-[#00BDBB]/40",
-  destructive:
-    "group-hover:border-destructive/55 dark:group-hover:border-destructive/45",
-  warning:
-    "group-hover:border-amber-400/60 dark:group-hover:border-amber-400/45",
-  success:
-    "group-hover:border-emerald-400/60 dark:group-hover:border-emerald-400/45",
-};
-
-function KpiCard({
-  icon: Icon,
-  label,
-  value,
-  subtitle,
-  variant = "default",
-  href,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  value: React.ReactNode;
-  subtitle: string;
-  variant?: "default" | "destructive" | "warning" | "success";
-  href: string;
-}) {
-  const colorClass =
-    variant === "destructive"
-      ? "text-destructive"
-      : variant === "warning"
-        ? "text-amber-500"
-        : variant === "success"
-          ? "text-emerald-500"
-          : "text-[#0A3C74] dark:text-[#5ad4d2]";
-  const hasColor = variant !== "default";
-
-  return (
-    <Link
-      href={href}
-      className="group block h-full rounded-xl outline-none transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-2 hover:scale-[1.03] active:-translate-y-0.5 active:scale-[1.01] focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-    >
-      <Card
-        className={[
-          "relative h-full cursor-pointer overflow-hidden",
-          "border bg-card/95 backdrop-blur-[2px]",
-          "shadow-sm transition-[box-shadow,border-color,background-color] duration-300 ease-out",
-          "group-hover:shadow-xl group-hover:shadow-[#0A3C74]/12",
-          "dark:group-hover:shadow-2xl dark:group-hover:shadow-black/50",
-          VARIANT_HOVER[variant],
-        ].join(" ")}
-      >
-        {/* Top shine */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent opacity-60 dark:via-white/20"
-        />
-        {/* Hover glow */}
-        <div
-          aria-hidden
-          className={[
-            "pointer-events-none absolute -inset-px z-0 rounded-[inherit] opacity-0 transition-opacity duration-300 group-hover:opacity-100",
-            variant === "destructive"
-              ? "bg-gradient-to-b from-destructive/15 via-transparent to-transparent"
-              : variant === "warning"
-                ? "bg-gradient-to-b from-amber-400/15 via-transparent to-transparent"
-                : variant === "success"
-                  ? "bg-gradient-to-b from-emerald-400/15 via-transparent to-transparent"
-                  : "bg-gradient-to-b from-[#00BDBB]/18 via-transparent to-transparent",
-          ].join(" ")}
-        />
-
-        <CardHeader className="relative z-10 space-y-0 px-4 pb-2 sm:px-5">
-          <CardDescription className="flex items-center gap-2.5">
-            <span
-              className={[
-                "flex size-7 shrink-0 items-center justify-center rounded-lg border shadow-sm",
-                "bg-background transition-transform duration-300 ease-out",
-                "group-hover:scale-110 group-hover:shadow-md",
-                hasColor ? "border-current/15" : "border-border",
-              ].join(" ")}
-            >
-              <Icon className={`size-3.5 ${colorClass}`} />
-            </span>
-            <span className="min-w-0 flex-1 text-sm font-bold leading-snug tracking-tight text-balance text-foreground/80 sm:text-[15px]">
-              {label}
-            </span>
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="relative z-10 px-4 text-center sm:px-5">
-          <div
-            className={[
-              "text-2xl font-bold tracking-tight whitespace-nowrap",
-              "transition-transform duration-300 ease-out group-hover:scale-105",
-              hasColor ? colorClass : "text-foreground",
-            ].join(" ")}
-          >
-            {value}
-          </div>
-          <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground transition-colors duration-300 group-hover:text-foreground/75 sm:text-xs">
-            {subtitle}
-          </p>
-        </CardContent>
-      </Card>
-    </Link>
   );
 }

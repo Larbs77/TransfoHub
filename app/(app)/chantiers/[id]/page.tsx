@@ -6,6 +6,9 @@ import {
   getBurnRateChantier,
   getConsultationQuestions,
   getJalonWorkflowUiState,
+  getStatusConfigs,
+  getRaidFieldOptions,
+  getComitesForSelect,
 } from "@/app/(app)/actions";
 import { AccessDenied } from "@/components/access-denied";
 import {
@@ -27,6 +30,7 @@ import {
   CardDescription,
   CardAction,
 } from "@/components/ui/card";
+import { ChantierDescription } from "@/components/chantier-description";
 import { EquipeTable } from "@/components/equipe-table";
 import { RaidList } from "@/components/raid-list";
 import { AddRaidButton } from "@/components/add-raid-button";
@@ -49,13 +53,16 @@ interface Props {
 export default async function ChantierDetailPage({ params }: Props) {
   const { id } = await params;
 
-  let chantier, burnRate, consultationQuestions, jalonWorkflow;
+  let chantier, burnRate, consultationQuestions, jalonWorkflow, statusConfigs, fieldOptions, comites;
   try {
-    [chantier, burnRate, consultationQuestions, jalonWorkflow] = await Promise.all([
+    [chantier, burnRate, consultationQuestions, jalonWorkflow, statusConfigs, fieldOptions, comites] = await Promise.all([
       getChantierById(id),
       getBurnRateChantier(id),
       getConsultationQuestions(id),
       getJalonWorkflowUiState(id),
+      getStatusConfigs().catch(() => []),
+      getRaidFieldOptions().catch(() => []),
+      getComitesForSelect().catch(() => []),
     ]);
   } catch (e: unknown) {
     if (e instanceof Error && e.message.includes("non autorisé")) {
@@ -140,18 +147,8 @@ export default async function ChantierDetailPage({ params }: Props) {
           )}
         </div>
 
-        {/* Description */}
         {chantier.description && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Description du chantier</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="prose prose-sm max-w-none text-sm text-muted-foreground whitespace-pre-line leading-relaxed">
-                {chantier.description}
-              </div>
-            </CardContent>
-          </Card>
+          <ChantierDescription description={chantier.description} />
         )}
 
         {/* Financial Overview */}
@@ -202,22 +199,32 @@ export default async function ChantierDetailPage({ params }: Props) {
           membresCount={chantier.membres.length}
           raidCount={chantier.raids.length}
           kpiTab={
-            <ChantierKpiTab
-              data={{
-                avancement: chantier.avancement,
-                statut: chantier.statut,
-                date_debut: chantier.date_debut,
-                date_fin: chantier.date_fin,
-                budget: chantier.budgetTotalMAD,
-                raids: chantier.raids,
-                membres: chantier.membres,
-                burnRateTotals: burnRate?.totals ?? null,
-                questions: consultationQuestions.map((q) => ({ statut: q.statut, priorite: q.priorite })),
-                adherencesSource: chantier.adherencesSource.map((a) => ({ criticite: a.criticite })),
-                adherencesDependant: chantier.adherencesDependant.map((a) => ({ criticite: a.criticite })),
-                chantierCode: chantier.code,
-              }}
-            />
+            <Card>
+              <CardHeader>
+                <CardTitle>Indicateurs</CardTitle>
+                <CardDescription>
+                  Pilotage du chantier — avancement, RAID, Q&amp;A, adhérences et équipe
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ChantierKpiTab
+                  data={{
+                    avancement: chantier.avancement,
+                    statut: chantier.statut,
+                    date_debut: chantier.date_debut,
+                    date_fin: chantier.date_fin,
+                    budget: chantier.budgetTotalMAD,
+                    raids: chantier.raids,
+                    membres: chantier.membres,
+                    burnRateTotals: burnRate?.totals ?? null,
+                    questions: consultationQuestions.map((q) => ({ statut: q.statut, priorite: q.priorite })),
+                    adherencesSource: chantier.adherencesSource.map((a) => ({ criticite: a.criticite })),
+                    adherencesDependant: chantier.adherencesDependant.map((a) => ({ criticite: a.criticite })),
+                    chantierCode: chantier.code,
+                  }}
+                />
+              </CardContent>
+            </Card>
           }
           equipeTab={
             <Card>
@@ -249,38 +256,89 @@ export default async function ChantierDetailPage({ params }: Props) {
                 </CardAction>
               </CardHeader>
               <CardContent>
-                <RaidList items={chantier.raids} initialRaidScope="all" />
+                <RaidList
+                  items={chantier.raids}
+                  initialRaidScope="all"
+                  statusConfigs={statusConfigs}
+                  fieldOptions={fieldOptions}
+                  chantiers={[
+                    { id: chantier.id, code: chantier.code, nom: chantier.nom },
+                  ]}
+                  comites={comites}
+                />
               </CardContent>
             </Card>
           }
           consultationTab={
-            <ChantierConsultationTab
-              questions={consultationQuestions}
-              chantierId={chantier.id}
-            />
+            <Card>
+              <CardHeader>
+                <CardTitle>Backlog Consultation</CardTitle>
+                <CardDescription>
+                  Questions Q&amp;A du chantier — suivi, priorités et retards
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ChantierConsultationTab
+                  questions={consultationQuestions}
+                  chantierId={chantier.id}
+                />
+              </CardContent>
+            </Card>
           }
           consultationCount={consultationQuestions.length}
           adherencesTab={
-            <ChantierAdherencesTab
-              asSource={chantier.adherencesSource}
-              asDependant={chantier.adherencesDependant}
-              chantierCode={chantier.code}
-              chantierId={chantier.id}
-            />
+            <Card>
+              <CardHeader>
+                <CardTitle>Adhérences</CardTitle>
+                <CardDescription>
+                  Dépendances entre chantiers — sortantes, entrantes et bloquantes
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ChantierAdherencesTab
+                  asSource={chantier.adherencesSource}
+                  asDependant={chantier.adherencesDependant}
+                  chantierCode={chantier.code}
+                  chantierId={chantier.id}
+                />
+              </CardContent>
+            </Card>
           }
           adherencesCount={chantier.adherencesSource.length + chantier.adherencesDependant.length}
-          capaciteTab={<ChantierCapaciteTab data={burnRate} />}
+          capaciteTab={
+            <Card>
+              <CardHeader>
+                <CardTitle>Capacité &amp; Coûts</CardTitle>
+                <CardDescription>
+                  Consommation de charge et de budget — planifié versus réel
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ChantierCapaciteTab data={burnRate} />
+              </CardContent>
+            </Card>
+          }
           jalonsTab={
-            <ChantierJalonsTab
-              jalons={chantier.jalons}
-              chantierId={chantier.id}
-              dateDebut={chantier.date_debut}
-              dateFin={chantier.date_fin}
-              workflowCaps={jalonWorkflow.caps}
-              pendingByEntityId={jalonWorkflow.pendingByEntityId}
-              pendingCreatesCount={jalonWorkflow.pendingCreates.length}
-              detailGouvernance={jalonWorkflow.detailGouvernance}
-            />
+            <Card>
+              <CardHeader>
+                <CardTitle>Jalons</CardTitle>
+                <CardDescription>
+                  Planning des phases et jalons du chantier
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ChantierJalonsTab
+                  jalons={chantier.jalons}
+                  chantierId={chantier.id}
+                  dateDebut={chantier.date_debut}
+                  dateFin={chantier.date_fin}
+                  workflowCaps={jalonWorkflow.caps}
+                  pendingByEntityId={jalonWorkflow.pendingByEntityId}
+                  pendingCreatesCount={jalonWorkflow.pendingCreates.length}
+                  detailGouvernance={jalonWorkflow.detailGouvernance}
+                />
+              </CardContent>
+            </Card>
           }
           jalonsCount={chantier.jalons.length}
         />

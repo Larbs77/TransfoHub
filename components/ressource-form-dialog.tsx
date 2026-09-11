@@ -25,7 +25,11 @@ import {
 } from "@/components/ui/select";
 import { MultiSelect } from "@/components/ui/multi-select";
 import { Loader2, CircleCheck, CircleX, UserPlus } from "lucide-react";
-import { RESSOURCE_TYPE_LABELS } from "@/lib/ressource-labels";
+import {
+  RESSOURCE_TYPE_HINTS,
+  RESSOURCE_TYPE_LABELS,
+} from "@/lib/ressource-labels";
+import { PasswordRulesHint } from "@/components/password-rules-hint";
 
 interface ProfilData {
   id: string;
@@ -377,6 +381,11 @@ export function RessourceFormDialog({
                       )}
                     </SelectContent>
                   </Select>
+                  {RESSOURCE_TYPE_HINTS[type] && (
+                    <p className="text-[11px] text-muted-foreground">
+                      {RESSOURCE_TYPE_HINTS[type]}
+                    </p>
+                  )}
                 </div>
                 <div className="grid gap-1.5">
                   <label className="text-sm font-medium">Profil</label>
@@ -470,7 +479,7 @@ export function RessourceFormDialog({
                   <Input
                     value={organisation}
                     onChange={(e) => setOrganisation(e.target.value)}
-                    placeholder="DSI Banque, McKinsey..."
+                    placeholder="DSI, filiale, cabinet…"
                   />
                 </div>
                 <div className="grid gap-1.5">
@@ -579,6 +588,7 @@ export function RessourceFormDialog({
                         placeholder="Min. 8 car., maj., min., chiffre, spécial"
                         autoComplete="new-password"
                       />
+                      <PasswordRulesHint password={accountPassword} />
                     </div>
                     <div className="grid gap-1.5">
                       <label className="text-sm font-medium">Rôle</label>

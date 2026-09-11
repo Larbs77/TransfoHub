@@ -24,6 +24,12 @@ import {
   writeRaidAudit,
 } from "@/lib/raid-collaboration";
 import {
+  assertCanManageComiteSeance,
+  comiteListWhereForSession,
+  comiteWritableWhereForSession,
+} from "@/lib/comite-access";
+import { isComiteNiveauOperationnel } from "@/lib/comite-niveau";
+import {
   countUnreadNotifications,
   listUserNotifications,
   markAllNotificationsRead,
@@ -44,7 +50,7 @@ import {
   resolveChantierRoleTag,
   chantierRoleTagRank,
 } from "@/lib/consultation-affectation";
-import { isRaidClosed, isRaidOverdue } from "@/lib/raid-labels";
+import { isRaidClosed, isRaidOverdue, actionRequiresEcheance } from "@/lib/raid-labels";
 
 // ── Progress Calculation ─────────────────────────────
 
@@ -172,7 +178,6 @@ export async function getChantiers() {
         select: {
           ressource: { select: { nom_complet: true } },
         },
-        take: 1,
       },
       jalons: {
         select: { id: true, nom: true, phase: true, statut: true, date_cible: true, date_reelle: true },
@@ -204,7 +209,10 @@ export async function getChantierById(id: string) {
     include: {
       raids: {
         orderBy: { createdAt: "desc" },
-        include: { comite: true },
+        include: {
+          comite: true,
+          chantier: { select: { id: true, code: true, nom: true } },
+        },
       },
       rmds: { include: { rmd: true } },
       membres: {
@@ -314,12 +322,41 @@ export async function getChantiersForRaidCreate() {
   });
 }
 
+const comiteSelectFields = {
+  id: true,
+  instance: true,
+  numero: true,
+  date: true,
+  chantierId: true,
+} as const;
+
 export async function getComitesForSelect() {
-  await requireAuth();
+  const session = await requireAuth();
+  const where = await comiteListWhereForSession(session);
   return prisma.comite.findMany({
+    where,
     orderBy: [{ instance: "asc" }, { date: "desc" }],
-    select: { id: true, instance: true, numero: true, date: true },
+    select: comiteSelectFields,
   });
+}
+
+/** Committees the current user may attach a RAID to. */
+export async function getComitesForRaidCreate(includeId?: string | null) {
+  const session = await requireAuth();
+  const where = await comiteWritableWhereForSession(session);
+  const rows = await prisma.comite.findMany({
+    where,
+    orderBy: [{ instance: "asc" }, { date: "desc" }],
+    select: comiteSelectFields,
+  });
+  if (includeId && !rows.some((r) => r.id === includeId)) {
+    const extra = await prisma.comite.findUnique({
+      where: { id: includeId },
+      select: comiteSelectFields,
+    });
+    if (extra) rows.unshift(extra);
+  }
+  return rows;
 }
 
 export async function getDashboardStats() {
@@ -871,6 +908,7 @@ export type PersonalRaidRow = {
   responsableRessourceId: string | null;
   equipeId?: string | null;
   comiteId: string | null;
+  comite: { id: string; instance: string; numero: number; date: Date } | null;
   createdAt: Date;
   updatedAt: Date;
   isMine: boolean;
@@ -1039,6 +1077,7 @@ export async function getPersonalDashboard() {
     orderBy: { updatedAt: "desc" },
     include: {
       chantier: { select: { id: true, code: true, nom: true } },
+      comite: true,
     },
   });
 
@@ -1071,6 +1110,14 @@ export async function getPersonalDashboard() {
     responsableRessourceId: r.responsableRessourceId,
     equipeId: r.equipeId,
     comiteId: r.comiteId,
+    comite: r.comite
+      ? {
+          id: r.comite.id,
+          instance: r.comite.instance,
+          numero: r.comite.numero,
+          date: r.comite.date,
+        }
+      : null,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     isMine: r.responsableRessourceId === session.ressourceId,
@@ -1536,7 +1583,6 @@ export async function getChantiersFavoris() {
         select: {
           ressource: { select: { nom_complet: true } },
         },
-        take: 1,
       },
       jalons: {
         select: { id: true, nom: true, phase: true, statut: true, date_cible: true, date_reelle: true },
@@ -1570,14 +1616,41 @@ export async function createRaid(data: {
   commentaires: string;
   comiteId: string | null;
 }) {
+  let chantierId = data.chantierId || null;
+  if (data.comiteId) {
+    const comite = await prisma.comite.findUnique({
+      where: { id: data.comiteId },
+      select: { chantierId: true, instance: true },
+    });
+    if (!comite) throw new Error("Comité introuvable.");
+    if (comite.chantierId) chantierId = comite.chantierId;
+    const param = await prisma.comiteParametre.findUnique({
+      where: { name: comite.instance },
+      select: { niveau: true },
+    });
+    const sessionForComite = await requireAuth();
+    await assertCanManageComiteSeance(sessionForComite, {
+      niveau: param?.niveau ?? "gouvernance",
+      chantierId: comite.chantierId,
+    });
+  }
   // Permission driven by AppRole.raid_create_scope (not legacy role list)
-  const session = await requireRaidCreateAccess(data.chantierId);
+  const session = await requireRaidCreateAccess(chantierId);
   const actor = await getActorDisplay(session);
   const teamAssign = await resolveRaidEquipeId({
     responsableRessourceId: data.responsableRessourceId || null,
-    chantierId: data.chantierId || null,
+    chantierId,
   });
   const code = await allocateNextRaidCode(data.type);
+  if (
+    data.type === "Action" &&
+    actionRequiresEcheance(data.statut) &&
+    !data.date_echeance
+  ) {
+    throw new Error(
+      "Une date d'échéance est obligatoire dès que l'action n'est plus « A planifier »."
+    );
+  }
   const echeanceInitiale = data.date_echeance ? new Date(data.date_echeance) : null;
   // À la création : actualisée = initiale (sauf override explicite)
   const echeanceActu = data.date_echeance_actualisee
@@ -1591,7 +1664,7 @@ export async function createRaid(data: {
       intitule: data.intitule,
       description: data.description,
       categorie: data.categorie,
-      chantierId: data.chantierId || null,
+      chantierId,
       domaine: data.domaine,
       probabilite: data.probabilite,
       impact: data.impact,
@@ -1713,10 +1786,19 @@ export async function updateRaid(
     );
   }
 
+  let chantierId = data.chantierId || null;
+  if (data.comiteId) {
+    const linkedComite = await prisma.comite.findUnique({
+      where: { id: data.comiteId },
+      select: { chantierId: true },
+    });
+    if (linkedComite?.chantierId) chantierId = linkedComite.chantierId;
+  }
+
   const actor = await getActorDisplay(session);
   const teamAssign = await resolveRaidEquipeId({
     responsableRessourceId: data.responsableRessourceId || null,
-    chantierId: data.chantierId || null,
+    chantierId,
   });
 
   const becomingClosed =
@@ -1724,7 +1806,25 @@ export async function updateRaid(
   const reopening =
     !isRaidClosed(data.statut) && isRaidClosed(existing.statut);
 
-  // code + date_echeance (initiale) immuables — jamais mis à jour ici
+  const firstInitiale =
+    !existing.date_echeance && data.date_echeance
+      ? new Date(data.date_echeance)
+      : null;
+  const initialeFinale = existing.date_echeance ?? firstInitiale;
+  if (
+    data.type === "Action" &&
+    actionRequiresEcheance(data.statut) &&
+    !initialeFinale
+  ) {
+    throw new Error(
+      "Une date d'échéance est obligatoire dès que l'action n'est plus « A planifier »."
+    );
+  }
+  const actuFinale = data.date_echeance_actualisee
+    ? new Date(data.date_echeance_actualisee)
+    : firstInitiale;
+
+  // code immuable ; échéance initiale figée dès qu'elle est renseignée
   await prisma.raid.update({
     where: { id },
     data: {
@@ -1732,7 +1832,7 @@ export async function updateRaid(
       intitule: data.intitule,
       description: data.description,
       categorie: data.categorie,
-      chantierId: data.chantierId || null,
+      chantierId,
       domaine: data.domaine,
       probabilite: data.probabilite,
       impact: data.impact,
@@ -1744,9 +1844,8 @@ export async function updateRaid(
       statut: data.statut,
       date_identification: data.date_identification ? new Date(data.date_identification) : null,
       date_revision: data.date_revision ? new Date(data.date_revision) : null,
-      date_echeance_actualisee: data.date_echeance_actualisee
-        ? new Date(data.date_echeance_actualisee)
-        : null,
+      ...(firstInitiale ? { date_echeance: firstInitiale } : {}),
+      date_echeance_actualisee: actuFinale,
       date_fin_reelle: becomingClosed
         ? existing.date_fin_reelle ?? new Date()
         : reopening
@@ -1796,7 +1895,7 @@ export async function fetchRaidFormEditContext() {
   return getRaidFormEditContext(session);
 }
 
-export async function deleteRaid(id: string) {
+export async function deleteRaid(id: string, options?: { motif?: string }) {
   const session = await requireAuth();
   // Delete: only rôles with périmètre chantiers = « tous les chantiers »
   if (!(await canDeleteRaid(session))) {
@@ -1804,6 +1903,25 @@ export async function deleteRaid(id: string) {
       "Suppression non autorisée : réservée aux rôles avec le périmètre « tous les chantiers »."
     );
   }
+  const motif = options?.motif?.trim() ?? "";
+  if (!motif) {
+    throw new Error("Le motif de suppression est obligatoire.");
+  }
+  const raid = await prisma.raid.findUnique({
+    where: { id },
+    select: { id: true, code: true, intitule: true },
+  });
+  if (!raid) throw new Error("Élément RAID introuvable.");
+  const actor = await getActorDisplay(session);
+  await writeRaidAudit({
+    raidId: raid.id,
+    action: "deleted",
+    summary: `${raid.code} « ${raid.intitule} » supprimé par ${actor.actorName} — motif : ${motif}`,
+    newValue: motif,
+    actorUserId: actor.actorUserId,
+    actorName: actor.actorName,
+    actorRessourceId: actor.actorRessourceId,
+  });
   await prisma.raid.delete({ where: { id } });
   revalidatePath("/");
   revalidatePath("/raid");
@@ -1898,6 +2016,32 @@ export async function deleteRmd(id: string) {
 
 // ── Equipe CRUD ──────────────────────────────────────
 
+export async function getRessourceChargeTotale(
+  ressourceId: string,
+  excludeChantierId?: string
+) {
+  await requireAuth();
+  const membres = await prisma.membreEquipe.findMany({
+    where: {
+      ressourceId,
+      ...(excludeChantierId ? { chantierId: { not: excludeChantierId } } : {}),
+    },
+    select: {
+      charge_pourcentage: true,
+      chantier: { select: { code: true, nom: true } },
+    },
+  });
+  const total = membres.reduce((s, m) => s + (m.charge_pourcentage ?? 0), 0);
+  return {
+    total,
+    details: membres.map((m) => ({
+      code: m.chantier.code,
+      nom: m.chantier.nom,
+      charge: m.charge_pourcentage ?? 0,
+    })),
+  };
+}
+
 export async function createMembreEquipe(data: {
   chantierId: string;
   equipe: string;
@@ -1917,12 +2061,6 @@ export async function createMembreEquipe(data: {
   });
   if (!ressource) {
     throw new Error("Ressource introuvable.");
-  }
-  if (data.is_directeur) {
-    await prisma.membreEquipe.updateMany({
-      where: { chantierId: data.chantierId, is_directeur: true },
-      data: { is_directeur: false },
-    });
   }
   await prisma.membreEquipe.create({
     data: {
@@ -1966,15 +2104,6 @@ export async function updateMembreEquipe(
   if (!ressource) {
     throw new Error("Ressource introuvable.");
   }
-  if (data.is_directeur) {
-    const existing = await prisma.membreEquipe.findUnique({ where: { id } });
-    if (existing) {
-      await prisma.membreEquipe.updateMany({
-        where: { chantierId: existing.chantierId, is_directeur: true, id: { not: id } },
-        data: { is_directeur: false },
-      });
-    }
-  }
   const membre = await prisma.membreEquipe.update({
     where: { id },
     data: {
@@ -2004,10 +2133,13 @@ export async function deleteMembreEquipe(id: string) {
 // ── Comités ──────────────────────────────────────────
 
 export async function getComites() {
-  await requireRole("Admin", "Programme_Office", "PMO_Chantier");
+  const session = await requireRole("Admin", "Programme_Office", "PMO_Chantier");
+  const where = await comiteListWhereForSession(session);
   return prisma.comite.findMany({
+    where,
     orderBy: [{ instance: "asc" }, { date: "desc" }],
     include: {
+      chantier: { select: { id: true, code: true, nom: true } },
       raids: {
         orderBy: { createdAt: "desc" },
         include: { chantier: { select: { id: true, code: true, nom: true } } },
@@ -2016,10 +2148,17 @@ export async function getComites() {
   });
 }
 
-export async function getNextComiteNumero(instance: string) {
-  await requireRole("Admin", "Programme_Office");
+export async function getNextComiteNumero(
+  instance: string,
+  chantierId?: string | null
+) {
+  await requireAuth();
+  const name = instance.trim();
+  if (!name) return 1;
   const last = await prisma.comite.findFirst({
-    where: { instance },
+    where: chantierId
+      ? { instance: name, chantierId }
+      : { instance: name, chantierId: null },
     orderBy: { numero: "desc" },
     select: { numero: true },
   });
@@ -2045,7 +2184,7 @@ async function assertValidComiteInstance(
       "Ce type de comité est inactif. Réactivez-le dans Paramètres comités ou choisissez une autre instance."
     );
   }
-  return name;
+  return param;
 }
 
 export async function createComite(data: {
@@ -2057,19 +2196,39 @@ export async function createComite(data: {
   statut: string;
   ordre_du_jour: string;
   invitation_envoyee: boolean;
+  chantierId?: string | null;
 }) {
-  await requireRole("Admin", "Programme_Office");
-  const instance = await assertValidComiteInstance(data.instance, {
+  const session = await requirePageAccess("/comites");
+  const param = await assertValidComiteInstance(data.instance, {
     requireActive: true,
+  });
+  const operationnel = isComiteNiveauOperationnel(param.niveau);
+  const chantierId = operationnel ? data.chantierId || null : null;
+  if (operationnel) {
+    if (!chantierId) {
+      throw new Error("Sélectionnez un chantier pour ce comité opérationnel.");
+    }
+    await requireChantierAccess(chantierId);
+  }
+  await assertCanManageComiteSeance(session, {
+    niveau: param.niveau,
+    chantierId,
   });
   await prisma.comite.create({
     data: {
-      ...data,
-      instance,
+      instance: param.name,
+      numero: data.numero,
       date: new Date(data.date),
+      heure_casablanca: data.heure_casablanca,
+      heure_belgique: data.heure_belgique,
+      statut: data.statut,
+      ordre_du_jour: data.ordre_du_jour,
+      invitation_envoyee: data.invitation_envoyee,
+      chantierId,
     },
   });
   revalidatePath("/comites");
+  if (chantierId) revalidatePath(`/chantiers/${chantierId}`);
 }
 
 export async function updateComite(
@@ -2083,30 +2242,60 @@ export async function updateComite(
     statut: string;
     ordre_du_jour: string;
     invitation_envoyee: boolean;
+    chantierId?: string | null;
   }
 ) {
-  await requireRole("Admin", "Programme_Office");
-  // Allow keeping a deactivated type on existing meetings; new type must be active
+  const session = await requirePageAccess("/comites");
   const current = await prisma.comite.findUnique({
     where: { id },
-    select: { instance: true },
+    select: { instance: true, chantierId: true },
   });
-  const instance = await assertValidComiteInstance(data.instance, {
-    requireActive: current?.instance !== data.instance.trim(),
+  if (!current) throw new Error("Comité introuvable.");
+  const param = await assertValidComiteInstance(data.instance, {
+    requireActive: current.instance !== data.instance.trim(),
+  });
+  const operationnel = isComiteNiveauOperationnel(param.niveau);
+  const chantierId = operationnel ? data.chantierId || current.chantierId : null;
+  if (operationnel && !chantierId) {
+    throw new Error("Sélectionnez un chantier pour ce comité opérationnel.");
+  }
+  if (chantierId) await requireChantierAccess(chantierId);
+  await assertCanManageComiteSeance(session, {
+    niveau: param.niveau,
+    chantierId,
   });
   await prisma.comite.update({
     where: { id },
     data: {
-      ...data,
-      instance,
+      instance: param.name,
+      numero: data.numero,
       date: new Date(data.date),
+      heure_casablanca: data.heure_casablanca,
+      heure_belgique: data.heure_belgique,
+      statut: data.statut,
+      ordre_du_jour: data.ordre_du_jour,
+      invitation_envoyee: data.invitation_envoyee,
+      chantierId,
     },
   });
   revalidatePath("/comites");
+  if (chantierId) revalidatePath(`/chantiers/${chantierId}`);
 }
 
 export async function deleteComite(id: string) {
-  await requireRole("Admin", "Programme_Office");
+  const session = await requirePageAccess("/comites");
+  const current = await prisma.comite.findUnique({
+    where: { id },
+    select: { instance: true, chantierId: true },
+  });
+  if (!current) throw new Error("Comité introuvable.");
+  const param = await prisma.comiteParametre.findUnique({
+    where: { name: current.instance },
+  });
+  await assertCanManageComiteSeance(session, {
+    niveau: param?.niveau ?? "gouvernance",
+    chantierId: current.chantierId,
+  });
   await prisma.comite.delete({ where: { id } });
   revalidatePath("/comites");
 }
@@ -2462,43 +2651,7 @@ export async function getRessourceById(id: string) {
 }
 
 export async function getRessourcesForSelect() {
-  const session = await requireAuth();
-
-  // PMO_Chantier: only their own resource + members of their chantiers
-  if (session.role === "PMO_Chantier") {
-    const chantierIds = await getUserChantierIds(session);
-    if (chantierIds === "all" || chantierIds.length === 0) {
-      // Fallback: just their own resource
-      return prisma.ressource.findMany({
-        where: {
-          actif: true,
-          ...(session.ressourceId ? { id: session.ressourceId } : {}),
-        },
-        orderBy: { nom_complet: "asc" },
-        select: { id: true, nom_complet: true, type: true, organisation: true },
-      });
-    }
-
-    // Get all ressourceIds linked to members of those chantiers
-    const membres = await prisma.membreEquipe.findMany({
-      where: { chantierId: { in: chantierIds } },
-      select: { ressourceId: true },
-    });
-    const ressourceIds = [
-      ...new Set([
-        ...(session.ressourceId ? [session.ressourceId] : []),
-        ...membres.map((m) => m.ressourceId),
-      ]),
-    ];
-
-    return prisma.ressource.findMany({
-      where: { actif: true, id: { in: ressourceIds } },
-      orderBy: { nom_complet: "asc" },
-      select: { id: true, nom_complet: true, type: true, organisation: true },
-    });
-  }
-
-  // Admin, Programme_Office, Workforce_Manager: all active resources
+  await requireAuth();
   return prisma.ressource.findMany({
     where: { actif: true },
     orderBy: { nom_complet: "asc" },

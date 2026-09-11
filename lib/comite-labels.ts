@@ -28,6 +28,8 @@ export type ComiteParametreOption = {
   name: string;
   description: string;
   frequency: string;
+  /** gouvernance | operationnel */
+  niveau?: string;
   owner: string;
   equipeId?: string | null;
   short_label: string;

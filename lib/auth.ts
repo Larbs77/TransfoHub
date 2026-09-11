@@ -48,15 +48,11 @@ export async function getSession() {
 
 // ── Password utilities ─────────────────────────────────
 
-const PASSWORD_REGEX =
-  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{8,}$/;
-
-export function validatePasswordComplexity(password: string): string | null {
-  if (!PASSWORD_REGEX.test(password)) {
-    return "Le mot de passe doit contenir au moins 8 caractères, une majuscule, une minuscule, un chiffre et un caractère spécial.";
-  }
-  return null;
-}
+export {
+  PASSWORD_RULES,
+  getPasswordRuleResults,
+  validatePasswordComplexity,
+} from "@/lib/password-rules";
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12);

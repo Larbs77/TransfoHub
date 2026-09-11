@@ -1,4 +1,4 @@
-import { getRaidItems, getStatusConfigs, getRaidFieldOptions } from "@/app/(app)/actions";
+import { getRaidItems, getStatusConfigs, getRaidFieldOptions, getChantiersForSelect, getComitesForSelect } from "@/app/(app)/actions";
 import { Card, CardContent } from "@/components/ui/card";
 import { RaidList } from "@/components/raid-list";
 import { AddRaidButton } from "@/components/add-raid-button";
@@ -9,10 +9,12 @@ interface Props {
 
 export default async function RaidActionsPage({ searchParams }: Props) {
   const params = await searchParams;
-  const [items, statusConfigs, fieldOptions] = await Promise.all([
+  const [items, statusConfigs, fieldOptions, chantiers, comites] = await Promise.all([
     getRaidItems("Action"),
     getStatusConfigs(),
     getRaidFieldOptions().catch(() => []),
+    getChantiersForSelect().catch(() => []),
+    getComitesForSelect().catch(() => []),
   ]);
   const activeCount = items.filter((a) => a.statut !== "Clôturé" && a.statut !== "Abandonné").length;
 
@@ -42,6 +44,8 @@ export default async function RaidActionsPage({ searchParams }: Props) {
               initialRaidScope={initialRaidScope}
               statusConfigs={statusConfigs}
               fieldOptions={fieldOptions}
+              chantiers={chantiers}
+              comites={comites}
             />
           </CardContent>
         </Card>

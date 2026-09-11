@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -8,6 +8,7 @@ import { Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Calendar, Search, Cloc
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MultiSelect } from "@/components/ui/multi-select";
 import {
   Select,
   SelectContent,
@@ -28,6 +29,7 @@ import { RaidFormDialog } from "./raid-form-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import { CalendarView, type CalendarEvent } from "./calendar-view";
 import { ActionKanban } from "./action-kanban";
+import { RaidExcelExportButton } from "./raid-excel-export-button";
 import { deleteRaid, fetchRaidFormEditContext } from "@/app/(app)/actions";
 import { scoreCriticite } from "@/lib/utils-pmo";
 import { useUser } from "@/components/user-provider";
@@ -53,6 +55,7 @@ import {
   type StatusConfigItem,
   type RaidFieldOptionItem,
 } from "@/lib/raid-labels";
+import { INSTANCE_LABELS } from "@/lib/comite-labels";
 
 type RaidFormEditCtx = {
   chantierScopeAll: boolean;
@@ -87,9 +90,32 @@ interface RaidRow {
   date_fin_reelle?: Date | null;
   commentaires: string;
   comiteId: string | null;
-  comite?: { id: string; instance: string; numero: number } | null;
+  comite?: { id: string; instance: string; numero: number; date?: Date | null } | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+type ChantierFilterOption = { id: string; code: string; nom: string };
+type ComiteFilterOption = {
+  id: string;
+  instance: string;
+  numero: number;
+  date?: Date | string | null;
+};
+
+const EMPTY_ROWS: RaidRow[] = [];
+const EMPTY_CHANTIERS: ChantierFilterOption[] = [];
+const EMPTY_COMITES: ComiteFilterOption[] = [];
+
+function comiteSelectLabel(co: { instance: string; numero: number }) {
+  return `${INSTANCE_LABELS[co.instance] ?? co.instance} #${co.numero}`;
+}
+
+function comiteSelectDate(d: Date | string | null | undefined) {
+  if (d == null || d === "") return "";
+  const date = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(date.getTime())) return "";
+  return format(date, "dd MMM yyyy", { locale: fr });
 }
 
 interface Props {
@@ -104,6 +130,10 @@ interface Props {
   initialRaidScope?: RaidScope;
   statusConfigs?: StatusConfigItem[];
   fieldOptions?: RaidFieldOptionItem[];
+  /** Chantiers already scoped to the user's access (all vs assigned). */
+  chantiers?: ChantierFilterOption[];
+  /** Same catalog as the RAID create form (`getComitesForSelect`). */
+  comites?: ComiteFilterOption[];
 }
 
 type SortField = "intitule" | "statut" | "categorie" | "responsable" | "date_identification" | "date_echeance" | "criticite";
@@ -224,6 +254,9 @@ function RaidTable({
   statusConfigs,
   fieldOptions,
   formEditCtx,
+  chantiers = EMPTY_CHANTIERS,
+  comites = EMPTY_COMITES,
+  onFilteredChange,
 }: {
   items: RaidRow[];
   showType: boolean;
@@ -237,22 +270,35 @@ function RaidTable({
   statusConfigs?: StatusConfigItem[];
   fieldOptions?: RaidFieldOptionItem[];
   formEditCtx: RaidFormEditCtx | null;
+  chantiers?: ChantierFilterOption[];
+  comites?: ComiteFilterOption[];
+  onFilteredChange?: (rows: RaidRow[]) => void;
 }) {
   const router = useRouter();
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [search, setSearch] = useState("");
-  const [filterCategorie, setFilterCategorie] = useState("__all__");
-  const [filterDomaine, setFilterDomaine] = useState("__all__");
-  const [filterProb, setFilterProb] = useState(initialProbabilite ? String(initialProbabilite) : "__all__");
-  const [filterImpact, setFilterImpact] = useState(initialImpact ? String(initialImpact) : "__all__");
-  const [filterStatut, setFilterStatut] = useState(
-    initialStatut === "active" ? "__active__"
-      : initialStatut === "open" ? "__open__"
-        : initialStatut || "__all__"
+  const [filterCategorie, setFilterCategorie] = useState<string[]>([]);
+  const [filterDomaine, setFilterDomaine] = useState<string[]>([]);
+  const [filterProb, setFilterProb] = useState<string[]>(
+    initialProbabilite ? [String(initialProbabilite)] : []
+  );
+  const [filterImpact, setFilterImpact] = useState<string[]>(
+    initialImpact ? [String(initialImpact)] : []
+  );
+  const [filterStatut, setFilterStatut] = useState<string[]>(
+    initialStatut === "active"
+      ? ["__active__"]
+      : initialStatut === "open"
+        ? ["__open__"]
+        : initialStatut
+          ? [initialStatut]
+          : []
   );
   const [filterOverdue, setFilterOverdue] = useState(initialOverdue ?? false);
   const [filterCritical, setFilterCritical] = useState(initialCritical ?? false);
+  const [filterChantier, setFilterChantier] = useState<string[]>([]);
+  const [filterComite, setFilterComite] = useState<string[]>([]);
 
   // Pagination
   const [pageSize, setPageSize] = useState<number>(10);
@@ -290,39 +336,122 @@ function RaidTable({
     [fieldOptions, items]
   );
 
+  const chantierFilterOptions = useMemo(() => {
+    const source =
+      chantiers.length > 0
+        ? chantiers
+        : (() => {
+            const map = new Map<string, ChantierFilterOption>();
+            for (const r of items) {
+              if (r.chantier?.id) {
+                map.set(r.chantier.id, {
+                  id: r.chantier.id,
+                  code: r.chantier.code,
+                  nom: r.chantier.nom,
+                });
+              }
+            }
+            return [...map.values()];
+          })();
+    return [...source].sort((a, b) => a.code.localeCompare(b.code, "fr"));
+  }, [chantiers, items]);
+
+  const accessibleChantierIds = useMemo(
+    () => new Set(chantierFilterOptions.map((c) => c.id)),
+    [chantierFilterOptions]
+  );
+
+  const comiteFilterOptions = useMemo(() => {
+    const source =
+      comites.length > 0
+        ? comites
+        : (() => {
+            const map = new Map<string, ComiteFilterOption>();
+            for (const r of items) {
+              if (r.comite?.id) {
+                map.set(r.comite.id, {
+                  id: r.comite.id,
+                  instance: r.comite.instance,
+                  numero: r.comite.numero,
+                  date: r.comite.date,
+                });
+              }
+            }
+            return [...map.values()];
+          })();
+    return [...source].sort((a, b) => {
+      const inst = (INSTANCE_LABELS[a.instance] ?? a.instance).localeCompare(
+        INSTANCE_LABELS[b.instance] ?? b.instance,
+        "fr"
+      );
+      if (inst !== 0) return inst;
+      return b.numero - a.numero;
+    });
+  }, [comites, items]);
+
   const filtered = useMemo(() => {
     let result = items;
     if (search) {
       const q = search.toLowerCase();
-      result = result.filter(
-        (r) =>
+      result = result.filter((r) => {
+        const comiteLabel = r.comite ? comiteSelectLabel(r.comite) : "";
+        const textMatch =
           r.intitule.toLowerCase().includes(q) ||
           r.responsable.toLowerCase().includes(q) ||
           r.description.toLowerCase().includes(q) ||
           (r.code ?? "").toLowerCase().includes(q) ||
           (r.categorie ?? "").toLowerCase().includes(q) ||
-          (r.domaine ?? "").toLowerCase().includes(q)
+          (r.domaine ?? "").toLowerCase().includes(q) ||
+          comiteLabel.toLowerCase().includes(q) ||
+          (r.comite?.instance ?? "").toLowerCase().includes(q);
+        const chantierAccessible =
+          !!r.chantier?.id && accessibleChantierIds.has(r.chantier.id);
+        const chantierMatch =
+          chantierAccessible &&
+          ((r.chantier?.code ?? "").toLowerCase().includes(q) ||
+            (r.chantier?.nom ?? "").toLowerCase().includes(q));
+        return textMatch || chantierMatch;
+      });
+    }
+    if (filterCategorie.length > 0) {
+      result = result.filter((r) => filterCategorie.includes(r.categorie));
+    }
+    if (filterDomaine.length > 0) {
+      result = result.filter((r) => filterDomaine.includes(r.domaine));
+    }
+    if (filterProb.length > 0) {
+      result = result.filter(
+        (r) => r.probabilite != null && filterProb.includes(String(r.probabilite))
       );
     }
-    if (filterCategorie !== "__all__") {
-      result = result.filter((r) => r.categorie === filterCategorie);
+    if (filterImpact.length > 0) {
+      result = result.filter(
+        (r) => r.impact != null && filterImpact.includes(String(r.impact))
+      );
     }
-    if (filterDomaine !== "__all__") {
-      result = result.filter((r) => r.domaine === filterDomaine);
+    if (filterStatut.length > 0) {
+      result = result.filter((r) =>
+        filterStatut.some((s) => {
+          if (s === "__active__") return r.statut !== "Clôturé" && r.statut !== "Abandonné";
+          if (s === "__open__") return r.statut !== "Clos";
+          return r.statut === s;
+        })
+      );
     }
-    if (filterProb !== "__all__") {
-      result = result.filter((r) => r.probabilite === Number(filterProb));
+    if (filterChantier.length > 0) {
+      result = result.filter(
+        (r) =>
+          !!r.chantierId &&
+          accessibleChantierIds.has(r.chantierId) &&
+          filterChantier.includes(r.chantierId)
+      );
     }
-    if (filterImpact !== "__all__") {
-      result = result.filter((r) => r.impact === Number(filterImpact));
-    }
-    // Statut filter
-    if (filterStatut === "__active__") {
-      result = result.filter((r) => r.statut !== "Clôturé" && r.statut !== "Abandonné");
-    } else if (filterStatut === "__open__") {
-      result = result.filter((r) => r.statut !== "Clos");
-    } else if (filterStatut !== "__all__") {
-      result = result.filter((r) => r.statut === filterStatut);
+    if (filterComite.length > 0) {
+      result = result.filter((r) =>
+        filterComite.some((id) =>
+          id === "__none__" ? !r.comiteId : r.comiteId === id
+        )
+      );
     }
     // Overdue filter (échéance actualisée, fallback initiale)
     if (filterOverdue) {
@@ -342,7 +471,7 @@ function RaidTable({
       );
     }
     return result;
-  }, [items, search, filterCategorie, filterDomaine, filterProb, filterImpact, filterStatut, filterOverdue, filterCritical, now]);
+  }, [items, search, filterCategorie, filterDomaine, filterProb, filterImpact, filterStatut, filterChantier, filterComite, filterOverdue, filterCritical, now, accessibleChantierIds]);
 
   const sorted = useMemo(() => {
     if (!sortField) return filtered;
@@ -390,6 +519,12 @@ function RaidTable({
     });
   }, [filtered, sortField, sortDir]);
 
+  const onFilteredChangeRef = useRef(onFilteredChange);
+  onFilteredChangeRef.current = onFilteredChange;
+  useEffect(() => {
+    onFilteredChangeRef.current?.(sorted);
+  }, [sorted]);
+
   // Pagination
   const totalPages = pageSize === 0 ? 1 : Math.ceil(sorted.length / pageSize);
   const safePage = Math.min(currentPage, totalPages || 1);
@@ -397,74 +532,110 @@ function RaidTable({
     ? sorted
     : sorted.slice((safePage - 1) * pageSize, safePage * pageSize);
 
-  // Reset page when filters change
-  useMemo(() => { setCurrentPage(1); }, [search, filterCategorie, filterDomaine, filterProb, filterImpact, filterStatut, filterOverdue, filterCritical]);
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterCategorie, filterDomaine, filterProb, filterImpact, filterStatut, filterChantier, filterComite, filterOverdue, filterCritical]);
 
   const itemType = items.length > 0 ? items[0].type : "Action";
   const statutList = statusConfigs?.length
     ? getStatutsFromConfig(itemType, statusConfigs)
     : getStatutsForType(itemType);
+  const statutOptions = [
+    ...(isActionView
+      ? [{ value: "__active__", label: "Actives (non clôturées)" }]
+      : []),
+    ...(isRisqueView
+      ? [{ value: "__open__", label: "Ouverts (non clos)" }]
+      : []),
+    ...statutList.map((s) => ({ value: s, label: s })),
+  ];
   const hasActiveFilters =
-    filterProb !== "__all__" ||
-    filterImpact !== "__all__" ||
-    filterStatut !== "__all__" ||
+    filterCategorie.length > 0 ||
+    filterDomaine.length > 0 ||
+    filterProb.length > 0 ||
+    filterImpact.length > 0 ||
+    filterStatut.length > 0 ||
+    filterChantier.length > 0 ||
+    filterComite.length > 0 ||
     filterOverdue ||
     filterCritical;
 
   return (
     <div className="space-y-3">
       {/* Filters */}
-      <div className="flex flex-wrap gap-2">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-          <Input
-            placeholder="Rechercher (code, intitulé…)"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-8"
-          />
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+            <Input
+              placeholder="Rechercher (code, intitulé, chantier, comité…)"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8"
+            />
+          </div>
+          {chantierFilterOptions.length > 0 && (
+            <MultiSelect
+              options={chantierFilterOptions.map((c) => ({
+                value: c.id,
+                label: c.nom ? `${c.code} — ${c.nom}` : c.code,
+              }))}
+              selected={filterChantier}
+              onChange={setFilterChantier}
+              placeholder="Chantier"
+              className="w-1/2 min-w-0"
+              chips={false}
+              truncate
+            />
+          )}
         </div>
-        <Select value={filterCategorie} onValueChange={setFilterCategorie}>
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Catégorie" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">Toutes catégories</SelectItem>
-            {categorieFilterOptions.map((c) => (
-              <SelectItem key={c} value={c}>{c}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={filterDomaine} onValueChange={setFilterDomaine}>
-          <SelectTrigger className="w-[200px]">
-            <SelectValue placeholder="Domaine" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">Tous domaines</SelectItem>
-            {domaineFilterOptions.map((d) => (
-              <SelectItem key={d} value={d}>{d}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={filterStatut} onValueChange={setFilterStatut}>
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Statut" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">Tous statuts</SelectItem>
-            {isActionView && <SelectItem value="__active__">Actives (non clôturées)</SelectItem>}
-            {isRisqueView && <SelectItem value="__open__">Ouverts (non clos)</SelectItem>}
-            {statutList.map((s) => (
-              <SelectItem key={s} value={s}>{s}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="flex flex-wrap items-center gap-2">
+        <MultiSelect
+          options={categorieFilterOptions.map((c) => ({ value: c, label: c }))}
+          selected={filterCategorie}
+          onChange={setFilterCategorie}
+          placeholder="Catégorie"
+          className="w-[180px]"
+          chips={false}
+        />
+        <MultiSelect
+          options={domaineFilterOptions.map((d) => ({ value: d, label: d }))}
+          selected={filterDomaine}
+          onChange={setFilterDomaine}
+          placeholder="Domaine"
+          className="w-[200px]"
+          chips={false}
+        />
+        <MultiSelect
+          options={statutOptions}
+          selected={filterStatut}
+          onChange={setFilterStatut}
+          placeholder="Statut"
+          className="w-[200px]"
+          chips={false}
+        />
+        <MultiSelect
+          options={[
+            { value: "__none__", label: "Aucun" },
+            ...comiteFilterOptions.map((co) => ({
+              value: co.id,
+              label: comiteSelectLabel(co),
+              description: comiteSelectDate(co.date) || undefined,
+            })),
+          ]}
+          selected={filterComite}
+          onChange={setFilterComite}
+          placeholder="Comité"
+          className="w-[18rem] min-w-0"
+          chips={false}
+          truncate
+        />
         {isActionView && (
           <Button
             variant={filterOverdue ? "default" : "outline"}
             size="sm"
             onClick={() => setFilterOverdue((v) => !v)}
-            className="text-xs gap-1"
+            className="h-9 text-xs gap-1"
           >
             <Clock className="size-3.5" />
             Échues
@@ -476,47 +647,51 @@ function RaidTable({
               variant={filterCritical ? "default" : "outline"}
               size="sm"
               onClick={() => setFilterCritical((v) => !v)}
-              className="text-xs gap-1"
+              className="h-9 text-xs gap-1"
             >
               <ShieldAlert className="size-3.5" />
               Critiques
             </Button>
-            <Select value={filterProb} onValueChange={setFilterProb}>
-              <SelectTrigger className="w-[160px]">
-                <SelectValue placeholder="Probabilité" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">Toute probabilité</SelectItem>
-                {Object.entries(PROBABILITE_LABELS).map(([k, label]) => (
-                  <SelectItem key={k} value={k}>{k} - {label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={filterImpact} onValueChange={setFilterImpact}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Impact" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">Tout impact</SelectItem>
-                {Object.entries(IMPACT_LABELS).map(([k, label]) => (
-                  <SelectItem key={k} value={k}>{k} - {label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <MultiSelect
+              options={Object.entries(PROBABILITE_LABELS).map(([k, label]) => ({
+                value: k,
+                label: `${k} - ${label}`,
+              }))}
+              selected={filterProb}
+              onChange={setFilterProb}
+              placeholder="Probabilité"
+              className="w-[180px]"
+              chips={false}
+            />
+            <MultiSelect
+              options={Object.entries(IMPACT_LABELS).map(([k, label]) => ({
+                value: k,
+                label: `${k} - ${label}`,
+              }))}
+              selected={filterImpact}
+              onChange={setFilterImpact}
+              placeholder="Impact"
+              className="w-[160px]"
+              chips={false}
+            />
           </>
         )}
         {hasActiveFilters && (
           <Button
             variant="ghost"
             size="sm"
+            className="h-9 text-xs"
             onClick={() => {
-              setFilterProb("__all__");
-              setFilterImpact("__all__");
-              setFilterStatut("__all__");
+              setFilterCategorie([]);
+              setFilterDomaine([]);
+              setFilterProb([]);
+              setFilterImpact([]);
+              setFilterStatut([]);
+              setFilterChantier([]);
+              setFilterComite([]);
               setFilterOverdue(false);
               setFilterCritical(false);
             }}
-            className="text-xs"
           >
             Effacer filtres
           </Button>
@@ -530,17 +705,18 @@ function RaidTable({
               setCurrentPage(1);
             }}
           >
-            <SelectTrigger className="w-20 h-8" size="sm">
+            <SelectTrigger className="w-20 h-9">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {[10, 15, 20, 30].map((n) => (
+              {[5, 10, 15, 20, 30].map((n) => (
                 <SelectItem key={n} value={String(n)}>{n}</SelectItem>
               ))}
               <SelectItem value="all">Tout</SelectItem>
             </SelectContent>
           </Select>
         </div>
+      </div>
       </div>
 
       {sorted.length === 0 ? (
@@ -843,8 +1019,9 @@ function RaidScopeToggles({
   );
 }
 
-export function RaidList({ items, filterType, initialProbabilite, initialImpact, initialStatut, initialOverdue, initialCritical, initialRaidScope = "mine", statusConfigs, fieldOptions }: Props) {
+export function RaidList({ items, filterType, initialProbabilite, initialImpact, initialStatut, initialOverdue, initialCritical, initialRaidScope = "mine", statusConfigs, fieldOptions, chantiers = [], comites = [] }: Props) {
   const { ressourceId, displayName } = useUser();
+  const filteredIdsRef = useRef<Record<string, string[]>>({});
   const [raidScope, setRaidScope] = useState<RaidScope>(
     initialRaidScope === "all" ? "all" : "mine"
   );
@@ -956,12 +1133,13 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
 
   // If filtered to a single type, show table directly (no type tabs)
   if (filterType) {
-    const typeItems = grouped.get(filterType) ?? [];
+    const typeItems = grouped.get(filterType) ?? EMPTY_ROWS;
     const typeCalendar = calendarEvents.filter((e) => e.type === filterType);
     return (
       <>
         <div className="mb-4">{scopeBar}</div>
         <Tabs defaultValue="table" className="space-y-4" key={`scope-${raidScope}-${filterType}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
           <TabsList>
             <TabsTrigger value="table" className="gap-2">
               Tableau
@@ -980,6 +1158,13 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
               Calendrier
             </TabsTrigger>
           </TabsList>
+          <RaidExcelExportButton
+            allIds={scopedItems.map((r) => r.id)}
+            getSelectedIds={() =>
+              filteredIdsRef.current[filterType] ?? typeItems.map((r) => r.id)
+            }
+          />
+          </div>
           <TabsContent value="table">
             <RaidTable
               items={typeItems}
@@ -994,6 +1179,11 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
               statusConfigs={statusConfigs}
               fieldOptions={fieldOptions}
               formEditCtx={formEditCtx}
+              chantiers={chantiers}
+              comites={comites}
+              onFilteredChange={(rows) => {
+                filteredIdsRef.current[filterType] = rows.map((r) => r.id);
+              }}
             />
           </TabsContent>
           {filterType === "Action" && (
@@ -1020,9 +1210,10 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
         <DeleteConfirmDialog
           open={!!deleteId && !!formEditCtx?.chantierScopeAll}
           onOpenChange={(open) => !open && setDeleteId(null)}
-          onConfirm={async () => {
+          requireMotif
+          onConfirm={async (motif) => {
             try {
-              if (deleteId) await deleteRaid(deleteId);
+              if (deleteId) await deleteRaid(deleteId, { motif });
             } catch (err) {
               setDeleteError(err instanceof Error ? err.message : "Erreur de suppression");
               throw err;
@@ -1069,10 +1260,11 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
         </TabsList>
 
         {typeOrder.map((t) => {
-          const tItems = grouped.get(t) ?? [];
+          const tItems = grouped.get(t) ?? EMPTY_ROWS;
           return (
             <TabsContent key={t} value={t}>
               <Tabs defaultValue="table" className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                 <TabsList>
                   <TabsTrigger value="table" className="gap-2">
                     Tableau
@@ -1091,6 +1283,13 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
                     Calendrier
                   </TabsTrigger>
                 </TabsList>
+                <RaidExcelExportButton
+                  allIds={scopedItems.map((r) => r.id)}
+                  getSelectedIds={() =>
+                    filteredIdsRef.current[t] ?? tItems.map((r) => r.id)
+                  }
+                />
+                </div>
                 <TabsContent value="table">
                   <RaidTable
                     items={tItems}
@@ -1100,6 +1299,11 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
                     statusConfigs={statusConfigs}
                     fieldOptions={fieldOptions}
                     formEditCtx={formEditCtx}
+                    chantiers={chantiers}
+                    comites={comites}
+                    onFilteredChange={(rows) => {
+                      filteredIdsRef.current[t] = rows.map((r) => r.id);
+                    }}
                   />
                 </TabsContent>
                 {t === "Action" && (
@@ -1134,9 +1338,10 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
       <DeleteConfirmDialog
         open={!!deleteId && !!formEditCtx?.chantierScopeAll}
         onOpenChange={(open) => !open && setDeleteId(null)}
-        onConfirm={async () => {
+        requireMotif
+        onConfirm={async (motif) => {
           try {
-            if (deleteId) await deleteRaid(deleteId);
+            if (deleteId) await deleteRaid(deleteId, { motif });
           } catch (err) {
             setDeleteError(err instanceof Error ? err.message : "Erreur de suppression");
             throw err;

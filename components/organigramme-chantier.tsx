@@ -33,6 +33,11 @@ interface Props {
 const TEAM_ORDER = ["PMO", "AMOA", "MOE", "Métiers", "Sécurité", "EI"];
 
 export function OrganigrammeChantier({ directeur, membres, rmds }: Props) {
+  const directeurs = membres.filter((m) => m.is_directeur);
+  const directeurNames = directeurs.map(membreName).filter((n) => n && n !== "—");
+  if (directeurNames.length === 0 && directeur?.trim()) {
+    directeurNames.push(directeur.trim());
+  }
   // Find suppléants and group remaining members by team
   const suppleants = membres.filter((m) => m.role === "Directeur de chantier - suppléant");
   const grouped = new Map<string, Membre[]>();
@@ -60,12 +65,26 @@ export function OrganigrammeChantier({ directeur, membres, rmds }: Props) {
                 <div className="flex items-center justify-center gap-2 mb-1">
                   <Crown className="size-5 text-primary" />
                   <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    Directeur de chantier
+                    {directeurNames.length > 1
+                      ? "Directeurs de chantier"
+                      : "Directeur de chantier"}
                   </span>
                 </div>
-                <p className="text-base font-bold">
-                  {directeur || "Non défini"}
-                </p>
+                {directeurNames.length === 0 ? (
+                  <p className="text-base font-bold">Non défini</p>
+                ) : directeurs.length > 0 ? (
+                  directeurs.map((m) => (
+                    <p key={m.id} className="text-base font-bold">
+                      {membreName(m)}
+                    </p>
+                  ))
+                ) : (
+                  directeurNames.map((name) => (
+                    <p key={name} className="text-base font-bold">
+                      {name}
+                    </p>
+                  ))
+                )}
               </div>
               {/* Suppléant(s) */}
               {suppleants.length > 0 && (

@@ -38,6 +38,13 @@ import {
 import { Badge } from "@/components/ui/badge";
 import type { EquipeOption } from "@/lib/comite-labels";
 import {
+  COMITE_NIVEAU_GOUVERNANCE,
+  COMITE_NIVEAU_LABELS,
+  COMITE_NIVEAU_OPERATIONNEL,
+  COMITE_OWNER_EQUIPE_CHANTIER,
+  isComiteNiveauOperationnel,
+} from "@/lib/comite-niveau";
+import {
   createComiteParametre,
   updateComiteParametre,
   deleteComiteParametre,
@@ -49,6 +56,7 @@ export type ComiteParametreRow = {
   name: string;
   description: string;
   frequency: string;
+  niveau: string;
   owner: string;
   equipeId: string | null;
   short_label: string;
@@ -88,6 +96,7 @@ const emptyForm = {
   name: "",
   description: "",
   frequency: "",
+  niveau: COMITE_NIVEAU_GOUVERNANCE,
   equipeId: "",
   short_label: "",
   color: "#2563eb",
@@ -138,6 +147,8 @@ export function ComiteParametreManagement({
         r.short_label,
         r.description,
         r.frequency,
+        r.niveau,
+        COMITE_NIVEAU_LABELS[r.niveau] ?? r.niveau,
         r.owner,
         r.equipe?.name ?? "",
       ]
@@ -148,6 +159,9 @@ export function ComiteParametreManagement({
   }, [rows, search]);
 
   function ownerLabel(row: ComiteParametreRow) {
+    if (isComiteNiveauOperationnel(row.niveau)) {
+      return COMITE_OWNER_EQUIPE_CHANTIER;
+    }
     return row.equipe?.name || row.owner || "—";
   }
 
@@ -158,6 +172,7 @@ export function ComiteParametreManagement({
       equipes.find((e) => e.is_active)?.id ?? equipes[0]?.id ?? "";
     setForm({
       ...emptyForm,
+      niveau: COMITE_NIVEAU_GOUVERNANCE,
       equipeId: defaultEquipe,
       position:
         rows.length > 0 ? Math.max(...rows.map((r) => r.position)) + 1 : 0,
@@ -172,6 +187,9 @@ export function ComiteParametreManagement({
       name: row.name,
       description: row.description,
       frequency: row.frequency,
+      niveau: isComiteNiveauOperationnel(row.niveau)
+        ? COMITE_NIVEAU_OPERATIONNEL
+        : COMITE_NIVEAU_GOUVERNANCE,
       equipeId: row.equipeId ?? row.equipe?.id ?? "",
       short_label: row.short_label,
       color: row.color || "#6b7280",
@@ -183,8 +201,9 @@ export function ComiteParametreManagement({
 
   function handleSave() {
     setError("");
-    if (!form.equipeId) {
-      setError("Le propriétaire (équipe) est obligatoire.");
+    const operationnel = isComiteNiveauOperationnel(form.niveau);
+    if (!operationnel && !form.equipeId) {
+      setError("Le propriétaire (équipe institutionnelle) est obligatoire.");
       return;
     }
     startTransition(async () => {
@@ -193,7 +212,8 @@ export function ComiteParametreManagement({
           name: form.name,
           description: form.description,
           frequency: form.frequency,
-          equipeId: form.equipeId,
+          niveau: form.niveau,
+          equipeId: operationnel ? null : form.equipeId,
           short_label: form.short_label,
           color: form.color,
           position: form.position,
@@ -301,6 +321,7 @@ export function ComiteParametreManagement({
                   <th className="px-3 py-2.5 font-medium">Ordre</th>
                   <th className="px-3 py-2.5 font-medium">Nom</th>
                   <th className="px-3 py-2.5 font-medium">Libellé court</th>
+                  <th className="px-3 py-2.5 font-medium">Niveau</th>
                   <th className="px-3 py-2.5 font-medium">Fréquence</th>
                   <th className="px-3 py-2.5 font-medium">Propriétaire</th>
                   <th className="px-3 py-2.5 font-medium">Statut</th>
@@ -311,7 +332,7 @@ export function ComiteParametreManagement({
                 {filtered.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       className="px-3 py-10 text-center text-muted-foreground"
                     >
                       Aucun type de comité
@@ -346,6 +367,9 @@ export function ComiteParametreManagement({
                       </td>
                       <td className="px-3 py-2.5 text-muted-foreground">
                         {row.short_label || "—"}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {COMITE_NIVEAU_LABELS[row.niveau] ?? row.niveau}
                       </td>
                       <td className="px-3 py-2.5">{row.frequency || "—"}</td>
                       <td className="px-3 py-2.5">{ownerLabel(row)}</td>
@@ -450,6 +474,34 @@ export function ComiteParametreManagement({
                 placeholder="Rôle de cette instance de gouvernance…"
               />
             </div>
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">
+                Niveau <span className="text-destructive">*</span>
+              </label>
+              <Select
+                value={form.niveau}
+                onValueChange={(v) =>
+                  setForm((f) => ({
+                    ...f,
+                    niveau: v,
+                    equipeId:
+                      v === COMITE_NIVEAU_OPERATIONNEL ? "" : f.equipeId,
+                  }))
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={COMITE_NIVEAU_GOUVERNANCE}>
+                    Gouvernance (cross-chantier)
+                  </SelectItem>
+                  <SelectItem value={COMITE_NIVEAU_OPERATIONNEL}>
+                    Opérationnel (équipe chantier)
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-1.5">
                 <label className="text-sm font-medium">Fréquence</label>
@@ -469,32 +521,49 @@ export function ComiteParametreManagement({
               </div>
               <div className="grid gap-1.5">
                 <label className="text-sm font-medium">
-                  Propriétaire (équipe){" "}
-                  <span className="text-destructive">*</span>
+                  Propriétaire{" "}
+                  {form.niveau !== COMITE_NIVEAU_OPERATIONNEL && (
+                    <span className="text-destructive">*</span>
+                  )}
                 </label>
-                <Select
-                  value={form.equipeId || undefined}
-                  onValueChange={(v) =>
-                    setForm((f) => ({ ...f, equipeId: v }))
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Choisir une équipe" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {equipeOptionsForForm.map((eq) => (
-                      <SelectItem key={eq.id} value={eq.id}>
-                        {eq.name}
-                        {!eq.is_active ? " (inactive)" : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {equipeOptionsForForm.length === 0 && (
-                  <p className="text-[11px] text-muted-foreground">
-                    Aucune équipe active — créez-en dans Administration →
-                    Équipes.
+                {isComiteNiveauOperationnel(form.niveau) ? (
+                  <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                    {COMITE_OWNER_EQUIPE_CHANTIER}
+                    <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                      Équipe fonctionnelle du chantier choisi à chaque séance.
+                    </span>
                   </p>
+                ) : (
+                  <>
+                    <Select
+                      value={form.equipeId || "__none__"}
+                      onValueChange={(v) =>
+                        setForm((f) => ({
+                          ...f,
+                          equipeId: v === "__none__" ? "" : v,
+                        }))
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Choisir une équipe institutionnelle" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Choisir une équipe</SelectItem>
+                        {equipeOptionsForForm.map((eq) => (
+                          <SelectItem key={eq.id} value={eq.id}>
+                            {eq.name}
+                            {!eq.is_active ? " (inactive)" : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {equipeOptionsForForm.length === 0 && (
+                      <p className="text-[11px] text-muted-foreground">
+                        Aucune équipe active — créez-en dans Administration →
+                        Équipes.
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
             </div>

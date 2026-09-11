@@ -12,6 +12,7 @@ import {
   Check,
   X,
   Calendar,
+  ChevronDown,
   ChevronRight,
   Plus,
   CalendarDays,
@@ -33,9 +34,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ComiteFormDialog } from "./comite-form-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import { RaidFormDialog } from "./raid-form-dialog";
+import { RaidExcelExportOnceButton } from "./raid-excel-export-button";
 import { CalendarView, type CalendarEvent } from "./calendar-view";
 import { deleteComite, deleteRaid } from "@/app/(app)/actions";
-import { useCanCreateRaid } from "@/components/user-provider";
+import { useCanCreateRaid, useUser } from "@/components/user-provider";
 import {
   STATUT_COMITE_LABELS,
   STATUT_COMITE_COLORS,
@@ -44,6 +46,13 @@ import {
   colorForInstance,
   type ComiteParametreOption,
 } from "@/lib/comite-labels";
+import {
+  COMITE_NIVEAU_GOUVERNANCE,
+  COMITE_NIVEAU_LABELS,
+  COMITE_NIVEAU_OPERATIONNEL,
+  isComiteNiveauOperationnel,
+  canActOnComiteSeance,
+} from "@/lib/comite-niveau";
 import {
   RAID_TYPE_COLORS,
   RAID_TYPE_LABELS,
@@ -62,6 +71,9 @@ interface RaidItem {
   date_identification: Date | null;
   date_revision: Date | null;
   date_echeance: Date | null;
+  date_echeance_actualisee?: Date | null;
+  date_fin_reelle?: Date | null;
+  createdAt?: Date | string;
   probabilite: number | null;
   impact: number | null;
   strategie: string;
@@ -85,6 +97,8 @@ interface ComiteRow {
   invitation_envoyee: boolean;
   createdAt: Date;
   updatedAt: Date;
+  chantierId?: string | null;
+  chantier?: { id: string; code: string; nom: string } | null;
   raids: RaidItem[];
 }
 
@@ -138,6 +152,148 @@ const VIEW_CONFIG: { key: ViewFilter; label: string; icon: typeof CalendarDays }
   { key: "all", label: "Tous", icon: ListChecks },
 ];
 
+function formatRaidDate(value: Date | string | null | undefined): string {
+  if (!value) return "—";
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return format(d, "dd/MM/yyyy");
+}
+
+function RaidDetailField({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <span>
+      <span className="font-bold text-muted-foreground/80">{label} :</span>{" "}
+      {value}
+    </span>
+  );
+}
+
+function ComiteRaidRow({
+  raid: r,
+  canActOn,
+  onEditRaid,
+  onDeleteRaid,
+}: {
+  raid: RaidItem;
+  canActOn: boolean;
+  onEditRaid: (raid: RaidItem) => void;
+  onDeleteRaid: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const description = r.description?.trim() || "—";
+  const categorie = r.categorie?.trim() || "—";
+  const domaine = r.domaine?.trim() || "—";
+
+  return (
+    <div className="rounded-md border bg-card text-sm">
+      <div className="flex items-center gap-3 px-3 py-2">
+        <Badge
+          className="text-[10px] shrink-0"
+          style={{
+            backgroundColor: getStatutColor(r.type, r.statut),
+            color: "white",
+          }}
+        >
+          {r.statut}
+        </Badge>
+        <span className="flex-1 min-w-0 truncate font-medium">
+          {r.intitule}
+        </span>
+        {r.responsable && (
+          <span className="text-xs text-muted-foreground shrink-0">
+            {r.responsable}
+          </span>
+        )}
+        {r.chantier && (
+          <Badge variant="outline" className="text-[10px] shrink-0">
+            {r.chantier.code}
+          </Badge>
+        )}
+        <div className="flex gap-1 shrink-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-expanded={open}
+            aria-label={open ? "Masquer les détails" : "Afficher les détails"}
+            title={open ? "Masquer les détails" : "Afficher les détails"}
+            onClick={() => setOpen((v) => !v)}
+          >
+            {open ? (
+              <ChevronDown className="size-3" />
+            ) : (
+              <ChevronRight className="size-3" />
+            )}
+          </Button>
+          {canActOn && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => onEditRaid(r)}
+              >
+                <Pencil className="size-3" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => onDeleteRaid(r.id)}
+              >
+                <Trash2 className="size-3 text-destructive" />
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+      {open && (
+        <div className="space-y-2 border-t border-border/60 px-3 py-2.5 text-xs font-light leading-relaxed text-muted-foreground">
+          <div>
+            <p className="text-[10px] font-bold tracking-wide text-muted-foreground/80">
+              Description :
+            </p>
+            <p className="mt-0.5 whitespace-pre-wrap">{description}</p>
+          </div>
+          <div className="flex flex-wrap gap-x-5 gap-y-1">
+            <RaidDetailField label="Catégorie" value={categorie} />
+            <RaidDetailField label="Domaine" value={domaine} />
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            <RaidDetailField label="Création" value={formatRaidDate(r.createdAt)} />
+            <RaidDetailField
+              label="Identification"
+              value={formatRaidDate(r.date_identification)}
+            />
+            <RaidDetailField
+              label="Révision"
+              value={formatRaidDate(r.date_revision)}
+            />
+            <RaidDetailField
+              label="Échéance initiale"
+              value={formatRaidDate(r.date_echeance)}
+            />
+            <RaidDetailField
+              label="Échéance actualisée"
+              value={formatRaidDate(r.date_echeance_actualisee)}
+            />
+            {r.date_fin_reelle ? (
+              <RaidDetailField
+                label="Fin réelle"
+                value={formatRaidDate(r.date_fin_reelle)}
+              />
+            ) : null}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function filterByView(comites: ComiteRow[], view: ViewFilter): ComiteRow[] {
   if (view === "all") return comites;
 
@@ -164,11 +320,13 @@ function ComiteRaidSection({
   onEditRaid,
   onDeleteRaid,
   onAddRaid,
+  canActOn,
 }: {
   comite: ComiteRow;
   onEditRaid: (r: RaidItem) => void;
   onDeleteRaid: (id: string) => void;
   onAddRaid?: (comiteId: string) => void;
+  canActOn: boolean;
 }) {
   const raids = comite.raids;
   const raidsByType = useMemo(() => {
@@ -190,12 +348,18 @@ function ComiteRaidSection({
             {raids.length} élément{raids.length !== 1 ? "s" : ""}
           </Badge>
         </div>
-        {onAddRaid && (
-          <Button size="xs" onClick={() => onAddRaid(comite.id)}>
-            <Plus className="size-3" />
-            Ajouter RAID
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {onAddRaid && canActOn && (
+            <Button size="xs" onClick={() => onAddRaid(comite.id)}>
+              <Plus className="size-3" />
+              Ajouter RAID
+            </Button>
+          )}
+          <RaidExcelExportOnceButton
+            ids={raids.map((r) => r.id)}
+            slug={`${comite.instance}-${comite.numero}`}
+          />
+        </div>
       </div>
 
       {raids.length === 0 ? (
@@ -220,49 +384,13 @@ function ComiteRaidSection({
                 </div>
                 <div className="space-y-1">
                   {items.map((r) => (
-                    <div
+                    <ComiteRaidRow
                       key={r.id}
-                      className="flex items-center gap-3 rounded-md border bg-card px-3 py-2 text-sm"
-                    >
-                      <Badge
-                        className="text-[10px] shrink-0"
-                        style={{
-                          backgroundColor: getStatutColor(r.type, r.statut),
-                          color: "white",
-                        }}
-                      >
-                        {r.statut}
-                      </Badge>
-                      <span className="flex-1 min-w-0 truncate font-medium">
-                        {r.intitule}
-                      </span>
-                      {r.responsable && (
-                        <span className="text-xs text-muted-foreground shrink-0">
-                          {r.responsable}
-                        </span>
-                      )}
-                      {r.chantier && (
-                        <Badge variant="outline" className="text-[10px] shrink-0">
-                          {r.chantier.code}
-                        </Badge>
-                      )}
-                      <div className="flex gap-1 shrink-0">
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          onClick={() => onEditRaid(r)}
-                        >
-                          <Pencil className="size-3" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          onClick={() => onDeleteRaid(r.id)}
-                        >
-                          <Trash2 className="size-3 text-destructive" />
-                        </Button>
-                      </div>
-                    </div>
+                      raid={r}
+                      canActOn={canActOn}
+                      onEditRaid={onEditRaid}
+                      onDeleteRaid={onDeleteRaid}
+                    />
                   ))}
                 </div>
               </div>
@@ -281,6 +409,7 @@ function InstanceTable({
   onEditRaid,
   onDeleteRaid,
   onAddRaid,
+  canActOn,
 }: {
   comites: ComiteRow[];
   onEdit: (c: ComiteRow) => void;
@@ -288,6 +417,7 @@ function InstanceTable({
   onEditRaid: (r: RaidItem) => void;
   onDeleteRaid: (id: string) => void;
   onAddRaid?: (comiteId: string) => void;
+  canActOn: (c: ComiteRow) => boolean;
 }) {
   const [sortField, setSortField] = useState<SortField | null>("date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -335,8 +465,8 @@ function InstanceTable({
             <TableHead>
               <SortHeader label="Date" field="date" current={sortField} dir={sortDir} onSort={handleSort} />
             </TableHead>
-            <TableHead>Heure Casa</TableHead>
-            <TableHead>Heure Belgique</TableHead>
+            <TableHead>Chantier</TableHead>
+            <TableHead>Heure</TableHead>
             <TableHead>
               <SortHeader label="Statut" field="statut" current={sortField} dir={sortDir} onSort={handleSort} />
             </TableHead>
@@ -369,8 +499,10 @@ function InstanceTable({
                 <TableCell className="text-sm whitespace-nowrap">
                   {format(new Date(c.date), "dd MMM yyyy", { locale: fr })}
                 </TableCell>
+                <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                  {c.chantier?.code ?? "—"}
+                </TableCell>
                 <TableCell className="text-sm">{c.heure_casablanca || "—"}</TableCell>
-                <TableCell className="text-sm">{c.heure_belgique || "—"}</TableCell>
                 <TableCell>
                   <Badge
                     className="text-[10px]"
@@ -398,12 +530,16 @@ function InstanceTable({
                 </TableCell>
                 <TableCell>
                   <div className="flex gap-1">
+                    {canActOn(c) && (
+                      <>
                     <Button variant="ghost" size="icon-xs" onClick={() => onEdit(c)}>
                       <Pencil className="size-3.5" />
                     </Button>
                     <Button variant="ghost" size="icon-xs" onClick={() => onDelete(c.id)}>
                       <Trash2 className="size-3.5 text-destructive" />
                     </Button>
+                      </>
+                    )}
                   </div>
                 </TableCell>
               </TableRow>
@@ -422,6 +558,7 @@ function InstanceTable({
             onEditRaid={onEditRaid}
             onDeleteRaid={onDeleteRaid}
             onAddRaid={onAddRaid}
+            canActOn={canActOn(c)}
           />
         );
       })}
@@ -431,7 +568,11 @@ function InstanceTable({
 
 export function ComitesList({ comites, instances = [] }: Props) {
   const canCreateRaid = useCanCreateRaid();
+  const { chantierScope } = useUser();
+  const canActOn = (c: ComiteRow) =>
+    canActOnComiteSeance(c, { chantierScope, instances });
   const [viewFilter, setViewFilter] = useState<ViewFilter>("week");
+  const [niveauFilter, setNiveauFilter] = useState<string>("__all__");
   const [editComite, setEditComite] = useState<ComiteRow | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -454,8 +595,17 @@ export function ComitesList({ comites, instances = [] }: Props) {
     return counts;
   }, [comites]);
 
+  const byNiveau = useMemo(() => {
+    if (niveauFilter === "__all__") return comites;
+    return comites.filter((c) => {
+      const param = instances.find((p) => p.name === c.instance);
+      const op = isComiteNiveauOperationnel(param?.niveau);
+      return niveauFilter === COMITE_NIVEAU_OPERATIONNEL ? op : !op;
+    });
+  }, [comites, instances, niveauFilter]);
+
   // Filter by view
-  const filtered = useMemo(() => filterByView(comites, viewFilter), [comites, viewFilter]);
+  const filtered = useMemo(() => filterByView(byNiveau, viewFilter), [byNiveau, viewFilter]);
 
   // Group by instance
   const grouped = useMemo(() => {
@@ -488,12 +638,12 @@ export function ComitesList({ comites, instances = [] }: Props) {
       date: new Date(c.date),
       label: `${displayLabelForInstance(c.instance, instances)} #${c.numero}`,
       color: colorForInstance(c.instance, instances),
-      sublabel: c.heure_casablanca ? `${c.heure_casablanca} (Casa) / ${c.heure_belgique} (Belgique)` : undefined,
+      sublabel: [c.chantier?.code, c.heure_casablanca].filter(Boolean).join(" · ") || undefined,
       details: {
         "Instance": displayLabelForInstance(c.instance, instances),
         "Numéro": `#${c.numero}`,
-        "Heure Casablanca": c.heure_casablanca || "",
-        "Heure Belgique": c.heure_belgique || "",
+        "Chantier": c.chantier ? `${c.chantier.code} — ${c.chantier.nom}` : "",
+        "Heure": c.heure_casablanca || "",
         "Statut": STATUT_COMITE_LABELS[c.statut] ?? c.statut,
         "Ordre du jour": c.ordre_du_jour || "",
         "Invitation envoyée": c.invitation_envoyee ? "Oui" : "Non",
@@ -503,6 +653,29 @@ export function ComitesList({ comites, instances = [] }: Props) {
 
   return (
     <>
+      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-1 rounded-lg border bg-muted/50 p-1 w-fit">
+        {(
+          [
+            ["__all__", "Tous"],
+            [COMITE_NIVEAU_GOUVERNANCE, COMITE_NIVEAU_LABELS[COMITE_NIVEAU_GOUVERNANCE]],
+            [COMITE_NIVEAU_OPERATIONNEL, COMITE_NIVEAU_LABELS[COMITE_NIVEAU_OPERATIONNEL]],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setNiveauFilter(key)}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              niveauFilter === key
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       {/* Top-level view tabs */}
       <div className="flex items-center gap-1 rounded-lg border bg-muted/50 p-1 w-fit">
         {VIEW_CONFIG.map(({ key, label, icon: Icon }) => (
@@ -528,6 +701,7 @@ export function ComitesList({ comites, instances = [] }: Props) {
             </span>
           </button>
         ))}
+      </div>
       </div>
 
       {/* Instance sub-tabs */}
@@ -594,6 +768,7 @@ export function ComitesList({ comites, instances = [] }: Props) {
                     onEditRaid={setEditRaid}
                     onDeleteRaid={(id) => { setDeleteError(null); setDeleteRaidId(id); }}
                     onAddRaid={canCreateRaid ? setAddRaidComiteId : undefined}
+                    canActOn={canActOn}
                   />
                 </div>
               </TabsContent>
@@ -637,6 +812,13 @@ export function ComitesList({ comites, instances = [] }: Props) {
           open={!!addRaidComiteId}
           onOpenChange={(open) => !open && setAddRaidComiteId(null)}
           defaultComiteId={addRaidComiteId}
+          defaultChantierId={
+            comites.find((c) => c.id === addRaidComiteId)?.chantierId ??
+            undefined
+          }
+          lockChantier={
+            !!comites.find((c) => c.id === addRaidComiteId)?.chantierId
+          }
         />
       )}
 
@@ -653,9 +835,10 @@ export function ComitesList({ comites, instances = [] }: Props) {
       <DeleteConfirmDialog
         open={!!deleteRaidId}
         onOpenChange={(open) => !open && setDeleteRaidId(null)}
-        onConfirm={async () => {
+        requireMotif
+        onConfirm={async (motif) => {
           try {
-            if (deleteRaidId) await deleteRaid(deleteRaidId);
+            if (deleteRaidId) await deleteRaid(deleteRaidId, { motif });
           } catch (err) {
             setDeleteError(
               err instanceof Error ? err.message : "Erreur de suppression"

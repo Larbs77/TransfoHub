@@ -86,6 +86,17 @@ export function planningRetardDays(
   return days > 0 ? days : null;
 }
 
+/** Couleur d'affichage : rouge si en retard courant, sinon couleur du statut. */
+export function jalonDisplayColor(
+  statut: string,
+  due: Date | string | null | undefined,
+  now: Date = new Date(),
+  opts?: { dateReelle?: Date | string | null }
+): string {
+  if (planningRetardDays(due, statut, now, opts) != null) return "#ef4444";
+  return STATUT_JALON_COLORS[statut] ?? "#94a3b8";
+}
+
 export function isPlanningEnRetard(
   due: Date | string | null | undefined,
   statut: string,

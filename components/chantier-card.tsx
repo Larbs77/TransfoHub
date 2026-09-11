@@ -16,6 +16,12 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
+import {
+  KPI_HOVER_LIFT_CLASS,
+  KpiHoverShine,
+  KpiHoverGlow,
+  kpiHoverCardShellClass,
+} from "@/components/kpi-hover-card";
 import { ChantierFormDialog } from "./chantier-form-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import {
@@ -69,14 +75,20 @@ export function ChantierCard({
   const [favori, setFavori] = useState(isFavori);
 
   const directeurName =
-    chantier.membres?.[0]?.ressource?.nom_complet || chantier.directeur;
+    chantier.membres
+      ?.map((m) => m.ressource?.nom_complet?.trim())
+      .filter((n): n is string => !!n)
+      .join(" · ") || chantier.directeur;
   const actionsCount = chantier.raids.filter((r) => r.type === "Action").length;
   const risksCount = chantier.raids.filter((r) => r.type === "Risque").length;
 
   return (
     <>
-      <Card className="flex flex-col">
-        <CardHeader className="pb-2">
+      <div className={KPI_HOVER_LIFT_CLASS}>
+        <Card className={`flex flex-col ${kpiHoverCardShellClass()}`}>
+          <KpiHoverShine />
+          <KpiHoverGlow />
+          <CardHeader className="relative z-10 pb-2">
           <div className="flex items-start justify-between gap-2">
             <div className="space-y-1 min-w-0">
               <CardDescription className="flex flex-wrap items-center gap-1.5">
@@ -107,7 +119,7 @@ export function ChantierCard({
             </Badge>
           </div>
         </CardHeader>
-        <CardContent className="flex flex-1 flex-col justify-between gap-2">
+        <CardContent className="relative z-10 flex flex-1 flex-col justify-between gap-2">
           <div className="grid grid-cols-4 gap-2 text-center text-sm">
             <div>
               <div className="text-sm font-bold">{actionsCount}</div>
@@ -180,8 +192,9 @@ export function ChantierCard({
           {deleteError && (
             <p className="text-xs text-destructive">{deleteError}</p>
           )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
 
       {editOpen && (
         <ChantierFormDialog

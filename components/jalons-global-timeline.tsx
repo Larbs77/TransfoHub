@@ -43,6 +43,7 @@ import {
   PHASE_COLORS,
   STATUT_JALON_COLORS,
   STATUT_JALON_LIST,
+  jalonDisplayColor,
 } from "@/lib/jalon-labels";
 import { DOMAINE_LABELS } from "@/lib/chantier-labels";
 import { useCanAccessPage } from "@/components/user-provider";
@@ -572,7 +573,12 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
                       {group.jalons.map((j) => {
                         const leftPct = getLeftPct(j.date_cible);
                         if (leftPct < -2 || leftPct > 102) return null;
-                        const color = STATUT_JALON_COLORS[j.statut] ?? "#94a3b8";
+                        const color = jalonDisplayColor(
+                          j.statut,
+                          j.date_cible,
+                          now,
+                          { dateReelle: j.date_reelle }
+                        );
                         return (
                           <div
                             key={j.id}
@@ -637,8 +643,19 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
                   variant="secondary"
                   className="text-[10px]"
                   style={{
-                    backgroundColor: (STATUT_JALON_COLORS[tooltip.jalon.statut] ?? "#94a3b8") + "20",
-                    color: STATUT_JALON_COLORS[tooltip.jalon.statut] ?? "#94a3b8",
+                    backgroundColor:
+                      jalonDisplayColor(
+                        tooltip.jalon.statut,
+                        tooltip.jalon.date_cible,
+                        now,
+                        { dateReelle: tooltip.jalon.date_reelle }
+                      ) + "20",
+                    color: jalonDisplayColor(
+                      tooltip.jalon.statut,
+                      tooltip.jalon.date_cible,
+                      now,
+                      { dateReelle: tooltip.jalon.date_reelle }
+                    ),
                   }}
                 >
                   {tooltip.jalon.statut}

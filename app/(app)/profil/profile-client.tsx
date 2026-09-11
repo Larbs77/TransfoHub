@@ -28,6 +28,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { PasswordRulesHint } from "@/components/password-rules-hint";
 import { UserAvatar } from "@/components/user-avatar";
 import { AvatarCropDialog } from "@/components/avatar-crop-dialog";
 import { useTheme } from "@/components/theme-provider";
@@ -595,6 +596,7 @@ export function ProfileClient({ profile }: { profile: ProfileData }) {
                   setPwdMsg(null);
                 }}
               />
+              <PasswordRulesHint password={newPassword} />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Confirmer</label>

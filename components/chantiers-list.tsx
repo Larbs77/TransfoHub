@@ -525,7 +525,7 @@ export function ChantiersList({ chantiers, favoris = [] }: Props) {
         <ChantierGantt chantiers={filtered} />
       ) : viewMode === "grid" ? (
         <>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 overflow-visible py-2 md:grid-cols-2 xl:grid-cols-3">
             {filtered.length === 0 ? (
               <p className="col-span-full text-center text-muted-foreground py-8">
                 Aucun chantier trouvé

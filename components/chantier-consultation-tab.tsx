@@ -425,6 +425,26 @@ export function ChantierConsultationTab({ questions, chantierId }: Props) {
             {QA_STATUTS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
           </SelectContent>
         </Select>
+        <div className="flex items-center gap-2 ml-auto">
+          <label className="text-xs text-muted-foreground whitespace-nowrap">Afficher</label>
+          <Select
+            value={pageSize === 0 ? "all" : String(pageSize)}
+            onValueChange={(v) => {
+              setPageSize(v === "all" ? 0 : Number(v));
+              setCurrentPage(1);
+            }}
+          >
+            <SelectTrigger className="w-20 h-8" size="sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {[5, 10, 15, 20, 30].map((n) => (
+                <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+              ))}
+              <SelectItem value="all">Tout</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         {qaModes.create !== "INTERDIT" && (
           <Button onClick={handleAdd} size="sm" className="shrink-0">
             <Plus className="mr-1 size-4" />

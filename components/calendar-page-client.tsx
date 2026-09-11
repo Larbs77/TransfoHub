@@ -169,11 +169,11 @@ export function CalendarPageClient({
           date: new Date(c.date),
           label,
           color: colorForInstance(c.instance, instances),
-          sublabel: c.heure_casablanca ? `${c.heure_casablanca} (Casa)` : "Comité",
+          sublabel: c.heure_casablanca || "Comité",
           details: {
             "Instance": displayLabelForInstance(c.instance, instances),
             "Numéro": `#${c.numero}`,
-            "Heure Casablanca": c.heure_casablanca || "",
+            "Heure": c.heure_casablanca || "",
             "Heure Belgique": c.heure_belgique || "",
             "Statut": STATUT_COMITE_LABELS[c.statut] ?? c.statut,
             "Ordre du jour": c.ordre_du_jour || "",

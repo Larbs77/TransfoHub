@@ -116,13 +116,23 @@ function membreDisplayName(m: MembreNameSource): string {
   return m.ressource?.nom_complet?.trim() || m.nom_complet?.trim() || "—";
 }
 
+export function formatDirecteursNames(
+  membres: MembreNameSource[],
+  fallback = ""
+): string {
+  const names = membres
+    .filter((m) => m.is_directeur)
+    .map(membreDisplayName)
+    .filter((n) => n && n !== "—");
+  if (names.length) return names.join(" · ");
+  return fallback || "—";
+}
+
 export function getDirecteur(
   chantier: { directeur: string },
   membres: MembreNameSource[]
 ): string {
-  if (chantier.directeur) return chantier.directeur;
-  const dc = membres.find((m) => m.is_directeur);
-  return dc ? membreDisplayName(dc) : "—";
+  return formatDirecteursNames(membres, chantier.directeur);
 }
 
 export function getSuppleant(

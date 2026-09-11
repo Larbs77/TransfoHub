@@ -42,6 +42,7 @@ async function loadRaidForCollab(id: string) {
       equipeId: true,
       chantierId: true,
       categorie: true,
+      date_echeance: true,
     },
   });
 }
@@ -230,11 +231,13 @@ async function applyRaidStatusChange(
   raid: {
     id: string;
     code?: string;
+    type?: string;
     intitule?: string;
     statut: string;
     responsableRessourceId: string | null;
     responsable: string;
     chantierId: string | null;
+    date_echeance?: Date | null;
   },
   statut: string,
   note: string,
@@ -247,6 +250,17 @@ async function applyRaidStatusChange(
   const oldStatut = raid.statut;
   if (oldStatut === statut) {
     throw new Error("Le statut est déjà à cette valeur.");
+  }
+
+  const { actionRequiresEcheance } = await import("@/lib/raid-labels");
+  if (
+    raid.type === "Action" &&
+    actionRequiresEcheance(statut) &&
+    !raid.date_echeance
+  ) {
+    throw new Error(
+      "Renseignez d'abord une date d'échéance (ouvrir l'action) avant de quitter « A planifier »."
+    );
   }
 
   const actor = await getActorDisplay(session);

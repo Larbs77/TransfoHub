@@ -5,6 +5,12 @@ export const RESSOURCE_TYPE_LABELS: Record<string, string> = {
   Consultant: "Consultant",
 };
 
+export const RESSOURCE_TYPE_HINTS: Record<string, string> = {
+  Interne: "Collaborateur Bank of Africa (salarié interne).",
+  Externe: "Ressource du Groupe / d'une filiale, hors BOA Maroc.",
+  Consultant: "Prestataire ou cabinet (mission externe).",
+};
+
 export const RESSOURCE_TYPE_COLORS: Record<string, string> = {
   Interne: "#2563eb",
   Externe: "#059669",

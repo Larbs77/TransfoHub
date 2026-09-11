@@ -23,6 +23,7 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { KpiHoverCard, type KpiHoverVariant } from "@/components/kpi-hover-card";
 import { scoreCriticite } from "@/lib/utils-pmo";
 
 interface RaidItem {
@@ -71,52 +72,35 @@ interface KpiData {
   chantierCode: string;
 }
 
-interface KpiCardProps {
-  icon: React.ReactNode;
+const EQUIPE_TYPES = ["AMOA", "MOE", "Métiers", "Sécurité", "EI"];
+
+function KpiCard({
+  icon,
+  label,
+  value,
+  subtitle,
+  variant = "neutral",
+}: {
+  icon: React.ComponentType<{ className?: string }>;
   label: string;
   value: string | number;
   subtitle?: string;
-  color: string;
   variant?: "success" | "warning" | "danger" | "neutral";
-}
-
-const EQUIPE_TYPES = ["AMOA", "MOE", "Métiers", "Sécurité", "EI"];
-
-function KpiCard({ icon, label, value, subtitle, color, variant = "neutral" }: KpiCardProps) {
-  const variantBg = {
-    success: "bg-emerald-50 dark:bg-emerald-950/30",
-    warning: "bg-amber-50 dark:bg-amber-950/30",
-    danger: "bg-red-50 dark:bg-red-950/30",
-    neutral: "bg-muted/30",
-  }[variant];
-
-  const variantText = {
-    success: "text-emerald-600 dark:text-emerald-400",
-    warning: "text-amber-600 dark:text-amber-400",
-    danger: "text-red-600 dark:text-red-400",
-    neutral: "",
-  }[variant];
-
+}) {
+  const hoverVariant: KpiHoverVariant =
+    variant === "danger"
+      ? "destructive"
+      : variant === "neutral"
+        ? "default"
+        : variant;
   return (
-    <Card className={`${variantBg} border`}>
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-2">
-          <div className="space-y-1">
-            <p className="text-xs font-medium text-muted-foreground">{label}</p>
-            <p className={`text-2xl font-bold ${variantText}`}>{value}</p>
-            {subtitle && (
-              <p className="text-[11px] text-muted-foreground">{subtitle}</p>
-            )}
-          </div>
-          <div
-            className="rounded-lg p-2 shrink-0"
-            style={{ backgroundColor: color + "18" }}
-          >
-            <div style={{ color }}>{icon}</div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+    <KpiHoverCard
+      icon={icon}
+      label={label}
+      value={value}
+      subtitle={subtitle}
+      variant={hoverVariant}
+    />
   );
 }
 
@@ -219,9 +203,9 @@ export function ChantierKpiTab({ data }: { data: KpiData }) {
         <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wide">
           Planification & Avancement
         </h3>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 overflow-visible py-2 sm:grid-cols-4">
           <KpiCard
-            icon={<TrendingUp className="size-5" />}
+            icon={TrendingUp}
             label="SPI"
             value={spiRounded}
             subtitle={
@@ -231,15 +215,13 @@ export function ChantierKpiTab({ data }: { data: KpiData }) {
                   ? "Léger retard"
                   : "En retard"
             }
-            color="#2563eb"
             variant={spiRounded >= 1 ? "success" : spiRounded >= 0.8 ? "warning" : "danger"}
           />
           <KpiCard
-            icon={<BarChart3 className="size-5" />}
+            icon={BarChart3}
             label="Avancement"
             value={`${data.avancement}%`}
             subtitle={`Temps écoulé: ${Math.round(timeElapsedPct)}%`}
-            color="#8b5cf6"
             variant={
               data.avancement >= timeElapsedPct
                 ? "success"
@@ -249,19 +231,17 @@ export function ChantierKpiTab({ data }: { data: KpiData }) {
             }
           />
           <KpiCard
-            icon={<CalendarClock className="size-5" />}
+            icon={CalendarClock}
             label="Jours Restants"
             value={daysRemaining}
             subtitle={daysRemaining === 0 ? "Échéance atteinte" : `sur ${Math.round(totalDays)}j au total`}
-            color="#0891b2"
             variant={daysRemaining > 30 ? "neutral" : daysRemaining > 7 ? "warning" : "danger"}
           />
           <KpiCard
-            icon={<Users className="size-5" />}
+            icon={Users}
             label="Membres"
             value={data.membres.length}
             subtitle={`${equipesCovered.length}/${EQUIPE_TYPES.length} équipes`}
-            color="#2563eb"
             variant="neutral"
           />
         </div>
@@ -272,37 +252,33 @@ export function ChantierKpiTab({ data }: { data: KpiData }) {
         <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wide">
           Capacités & Coûts
         </h3>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 overflow-visible py-2 sm:grid-cols-4">
           <KpiCard
-            icon={<Coins className="size-5" />}
+            icon={Coins}
             label="Budget"
             value={budgetMAD > 0 ? `${(budgetMAD / 1_000_000).toFixed(1)}M` : "—"}
             subtitle="MAD"
-            color="#f59e0b"
             variant="neutral"
           />
           <KpiCard
-            icon={<Gauge className="size-5" />}
+            icon={Gauge}
             label="Coût Réel"
             value={coutReel > 0 ? `${(coutReel / 1_000_000).toFixed(1)}M` : "—"}
             subtitle="MAD"
-            color="#f97316"
             variant={budgetMAD > 0 && coutReel > budgetMAD ? "danger" : coutReel > budgetMAD * 0.8 ? "warning" : "neutral"}
           />
           <KpiCard
-            icon={<CalendarClock className="size-5" />}
+            icon={CalendarClock}
             label="Jours Planifiés"
             value={joursPlanifies}
             subtitle={`${joursReels} réels`}
-            color="#0891b2"
             variant="neutral"
           />
           <KpiCard
-            icon={<TrendingUp className="size-5" />}
+            icon={TrendingUp}
             label="Taux Consommation"
             value={`${tauxConsommation}%`}
             subtitle={tauxConsommation === 0 ? "Aucune donnée" : tauxConsommation > 100 ? "Dépassement" : "Dans le budget"}
-            color="#7c3aed"
             variant={tauxConsommation === 0 ? "neutral" : tauxConsommation <= 80 ? "success" : tauxConsommation <= 100 ? "warning" : "danger"}
           />
         </div>
@@ -313,25 +289,23 @@ export function ChantierKpiTab({ data }: { data: KpiData }) {
         <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wide">
           Actions
         </h3>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 overflow-visible py-2 sm:grid-cols-4">
           <KpiCard
-            icon={<Zap className="size-5" />}
+            icon={Zap}
             label="Total Actions"
             value={actions.length}
             subtitle={`${activeActions.length} en cours`}
-            color="#f59e0b"
             variant="neutral"
           />
           <KpiCard
-            icon={<CheckCircle2 className="size-5" />}
+            icon={CheckCircle2}
             label="Taux Complétion"
             value={`${actionCompletionRate}%`}
             subtitle={`${closedActions.length}/${actions.length} clôturées`}
-            color="#10b981"
             variant={actionCompletionRate >= 70 ? "success" : actionCompletionRate >= 40 ? "warning" : "neutral"}
           />
           <KpiCard
-            icon={<Clock className="size-5" />}
+            icon={Clock}
             label="Actions en Retard"
             value={overdueActions.length}
             subtitle={
@@ -339,11 +313,10 @@ export function ChantierKpiTab({ data }: { data: KpiData }) {
                 ? "Aucun retard"
                 : `sur ${activeActions.length} actives`
             }
-            color="#ef4444"
             variant={overdueActions.length === 0 ? "success" : overdueActions.length <= 2 ? "warning" : "danger"}
           />
           <KpiCard
-            icon={<Hourglass className="size-5" />}
+            icon={Hourglass}
             label="Décisions en Attente"
             value={pendingDecisions.length}
             subtitle={
@@ -351,7 +324,6 @@ export function ChantierKpiTab({ data }: { data: KpiData }) {
                 ? "Aucune en attente"
                 : "Peut bloquer l'avancement"
             }
-            color="#7c3aed"
             variant={pendingDecisions.length === 0 ? "success" : pendingDecisions.length <= 2 ? "warning" : "danger"}
           />
         </div>
@@ -362,25 +334,23 @@ export function ChantierKpiTab({ data }: { data: KpiData }) {
         <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wide">
           Risques
         </h3>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 overflow-visible py-2 sm:grid-cols-4">
           <KpiCard
-            icon={<ShieldAlert className="size-5" />}
+            icon={ShieldAlert}
             label="Risques Ouverts"
             value={openRisks.length}
             subtitle={`${risks.length} au total`}
-            color="#7c3aed"
             variant="neutral"
           />
           <KpiCard
-            icon={<AlertTriangle className="size-5" />}
+            icon={AlertTriangle}
             label="Risques Critiques"
             value={criticalRisks.length}
             subtitle={criticalRisks.length === 0 ? "Aucun risque critique" : "Score >= 12"}
-            color="#ef4444"
             variant={criticalRisks.length === 0 ? "success" : "danger"}
           />
           <KpiCard
-            icon={<BarChart3 className="size-5" />}
+            icon={BarChart3}
             label="Score Risque Moyen"
             value={avgCriticite}
             subtitle={
@@ -392,15 +362,13 @@ export function ChantierKpiTab({ data }: { data: KpiData }) {
                     ? "Niveau modéré"
                     : "Niveau élevé"
             }
-            color="#f97316"
             variant={avgCriticite === 0 ? "neutral" : avgCriticite < 6 ? "success" : avgCriticite < 12 ? "warning" : "danger"}
           />
           <KpiCard
-            icon={<Shield className="size-5" />}
+            icon={Shield}
             label="Taux Mitigation"
             value={`${mitigationRate}%`}
             subtitle={`${risksWithMitigation.length}/${openRisks.length} mitigés`}
-            color="#10b981"
             variant={mitigationRate >= 70 ? "success" : mitigationRate >= 40 ? "warning" : "danger"}
           />
         </div>
@@ -411,29 +379,26 @@ export function ChantierKpiTab({ data }: { data: KpiData }) {
         <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wide">
           Q&A
         </h3>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-4 overflow-visible py-2 sm:grid-cols-3">
           <KpiCard
-            icon={<HelpCircle className="size-5" />}
+            icon={HelpCircle}
             label="Total Questions"
             value={totalQuestions}
             subtitle={`${questionsOuvertes} ouverte(s)`}
-            color="#0ea5e9"
             variant="neutral"
           />
           <KpiCard
-            icon={<Clock className="size-5" />}
+            icon={Clock}
             label="Ouvertes"
             value={questionsOuvertes}
             subtitle={questionsOuvertes === 0 ? "Tout traité" : "En attente de réponse"}
-            color="#f97316"
             variant={questionsOuvertes === 0 ? "success" : questionsOuvertes <= 3 ? "warning" : "danger"}
           />
           <KpiCard
-            icon={<AlertCircle className="size-5" />}
+            icon={AlertCircle}
             label="Critiques Ouvertes"
             value={questionsCritiques}
             subtitle={questionsCritiques === 0 ? "Aucune critique" : "Priorité haute"}
-            color="#ef4444"
             variant={questionsCritiques === 0 ? "success" : "danger"}
           />
         </div>
@@ -444,37 +409,33 @@ export function ChantierKpiTab({ data }: { data: KpiData }) {
         <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wide">
           Adhérences
         </h3>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 overflow-visible py-2 sm:grid-cols-4">
           <KpiCard
-            icon={<Link2 className="size-5" />}
+            icon={Link2}
             label="Total Adhérences"
             value={totalAdherences}
             subtitle={`${adherencesSource} sortantes, ${adherencesDependant} entrantes`}
-            color="#6366f1"
             variant="neutral"
           />
           <KpiCard
-            icon={<ArrowRight className="size-5" />}
+            icon={ArrowRight}
             label={`Dépendent de ${data.chantierCode}`}
             value={adherencesSource}
             subtitle="Sortantes"
-            color="#f97316"
             variant="neutral"
           />
           <KpiCard
-            icon={<ArrowLeft className="size-5" />}
+            icon={ArrowLeft}
             label={`${data.chantierCode} dépend de`}
             value={adherencesDependant}
             subtitle="Entrantes"
-            color="#3b82f6"
             variant="neutral"
           />
           <KpiCard
-            icon={<AlertTriangle className="size-5" />}
+            icon={AlertTriangle}
             label="Bloquantes"
             value={adherencesBloquantes}
             subtitle={adherencesBloquantes === 0 ? "Aucune bloquante" : "Attention requise"}
-            color="#ef4444"
             variant={adherencesBloquantes === 0 ? "success" : "danger"}
           />
         </div>

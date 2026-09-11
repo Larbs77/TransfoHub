@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils";
 interface Option {
   value: string;
   label: string;
+  /** Optional second line (e.g. a date). Does not affect the closed-field height. */
+  description?: string;
 }
 
 interface MultiSelectProps {
@@ -21,6 +23,8 @@ interface MultiSelectProps {
    * wrapping chips instead of a single truncated line.
    */
   chips?: boolean;
+  /** Single-line labels with ellipsis when they overflow. */
+  truncate?: boolean;
 }
 
 export function MultiSelect({
@@ -30,6 +34,7 @@ export function MultiSelect({
   placeholder = "Sélectionner...",
   className,
   chips = true,
+  truncate = false,
 }: MultiSelectProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -97,9 +102,12 @@ export function MultiSelect({
         className={cn(
           "border-input text-foreground focus-visible:border-ring focus-visible:ring-ring/50",
           "dark:bg-input/30 dark:hover:bg-input/50",
-          "flex w-full items-start justify-between gap-2 rounded-lg border bg-transparent px-3 py-2 text-sm shadow-xs",
-          "transition-[color,box-shadow] outline-none focus-visible:ring-[3px]",
-          "min-h-10 text-left",
+          "flex w-full justify-between gap-2 border bg-transparent px-3 text-sm shadow-xs",
+          "transition-[color,box-shadow] outline-none focus-visible:ring-[3px] text-left",
+          chips
+            ? "min-h-10 items-start rounded-lg py-2"
+            : "h-9 min-h-9 items-center rounded-md py-0",
+          truncate && "items-center",
           selected.length === 0 && "text-muted-foreground"
         )}
       >
@@ -131,16 +139,21 @@ export function MultiSelect({
             <span
               className={cn(
                 "block min-w-0 leading-snug",
-                selected.length <= 1
-                  ? "whitespace-normal break-words"
-                  : "truncate whitespace-nowrap"
+                truncate || selected.length > 1
+                  ? "truncate whitespace-nowrap"
+                  : "whitespace-normal break-words"
               )}
+              title={
+                truncate && selected.length === 1
+                  ? labelFor(selected[0]) ?? undefined
+                  : undefined
+              }
             >
               {compactLabel}
             </span>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-1 pt-0.5">
+        <div className={cn("flex shrink-0 items-center gap-1", chips && "pt-0.5")}>
           {selected.length > 0 && (
             <span
               role="button"
@@ -197,15 +210,18 @@ export function MultiSelect({
                   key={option.value}
                   type="button"
                   onClick={() => toggle(option.value)}
+                  title={truncate ? option.label : undefined}
                   className={cn(
-                    "flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-sm outline-hidden select-none",
+                    "flex w-full gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-hidden select-none",
                     "hover:bg-accent hover:text-accent-foreground",
+                    option.description || !truncate ? "items-start" : "items-center",
                     checked && "bg-primary/5"
                   )}
                 >
                   <span
                     className={cn(
-                      "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-sm border",
+                      "flex size-4 shrink-0 items-center justify-center rounded-sm border",
+                      (option.description || !truncate) && "mt-0.5",
                       checked
                         ? "border-primary bg-primary text-primary-foreground"
                         : "border-input"
@@ -213,8 +229,22 @@ export function MultiSelect({
                   >
                     {checked && <CheckIcon className="size-3" />}
                   </span>
-                  <span className="min-w-0 flex-1 whitespace-normal break-words leading-snug">
-                    {option.label}
+                  <span className="min-w-0 flex-1">
+                    <span
+                      className={cn(
+                        "block leading-snug",
+                        truncate
+                          ? "truncate whitespace-nowrap"
+                          : "whitespace-normal break-words"
+                      )}
+                    >
+                      {option.label}
+                    </span>
+                    {option.description ? (
+                      <span className="mt-0.5 block truncate text-[10px] font-light leading-none text-muted-foreground">
+                        {option.description}
+                      </span>
+                    ) : null}
                   </span>
                 </button>
               );

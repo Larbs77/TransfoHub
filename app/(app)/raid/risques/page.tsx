@@ -1,4 +1,4 @@
-import { getRaidItems, getStatusConfigs, getRaidFieldOptions } from "@/app/(app)/actions";
+import { getRaidItems, getStatusConfigs, getRaidFieldOptions, getChantiersForSelect, getComitesForSelect } from "@/app/(app)/actions";
 import { Card, CardContent } from "@/components/ui/card";
 import { RaidList } from "@/components/raid-list";
 import { AddRaidButton } from "@/components/add-raid-button";
@@ -16,10 +16,12 @@ interface Props {
 
 export default async function RaidRisquesPage({ searchParams }: Props) {
   const params = await searchParams;
-  const [items, statusConfigs, fieldOptions] = await Promise.all([
+  const [items, statusConfigs, fieldOptions, chantiers, comites] = await Promise.all([
     getRaidItems("Risque"),
     getStatusConfigs(),
     getRaidFieldOptions().catch(() => []),
+    getChantiersForSelect().catch(() => []),
+    getComitesForSelect().catch(() => []),
   ]);
   const criticalCount = items.filter(
     (r) => r.probabilite && r.impact && scoreCriticite(r.impact, r.probabilite) >= 12
@@ -55,6 +57,8 @@ export default async function RaidRisquesPage({ searchParams }: Props) {
               initialRaidScope={initialRaidScope}
               statusConfigs={statusConfigs}
               fieldOptions={fieldOptions}
+              chantiers={chantiers}
+              comites={comites}
             />
           </CardContent>
         </Card>
