@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { KpiHoverCard, type KpiHoverVariant } from "@/components/kpi-hover-card";
-import { scoreCriticite } from "@/lib/utils-pmo";
+import { isRisqueAttention, evaluateRaidRisque, criticiteRank } from "@/lib/raid-labels";
 
 interface RaidItem {
   type: string;
@@ -151,17 +151,16 @@ export function ChantierKpiTab({ data }: { data: KpiData }) {
 
   // --- Risks ---
   const openRisks = risks.filter((r) => r.statut !== "Clos");
-  const criticalRisks = risks.filter(
-    (r) => r.probabilite && r.impact && scoreCriticite(r.impact, r.probabilite) >= 12
-  );
-  const avgCriticite = openRisks.length > 0
-    ? Math.round(
-        openRisks
-          .filter((r) => r.probabilite && r.impact)
-          .reduce((sum, r) => sum + scoreCriticite(r.impact!, r.probabilite!), 0) /
-          Math.max(openRisks.filter((r) => r.probabilite && r.impact).length, 1) * 10
-      ) / 10
-    : 0;
+  const criticalRisks = risks.filter((r) => isRisqueAttention(r));
+  const rankedOpen = openRisks
+    .map((r) => criticiteRank(evaluateRaidRisque(r).criticite))
+    .filter((n) => n > 0);
+  const avgCriticite =
+    rankedOpen.length > 0
+      ? Math.round(
+          (rankedOpen.reduce((sum, n) => sum + n, 0) / rankedOpen.length) * 10
+        ) / 10
+      : 0;
   const risksWithMitigation = openRisks.filter((r) => r.mitigation && r.mitigation.trim() !== "");
   const mitigationRate = openRisks.length > 0
     ? Math.round((risksWithMitigation.length / openRisks.length) * 100)
@@ -346,23 +345,23 @@ export function ChantierKpiTab({ data }: { data: KpiData }) {
             icon={AlertTriangle}
             label="Risques Critiques"
             value={criticalRisks.length}
-            subtitle={criticalRisks.length === 0 ? "Aucun risque critique" : "Score >= 12"}
+            subtitle={criticalRisks.length === 0 ? "Aucun risque critique" : "Majeure ou Critique"}
             variant={criticalRisks.length === 0 ? "success" : "danger"}
           />
           <KpiCard
             icon={BarChart3}
-            label="Score Risque Moyen"
+            label="Criticité moyenne"
             value={avgCriticite}
             subtitle={
               avgCriticite === 0
                 ? "Aucun risque évalué"
-                : avgCriticite < 6
-                  ? "Niveau faible"
-                  : avgCriticite < 12
-                    ? "Niveau modéré"
-                    : "Niveau élevé"
+                : avgCriticite < 2
+                  ? "Faible / Modérée"
+                  : avgCriticite < 3
+                    ? "Modérée / Majeure"
+                    : "Majeure / Critique"
             }
-            variant={avgCriticite === 0 ? "neutral" : avgCriticite < 6 ? "success" : avgCriticite < 12 ? "warning" : "danger"}
+            variant={avgCriticite === 0 ? "neutral" : avgCriticite < 2 ? "success" : avgCriticite < 3 ? "warning" : "danger"}
           />
           <KpiCard
             icon={Shield}

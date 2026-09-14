@@ -54,12 +54,13 @@ import {
   RAID_AUDIT_FIELD_LABELS,
   getStatutColor,
   getStatutsForType,
-  getCriticiteLabel,
+  evaluateRaidRisque,
   CRITICITE_COLORS,
+  CRITICITE_FG,
   PROBABILITE_LABELS,
   IMPACT_LABELS,
 } from "@/lib/raid-labels";
-import { scoreCriticite } from "@/lib/utils-pmo";
+
 import { isRaidClosed } from "@/lib/raid-labels";
 import {
   addRaidComment,
@@ -98,6 +99,7 @@ type RaidDetail = {
   domaine: string;
   probabilite: number | null;
   impact: number | null;
+  niveau_maitrise?: string | null;
   strategie: string;
   mitigation: string;
   responsable: string;
@@ -239,11 +241,7 @@ export function RaidDetailClient({
   const unassigned = !raid.responsableRessourceId;
   const statuts = getStatutsForType(raid.type);
 
-  const score =
-    raid.probabilite && raid.impact
-      ? scoreCriticite(raid.impact, raid.probabilite)
-      : null;
-  const critLabel = score ? getCriticiteLabel(score) : null;
+  const { niveauRisque, criticite: critLabel } = evaluateRaidRisque(raid);
 
   const timeline = useMemo(() => {
     return [...raid.auditLogs].sort(
@@ -473,8 +471,46 @@ export function RaidDetailClient({
                 </p>
                 {raid.type === "Risque" && (
                   <div className="grid gap-3 sm:grid-cols-2">
-                    {score != null && critLabel && (
-                      <div className="rounded-lg border bg-muted/20 p-3">
+                    <div className="rounded-lg border bg-muted/20 p-3 text-sm">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Probabilité
+                      </p>
+                      <p className="mt-1 font-medium">
+                        {raid.probabilite
+                          ? PROBABILITE_LABELS[raid.probabilite] ??
+                            raid.probabilite
+                          : "—"}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/20 p-3 text-sm">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Impact
+                      </p>
+                      <p className="mt-1 font-medium">
+                        {raid.impact
+                          ? IMPACT_LABELS[raid.impact] ?? raid.impact
+                          : "—"}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/20 p-3 text-sm">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Niveau de risque
+                      </p>
+                      <p className="mt-1 font-medium">{niveauRisque ?? "—"}</p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                        Calculé automatiquement — non modifiable
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/20 p-3 text-sm">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Niveau de maîtrise
+                      </p>
+                      <p className="mt-1 font-medium">
+                        {raid.niveau_maitrise?.trim() || "—"}
+                      </p>
+                    </div>
+                    {critLabel && (
+                      <div className="rounded-lg border bg-muted/20 p-3 sm:col-span-2">
                         <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                           Criticité
                         </p>
@@ -483,28 +519,13 @@ export function RaidDetailClient({
                           style={{
                             backgroundColor:
                               CRITICITE_COLORS[critLabel] ?? "#6b7280",
-                            color: "white",
+                            color: CRITICITE_FG,
                           }}
                         >
-                          {score}/25 — {critLabel}
+                          {critLabel}
                         </Badge>
                       </div>
                     )}
-                    <div className="rounded-lg border bg-muted/20 p-3 text-sm">
-                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                        Probabilité / Impact
-                      </p>
-                      <p className="mt-1 font-medium">
-                        {raid.probabilite
-                          ? PROBABILITE_LABELS[raid.probabilite] ??
-                            raid.probabilite
-                          : "—"}{" "}
-                        /{" "}
-                        {raid.impact
-                          ? IMPACT_LABELS[raid.impact] ?? raid.impact
-                          : "—"}
-                      </p>
-                    </div>
                     {raid.strategie && (
                       <div className="sm:col-span-2 rounded-lg border bg-muted/20 p-3 text-sm">
                         <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">

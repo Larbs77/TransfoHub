@@ -320,6 +320,7 @@ export async function confirmCsvImport(
         probabilite:
           typeof p.probabilite === "number" ? p.probabilite : null,
         impact: typeof p.impact === "number" ? p.impact : null,
+        niveau_maitrise: String(p.niveau_maitrise ?? ""),
         strategie: String(p.strategie ?? ""),
         mitigation: String(p.mitigation ?? ""),
         responsable: String(p.responsable ?? ""),

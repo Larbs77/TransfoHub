@@ -10,7 +10,7 @@ const globalForPrisma = globalThis as unknown as {
  * Bump whenever the Prisma schema gains fields/models so HMR drops a stale
  * singleton (otherwise findUnique/update rejects unknown fields).
  */
-const PRISMA_MODEL_STAMP = "chantier-lien-espace-documentaire-v1";
+const PRISMA_MODEL_STAMP = "raid-matrice-maitrise-v1";
 
 function clientLooksCurrent(client: PrismaClient): boolean {
   try {
@@ -93,6 +93,10 @@ function clientLooksCurrent(client: PrismaClient): boolean {
         ? fields.some((f) => f.name === "code")
         : "code" in fields;
       if (!hasCode) return false;
+      const hasMaitrise = Array.isArray(fields)
+        ? fields.some((f) => f.name === "niveau_maitrise")
+        : "niveau_maitrise" in fields;
+      if (!hasMaitrise) return false;
     }
 
     return true;

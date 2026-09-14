@@ -110,9 +110,14 @@ export const RAID_CSV_COLUMNS: CsvColumn[] = [
   {
     key: "probabilite",
     header: "probabilite",
-    description: "1–5 (Risque)",
+    description: "1 Faible, 2 Moyenne, 3 Élevée (Risque)",
   },
-  { key: "impact", header: "impact", description: "1–5 (Risque)" },
+  { key: "impact", header: "impact", description: "1 Faible, 2 Moyen, 3 Élevé (Risque)" },
+  {
+    key: "niveau_maitrise",
+    header: "niveau_maitrise",
+    description: "Élevé | Modéré | Faible (Risque)",
+  },
   { key: "strategie", header: "strategie", description: "Stratégie (Risque)" },
   { key: "mitigation", header: "mitigation", description: "Mitigation" },
   { key: "responsable", header: "responsable", description: "Nom responsable" },
@@ -696,10 +701,21 @@ export function validateRaidRow(
     }
   }
 
-  const prob = parseOptionalInt(raw.probabilite ?? "", 1, 5);
+  const prob = parseOptionalInt(raw.probabilite ?? "", 1, 3);
   if (prob.error) errors.push(`probabilite : ${prob.error}`);
-  const impact = parseOptionalInt(raw.impact ?? "", 1, 5);
+  const impact = parseOptionalInt(raw.impact ?? "", 1, 3);
   if (impact.error) errors.push(`impact : ${impact.error}`);
+  const maitriseRaw = String(raw.niveau_maitrise ?? "").trim();
+  const maitriseOk =
+    !maitriseRaw ||
+    maitriseRaw === "Élevé" ||
+    maitriseRaw === "Modéré" ||
+    maitriseRaw === "Faible";
+  if (!maitriseOk) {
+    errors.push(
+      `niveau_maitrise : valeur « ${maitriseRaw} » (Élevé, Modéré ou Faible)`
+    );
+  }
 
   const dId = parseOptionalDate(raw.date_identification ?? "");
   if (dId.error) errors.push(`date_identification : ${dId.error}`);
@@ -740,6 +756,7 @@ export function validateRaidRow(
     domaine,
     probabilite: raw.probabilite ?? "",
     impact: raw.impact ?? "",
+    niveau_maitrise: maitriseRaw,
     strategie,
     mitigation,
     responsable,
@@ -768,6 +785,7 @@ export function validateRaidRow(
       domaine,
       probabilite: prob.value,
       impact: impact.value,
+      niveau_maitrise: maitriseRaw,
       strategie,
       mitigation,
       responsable,

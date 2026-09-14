@@ -42,16 +42,16 @@ import {
   STRATEGIE_LIST,
   PROBABILITE_LABELS,
   IMPACT_LABELS,
+  NIVEAU_MAITRISE_VALUES,
   getStatutsForType,
   getStatutsFromConfig,
-  getCriticiteLabel,
+  evaluateRaidRisque,
   CRITICITE_COLORS,
   getLabelsForKind,
   actionRequiresEcheance,
   type StatusConfigItem,
   type RaidFieldOptionItem,
 } from "@/lib/raid-labels";
-import { scoreCriticite } from "@/lib/utils-pmo";
 import { format } from "date-fns";
 import { INSTANCE_LABELS } from "@/lib/comite-labels";
 
@@ -66,6 +66,7 @@ interface RaidData {
   domaine: string;
   probabilite: number | null;
   impact: number | null;
+  niveau_maitrise?: string | null;
   strategie: string;
   mitigation: string;
   responsable: string;
@@ -129,6 +130,12 @@ export function RaidFormDialog({
   const [domaine, setDomaine] = useState(raid?.domaine ?? "");
   const [probabilite, setProbabilite] = useState<number | "">(raid?.probabilite ?? "");
   const [impact, setImpact] = useState<number | "">(raid?.impact ?? "");
+  const [niveauMaitrise, setNiveauMaitrise] = useState(
+    raid?.niveau_maitrise &&
+      (NIVEAU_MAITRISE_VALUES as readonly string[]).includes(raid.niveau_maitrise)
+      ? raid.niveau_maitrise
+      : ""
+  );
   const [strategie, setStrategie] = useState(raid?.strategie ?? "");
   const [mitigation, setMitigation] = useState(raid?.mitigation ?? "");
   const [responsable, setResponsable] = useState(raid?.responsable ?? "");
@@ -152,8 +159,13 @@ export function RaidFormDialog({
   const [comiteId, setComiteId] = useState(raid?.comiteId ?? defaultComiteId ?? "__none__");
 
   const isRisque = type === "Risque";
-  const score = isRisque && probabilite && impact ? scoreCriticite(Number(impact), Number(probabilite)) : null;
-  const criticiteLabel = score ? getCriticiteLabel(score) : null;
+  const risqueEval = isRisque
+    ? evaluateRaidRisque({
+        probabilite: probabilite ? Number(probabilite) : null,
+        impact: impact ? Number(impact) : null,
+        niveau_maitrise: niveauMaitrise || null,
+      })
+    : { niveauRisque: null, criticite: null };
   const selectedComite = comites.find((c) => c.id === comiteId);
   const chantierLocked =
     lockChantier || !!(selectedComite?.chantierId);
@@ -246,6 +258,7 @@ export function RaidFormDialog({
       domaine,
       probabilite: isRisque && probabilite ? Number(probabilite) : null,
       impact: isRisque && impact ? Number(impact) : null,
+      niveau_maitrise: isRisque ? niveauMaitrise || "" : "",
       strategie: isRisque ? strategie : "",
       mitigation: isRisque ? mitigation : "",
       responsable,
@@ -583,7 +596,7 @@ export function RaidFormDialog({
                   <ShieldAlert className="size-3.5" />
                   Analyse du risque
                 </h3>
-                <div className="grid gap-4 sm:grid-cols-3">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   <div className="grid gap-1.5">
                     <label className="text-sm font-medium">Probabilité</label>
                     <Select
@@ -597,7 +610,7 @@ export function RaidFormDialog({
                         {Object.entries(PROBABILITE_LABELS).map(
                           ([k, label]) => (
                             <SelectItem key={k} value={k}>
-                              {k} - {label}
+                              {label}
                             </SelectItem>
                           )
                         )}
@@ -616,7 +629,49 @@ export function RaidFormDialog({
                       <SelectContent>
                         {Object.entries(IMPACT_LABELS).map(([k, label]) => (
                           <SelectItem key={k} value={k}>
-                            {k} - {label}
+                            {label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <label className="text-sm font-medium">
+                      Niveau de risque
+                    </label>
+                    <div
+                      className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium"
+                      aria-readonly="true"
+                    >
+                      {risqueEval.niveauRisque ? (
+                        <span>{risqueEval.niveauRisque}</span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Calculé automatiquement (probabilité × impact) — non
+                      modifiable
+                    </p>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <label className="text-sm font-medium">
+                      Niveau de maîtrise
+                    </label>
+                    <Select
+                      value={niveauMaitrise || "__none__"}
+                      onValueChange={(v) =>
+                        setNiveauMaitrise(v === "__none__" ? "" : v)
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="—" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">—</SelectItem>
+                        {NIVEAU_MAITRISE_VALUES.map((m) => (
+                          <SelectItem key={m} value={m}>
+                            {m}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -624,24 +679,31 @@ export function RaidFormDialog({
                   </div>
                   <div className="grid gap-1.5">
                     <label className="text-sm font-medium">Criticité</label>
-                    <div className="flex h-9 items-center gap-2 rounded-md border bg-background px-3">
-                      {score ? (
+                    <div className="flex h-9 items-center gap-2 rounded-md border bg-muted/40 px-3">
+                      {risqueEval.criticite ? (
                         <>
                           <span
-                            className="inline-block size-2.5 rounded-full"
+                            className="inline-block size-2.5 rounded-sm"
                             style={{
                               backgroundColor:
-                                CRITICITE_COLORS[criticiteLabel!],
+                                CRITICITE_COLORS[risqueEval.criticite],
                             }}
                           />
                           <span className="text-sm font-medium">
-                            {score}/25 — {criticiteLabel}
+                            {risqueEval.criticite}
                           </span>
                         </>
                       ) : (
-                        <span className="text-sm text-muted-foreground">—</span>
+                        <span className="text-sm text-muted-foreground">
+                          {risqueEval.niveauRisque
+                            ? "Saisir la maîtrise"
+                            : "—"}
+                        </span>
                       )}
                     </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Calculée (niveau de risque × maîtrise) — non modifiable
+                    </p>
                   </div>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">

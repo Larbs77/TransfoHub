@@ -871,8 +871,28 @@ async function main() {
         categorie: r.categorie,
         chantierId,
         domaine: r.domaine,
-        probabilite: r.probabilite ?? null,
-        impact: r.impact ?? null,
+        probabilite:
+          r.probabilite == null
+            ? null
+            : r.probabilite <= 2
+              ? 1
+              : r.probabilite === 3
+                ? 2
+                : 3,
+        impact:
+          r.impact == null
+            ? null
+            : r.impact <= 2
+              ? 1
+              : r.impact === 3
+                ? 2
+                : 3,
+        niveau_maitrise:
+          r.type === "Risque"
+            ? r.statut === "Clos" || r.statut === "Matérialisé"
+              ? "Élevé"
+              : "Modéré"
+            : "",
         strategie: r.strategie ?? "",
         mitigation: r.mitigation ?? "",
         responsable: r.responsable,

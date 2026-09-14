@@ -98,6 +98,40 @@ Always clamp `left`/`right` to `[0,100]` **before** computing width — otherwis
 
 ## RAID
 
+### Matrice de criticité programme (validée, pas encore dans le code) — 2026-09-14
+
+Cadre : `20260907_BOA_Tech_Cadre_Méthodologique_Cartographie_Risques_Programme_vShared` v0.4.
+
+**Genre des libellés (décision métier) :**
+- **Criticité** et **probabilité** → adjectifs **féminins**
+- **Impact**, **niveau de maîtrise**, **niveau de risque** → adjectifs **masculins**
+
+| Axe | Genre | Échelle |
+|-----|--------|---------|
+| Probabilité | féminin | Faible / Moyenne / Élevée |
+| Impact | masculin | Faible / Moyen / Élevé |
+| Niveau de risque | masculin | Faible / Modéré / Élevé |
+| Niveau de maîtrise | masculin | Élevé / Modéré / Faible |
+| Criticité | féminin | Faible / **Modérée** / **Majeure** / Critique |
+
+**Décision métier :** le 4e libellé de criticité du cadre (§3.3 « Significatif ») s’appelle **Majeure**. Ne pas utiliser Significatif / Significative.
+
+Criticité **résiduelle** en deux temps (plus de score 1–25) :
+
+1. **Niveau de risque** = P × I → Faible / Modéré / Élevé
+2. **Niveau de maîtrise** = Élevé / Modéré / Faible
+3. **Criticité** = risque × maîtrise → Faible / Modérée / Majeure / Critique
+
+| Niveau de risque \ Maîtrise | Élevé | Modéré | Faible |
+|-----------------------------|-------|--------|--------|
+| Élevé | **Modérée** | **Majeure** | **Critique** |
+| Modéré | **Modérée** | **Modérée** | **Majeure** |
+| Faible | **Faible** | **Modérée** | **Modérée** |
+
+Escalade : Critique → CTR→CTP + remédiation ; Majeure → Comité de gestion, CTR si aggravation ; Modérée → chantier + info programme ; Faible → chantier seulement.
+
+**Statut :** lu et validé avec le métier ; **code TransfoHub non modifié** à cette date.
+
 ### Collaboration (unchanged principles)
 - List `/raid` → detail `/raid/[id]`.  
 - Comments + audit; status change requires comment.  

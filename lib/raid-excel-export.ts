@@ -5,10 +5,9 @@ import {
   IMPACT_LABELS,
   PROBABILITE_LABELS,
   RAID_TYPE_LABELS,
-  getCriticiteLabel,
+  evaluateRaidRisque,
 } from "@/lib/raid-labels";
 import { INSTANCE_LABELS } from "@/lib/comite-labels";
-import { scoreCriticite } from "@/lib/utils-pmo";
 
 /** RAID row shape needed for Excel (comments excluded). */
 export type RaidExcelSource = {
@@ -23,6 +22,7 @@ export type RaidExcelSource = {
   responsable?: string | null;
   probabilite?: number | null;
   impact?: number | null;
+  niveau_maitrise?: string | null;
   strategie?: string | null;
   mitigation?: string | null;
   date_identification?: Date | string | null;
@@ -51,6 +51,8 @@ const HEADERS = [
   "Date comité",
   "Probabilité",
   "Impact",
+  "Niveau de risque",
+  "Niveau de maîtrise",
   "Criticité",
   "Stratégie",
   "Mitigation",
@@ -63,7 +65,7 @@ const HEADERS = [
   "Mis à jour le",
 ] as const;
 
-const WIDTHS = [12, 14, 42, 40, 22, 22, 16, 14, 32, 24, 22, 14, 18, 16, 14, 28, 28, 16, 14, 16, 16, 16, 16, 16];
+const WIDTHS = [12, 14, 42, 40, 22, 22, 16, 14, 32, 24, 22, 14, 18, 16, 18, 18, 16, 28, 28, 16, 14, 16, 16, 16, 16, 16];
 
 function asDate(value: Date | string | null | undefined): Date | null {
   if (value == null || value === "") return null;
@@ -82,15 +84,14 @@ function comiteLabel(co: RaidExcelSource["comite"]): string {
 }
 
 function toRow(r: RaidExcelSource): (string | number)[] {
-  const score =
-    r.probabilite && r.impact ? scoreCriticite(r.impact, r.probabilite) : null;
+  const { niveauRisque, criticite } = evaluateRaidRisque(r);
   const probLabel =
     r.probabilite != null
-      ? `${r.probabilite}${PROBABILITE_LABELS[r.probabilite] ? ` - ${PROBABILITE_LABELS[r.probabilite]}` : ""}`
+      ? PROBABILITE_LABELS[r.probabilite] ?? String(r.probabilite)
       : "";
   const impactLabel =
     r.impact != null
-      ? `${r.impact}${IMPACT_LABELS[r.impact] ? ` - ${IMPACT_LABELS[r.impact]}` : ""}`
+      ? IMPACT_LABELS[r.impact] ?? String(r.impact)
       : "";
 
   return [
@@ -108,7 +109,9 @@ function toRow(r: RaidExcelSource): (string | number)[] {
     fmtDate(r.comite?.date),
     probLabel,
     impactLabel,
-    score != null ? `${score} - ${getCriticiteLabel(score)}` : "",
+    niveauRisque ?? "",
+    r.niveau_maitrise?.trim() || "",
+    criticite ?? "",
     r.strategie ?? "",
     r.mitigation ?? "",
     fmtDate(r.date_identification),

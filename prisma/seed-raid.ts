@@ -292,8 +292,23 @@ async function main() {
         description: item.description,
         categorie: item.categorie,
         domaine: item.domaine,
-        probabilite: "probabilite" in item ? (item.probabilite as number) : null,
-        impact: "impact" in item ? (item.impact as number) : null,
+        probabilite:
+          "probabilite" in item && typeof item.probabilite === "number"
+            ? item.probabilite <= 2
+              ? 1
+              : item.probabilite === 3
+                ? 2
+                : 3
+            : null,
+        impact:
+          "impact" in item && typeof item.impact === "number"
+            ? item.impact <= 2
+              ? 1
+              : item.impact === 3
+                ? 2
+                : 3
+            : null,
+        niveau_maitrise: item.type === "Risque" ? "Modéré" : "",
         strategie: "strategie" in item ? (item.strategie as string) : "",
         mitigation: "mitigation" in item ? (item.mitigation as string) : "",
         responsable: item.responsable,

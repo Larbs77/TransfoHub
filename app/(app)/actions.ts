@@ -1,7 +1,6 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { scoreCriticite } from "@/lib/utils-pmo";
 import { revalidatePath } from "next/cache";
 import { PHASES } from "@/lib/jalon-labels";
 import {
@@ -59,7 +58,18 @@ import {
   resolveChantierRoleTag,
   chantierRoleTagRank,
 } from "@/lib/consultation-affectation";
-import { isRaidClosed, isRaidOverdue, actionRequiresEcheance } from "@/lib/raid-labels";
+import {
+  isRaidClosed,
+  isRaidOverdue,
+  actionRequiresEcheance,
+  evaluateRaidRisque,
+  incrementRisqueMaitriseMatrix,
+  emptyRisqueMaitriseMatrix,
+  isNiveauMaitrise,
+  isRisqueAttention,
+  isRisqueCritique,
+  criticiteRank,
+} from "@/lib/raid-labels";
 
 // ── Progress Calculation ─────────────────────────────
 
@@ -399,7 +409,7 @@ export async function getDashboardStats() {
   const activeChantiers = chantiers.filter((c) => c.statut !== "Non démarré").length;
 
   const criticalRisksList = risks.filter(
-    (r) => r.probabilite && r.impact && scoreCriticite(r.impact, r.probabilite) >= 12
+    (r) => r.statut !== "Clos" && isRisqueAttention(r)
   );
 
   // Actions échues: échéance actualisée (fallback initiale) dépassée
@@ -453,12 +463,13 @@ export async function getDashboardStats() {
     raidTypeCounts[r.type] = (raidTypeCounts[r.type] ?? 0) + 1;
   }
 
-  // Chart data: risk matrix (5x5 grid)
-  const riskMatrix: number[][] = Array.from({ length: 5 }, () => Array(5).fill(0));
+  // Chart data: risk matrix (niveau de risque × niveau de maîtrise, 3×3)
+  const riskMatrix: number[][] = emptyRisqueMaitriseMatrix();
   for (const r of risks) {
-    if (r.probabilite && r.impact && r.statut !== "Clos") {
-      riskMatrix[r.probabilite - 1][r.impact - 1]++;
-    }
+    if (r.statut === "Clos") continue;
+    const { niveauRisque } = evaluateRaidRisque(r);
+    if (!niveauRisque || !isNiveauMaitrise(r.niveau_maitrise)) continue;
+    incrementRisqueMaitriseMatrix(riskMatrix, niveauRisque, r.niveau_maitrise);
   }
 
   // Chart data: overdue actions by domaine
@@ -532,15 +543,16 @@ export async function getDashboardStats() {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([month, data]) => ({ month, ...data }));
 
-  // Risk evolution: average score by month
+  // Risk evolution: average residual criticité rank by month
   const riskEvoMap = new Map<string, { total: number; count: number }>();
   for (const r of risks) {
-    if (r.probabilite && r.impact) {
+    const { criticite } = evaluateRaidRisque(r);
+    if (criticite) {
       const created = new Date(r.createdAt);
       if (created >= twelveMonthsAgo) {
         const key = `${created.getFullYear()}-${String(created.getMonth() + 1).padStart(2, "0")}`;
         const entry = riskEvoMap.get(key) ?? { total: 0, count: 0 };
-        entry.total += scoreCriticite(r.impact, r.probabilite);
+        entry.total += criticiteRank(criticite);
         entry.count++;
         riskEvoMap.set(key, entry);
       }
@@ -728,7 +740,7 @@ export async function getDashboardPMO() {
     isRaidOverdue(a.statut, a.date_echeance_actualisee, a.date_echeance, now)
   );
   const criticalRisksList = risks.filter(
-    (r) => r.probabilite && r.impact && scoreCriticite(r.impact, r.probabilite) >= 12
+    (r) => r.statut !== "Clos" && isRisqueAttention(r)
   );
   const closedActions = actions.filter((a) => a.statut === "Clôturé").length;
   const actionCloseRate = actions.length > 0 ? Math.round((closedActions / actions.length) * 100) : 0;
@@ -746,12 +758,13 @@ export async function getDashboardPMO() {
     raidTypeCounts[r.type] = (raidTypeCounts[r.type] ?? 0) + 1;
   }
 
-  // ── Chart: Matrice des Risques (5x5) ──
-  const riskMatrix: number[][] = Array.from({ length: 5 }, () => Array(5).fill(0));
+  // ── Chart: Matrice des Risques (niveau de risque × maîtrise, 3×3) ──
+  const riskMatrix: number[][] = emptyRisqueMaitriseMatrix();
   for (const r of risks) {
-    if (r.probabilite && r.impact && r.statut !== "Clos") {
-      riskMatrix[r.probabilite - 1][r.impact - 1]++;
-    }
+    if (r.statut === "Clos") continue;
+    const { niveauRisque } = evaluateRaidRisque(r);
+    if (!niveauRisque || !isNiveauMaitrise(r.niveau_maitrise)) continue;
+    incrementRisqueMaitriseMatrix(riskMatrix, niveauRisque, r.niveau_maitrise);
   }
 
   // ── Chart: Actions échues par domaine ──
@@ -790,12 +803,13 @@ export async function getDashboardPMO() {
   // ── Chart: Évolution des Risques (12 months) ──
   const riskEvoMap = new Map<string, { total: number; count: number }>();
   for (const r of risks) {
-    if (r.probabilite && r.impact) {
+    const { criticite } = evaluateRaidRisque(r);
+    if (criticite) {
       const created = new Date(r.createdAt);
       if (created >= twelveMonthsAgo) {
         const key = `${created.getFullYear()}-${String(created.getMonth() + 1).padStart(2, "0")}`;
         const entry = riskEvoMap.get(key) ?? { total: 0, count: 0 };
-        entry.total += scoreCriticite(r.impact, r.probabilite);
+        entry.total += criticiteRank(criticite);
         entry.count++;
         riskEvoMap.set(key, entry);
       }
@@ -914,6 +928,7 @@ export type PersonalRaidRow = {
   chantier: { id: string; code: string; nom: string } | null;
   impact: number | null;
   probabilite: number | null;
+  niveau_maitrise: string;
   responsableRessourceId: string | null;
   equipeId?: string | null;
   comiteId: string | null;
@@ -1116,6 +1131,7 @@ export async function getPersonalDashboard() {
       : null,
     impact: r.impact,
     probabilite: r.probabilite,
+    niveau_maitrise: r.niveau_maitrise,
     responsableRessourceId: r.responsableRessourceId,
     equipeId: r.equipeId,
     comiteId: r.comiteId,
@@ -1175,12 +1191,7 @@ export async function getPersonalDashboard() {
   );
   const myRisks = myRaids.filter((r) => r.type === "Risque");
   const myRisksOpen = myRisks.filter((r) => r.statut !== "Clos");
-  const myRisksCritical = myRisksOpen.filter(
-    (r) =>
-      r.probabilite &&
-      r.impact &&
-      scoreCriticite(r.impact, r.probabilite) >= 12
-  );
+  const myRisksCritical = myRisksOpen.filter((r) => isRisqueAttention(r));
   const myDecisionsPending = myRaids.filter(
     (r) => r.type === "Décision" && r.statut === "En attente"
   ).length;
@@ -1640,6 +1651,7 @@ export async function createRaid(data: {
   domaine: string;
   probabilite: number | null;
   impact: number | null;
+  niveau_maitrise?: string | null;
   strategie: string;
   mitigation: string;
   responsable: string;
@@ -1706,6 +1718,7 @@ export async function createRaid(data: {
       domaine: data.domaine,
       probabilite: data.probabilite,
       impact: data.impact,
+      niveau_maitrise: data.niveau_maitrise?.trim() || "",
       strategie: data.strategie,
       mitigation: data.mitigation,
       responsable: data.responsable,
@@ -1785,6 +1798,7 @@ export async function updateRaid(
     domaine: string;
     probabilite: number | null;
     impact: number | null;
+    niveau_maitrise?: string | null;
     strategie: string;
     mitigation: string;
     responsable: string;
@@ -1814,6 +1828,7 @@ export async function updateRaid(
       domaine: true,
       probabilite: true,
       impact: true,
+      niveau_maitrise: true,
       strategie: true,
       mitigation: true,
       responsable: true,
@@ -1927,6 +1942,7 @@ export async function updateRaid(
       domaine: data.domaine,
       probabilite: data.probabilite,
       impact: data.impact,
+      niveau_maitrise: data.niveau_maitrise?.trim() || "",
       strategie: data.strategie,
       mitigation: data.mitigation,
       responsable: data.responsable,
@@ -1987,6 +2003,11 @@ export async function updateRaid(
         field: "impact",
         oldValue: formatScoreAuditLabel(existing.impact, "impact"),
         newValue: formatScoreAuditLabel(data.impact, "impact"),
+      },
+      {
+        field: "niveau_maitrise",
+        oldValue: existing.niveau_maitrise,
+        newValue: data.niveau_maitrise?.trim() || "",
       },
       {
         field: "strategie",
@@ -6203,12 +6224,8 @@ export async function getDashboardCTP(month: number, year: number) {
 
   // Risks
   const openRisks = raids.filter((r) => r.type === "Risque" && r.statut !== "Clos");
-  const majorRisks = openRisks.filter(
-    (r) => r.probabilite && r.impact && scoreCriticite(r.impact, r.probabilite) >= 12
-  );
-  const blockerRisks = openRisks.filter(
-    (r) => r.probabilite && r.impact && scoreCriticite(r.impact, r.probabilite) >= 20
-  );
+  const majorRisks = openRisks.filter((r) => isRisqueAttention(r));
+  const blockerRisks = openRisks.filter((r) => isRisqueCritique(r));
 
   // SPI calculation: ratio of jalons completed on time vs total due by period end
   const jalonsDueByPeriod = jalons.filter((j) => new Date(j.date_cible) <= periodEnd);
@@ -6244,7 +6261,11 @@ export async function getDashboardCTP(month: number, year: number) {
 
   // Top risks for table
   const topRisks = majorRisks
-    .sort((a, b) => (scoreCriticite(b.impact!, b.probabilite!) - scoreCriticite(a.impact!, a.probabilite!)))
+    .sort(
+      (a, b) =>
+        criticiteRank(evaluateRaidRisque(b).criticite) -
+        criticiteRank(evaluateRaidRisque(a).criticite)
+    )
     .slice(0, 5)
     .map((r) => ({
       chantier: r.chantier ? `${r.chantier.code} - ${r.chantier.nom}` : "N/A",
@@ -6323,12 +6344,8 @@ export async function getDashboardCTR(startDate: string, endDate: string) {
 
   // Risks
   const openRisks = raids.filter((r) => r.type === "Risque" && r.statut !== "Clos");
-  const majorRisks = openRisks.filter(
-    (r) => r.probabilite && r.impact && scoreCriticite(r.impact, r.probabilite) >= 12
-  );
-  const blockerRisks = openRisks.filter(
-    (r) => r.probabilite && r.impact && scoreCriticite(r.impact, r.probabilite) >= 20
-  );
+  const majorRisks = openRisks.filter((r) => isRisqueAttention(r));
+  const blockerRisks = openRisks.filter((r) => isRisqueCritique(r));
 
   // SPI
   const jalonsDueByPeriod = jalons.filter((j) => new Date(j.date_cible) <= periodEnd);
@@ -6399,7 +6416,11 @@ export async function getDashboardCTR(startDate: string, endDate: string) {
 
   // Top risks
   const topRisks = majorRisks
-    .sort((a, b) => (scoreCriticite(b.impact!, b.probabilite!) - scoreCriticite(a.impact!, a.probabilite!)))
+    .sort(
+      (a, b) =>
+        criticiteRank(evaluateRaidRisque(b).criticite) -
+        criticiteRank(evaluateRaidRisque(a).criticite)
+    )
     .slice(0, 5)
     .map((r) => ({
       chantier: r.chantier ? `${r.chantier.code} - ${r.chantier.nom}` : "N/A",

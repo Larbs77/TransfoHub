@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Groq from "groq-sdk";
 import { prisma } from "@/lib/prisma";
-import { scoreCriticite } from "@/lib/utils-pmo";
+import { evaluateRaidRisque, isRisqueAttention } from "@/lib/raid-labels";
 
 function getGroqClient() {
   const apiKey = process.env.GROQ_API_KEY;
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
     // Build compact context to stay within Groq TPM limits
     const activeChantiers = chantiers.filter((c) => c.statut !== "Clôturé");
     const openRisks = risks.filter((r) => r.statut !== "Clos");
-    const criticalRisks = openRisks.filter((r) => r.impact && r.probabilite && scoreCriticite(r.impact, r.probabilite) >= 12);
+    const criticalRisks = openRisks.filter((r) => isRisqueAttention(r));
     const pendingDecisions = decisions.filter((d) => d.statut === "En attente");
     const upcomingComites = comites.filter((c) => c.date >= now);
     const favorisSet = new Set(favoris.map((f) => f.chantierId));
@@ -94,7 +94,7 @@ ${activeActions.length > 20 ? `... et ${activeActions.length - 20} autres` : ""}
 
 ### Risques ouverts (${openRisks.length})
 ${openRisks.slice(0, 15)
-  .map((r) => `- [${r.statut}] ${r.intitule} | Score: ${r.impact && r.probabilite ? scoreCriticite(r.impact, r.probabilite) : "—"}/25 | Resp: ${r.responsable} | ${r.chantier?.code || "—"}`)
+  .map((r) => `- [${r.statut}] ${r.intitule} | Criticité: ${evaluateRaidRisque(r).criticite ?? "—"} | Resp: ${r.responsable} | ${r.chantier?.code || "—"}`)
   .join("\n")}
 ${openRisks.length > 15 ? `... et ${openRisks.length - 15} autres` : ""}
 

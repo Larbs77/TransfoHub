@@ -15,7 +15,8 @@ import {
   getPhaseStats,
   type Meteo,
 } from "@/lib/rapport-utils";
-import { scoreCriticite, formatMAD, formatMADCompact } from "@/lib/utils-pmo";
+import { formatMAD, formatMADCompact } from "@/lib/utils-pmo";
+import { criticiteRank, evaluateRaidRisque } from "@/lib/raid-labels";
 import {
   ADHERENCE_CRITICITE_COLORS,
   ADHERENCE_STATUT_COLORS,
@@ -307,8 +308,8 @@ export function ChantierRapport({ chantier, burnRate, showPrintButton = true }: 
   const openRisks = chantier.raids
     .filter((r) => r.type === "Risque" && !["Clos", "Matérialisé"].includes(r.statut))
     .sort((a, b) => {
-      const scoreA = a.impact && a.probabilite ? scoreCriticite(a.impact, a.probabilite) : 0;
-      const scoreB = b.impact && b.probabilite ? scoreCriticite(b.impact, b.probabilite) : 0;
+      const scoreA = criticiteRank(evaluateRaidRisque(a).criticite);
+      const scoreB = criticiteRank(evaluateRaidRisque(b).criticite);
       return scoreB - scoreA;
     })
     .slice(0, 5);

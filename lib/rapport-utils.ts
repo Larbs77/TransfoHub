@@ -1,5 +1,5 @@
 import { differenceInDays, isWithinInterval } from "date-fns";
-import { scoreCriticite } from "./utils-pmo";
+import { isRisqueAttention } from "./raid-labels";
 
 export type Meteo = "vert" | "orange" | "rouge";
 
@@ -10,7 +10,13 @@ export const PHASES_ORDER = ["Précadrage", "Cadrage", "Exécution", "Clôture"]
 export function computeMeteo(
   chantier: { avancement: number; date_debut: Date; date_fin: Date },
   jalons: { statut: string; date_cible: Date }[],
-  raids: { type: string; statut: string; probabilite: number | null; impact: number | null }[]
+  raids: {
+    type: string;
+    statut: string;
+    probabilite: number | null;
+    impact: number | null;
+    niveau_maitrise?: string | null;
+  }[]
 ): Meteo {
   const now = new Date();
 
@@ -22,9 +28,7 @@ export function computeMeteo(
     (r) =>
       r.type === "Risque" &&
       !["Clos", "Matérialisé"].includes(r.statut) &&
-      r.probabilite != null &&
-      r.impact != null &&
-      scoreCriticite(r.impact!, r.probabilite!) >= 15
+      isRisqueAttention(r)
   ).length;
 
   const debut = new Date(chantier.date_debut);

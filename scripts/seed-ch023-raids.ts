@@ -372,8 +372,23 @@ async function main() {
         categorie: seed.categorie,
         domaine: seed.domaine,
         chantierId: chantier.id,
-        probabilite: seed.probabilite ?? null,
-        impact: seed.impact ?? null,
+        probabilite:
+          seed.probabilite == null
+            ? null
+            : seed.probabilite <= 2
+              ? 1
+              : seed.probabilite === 3
+                ? 2
+                : 3,
+        impact:
+          seed.impact == null
+            ? null
+            : seed.impact <= 2
+              ? 1
+              : seed.impact === 3
+                ? 2
+                : 3,
+        niveau_maitrise: seed.type === "Risque" ? "Modéré" : "",
         strategie: seed.strategie ?? "",
         mitigation: seed.mitigation ?? "",
         responsable: acteur.nom,

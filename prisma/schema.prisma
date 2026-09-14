@@ -292,8 +292,12 @@ model Raid {
   categorie              String     @default("")
   chantierId             String?
   domaine                String     @default("")
+  /// 1 Faible, 2 Moyenne, 3 Élevée (Risque).
   probabilite            Int?
+  /// 1 Faible, 2 Moyen, 3 Élevé (Risque).
   impact                 Int?
+  /// Élevé | Modéré | Faible — vide tant que non renseigné (hors matrice).
+  niveau_maitrise        String     @default("")
   strategie              String     @default("")
   mitigation             String     @default("")
   responsable            String     @default("")

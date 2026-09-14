@@ -72,8 +72,8 @@ import {
   IMPACT_LABELS,
   type StatusConfigItem,
   type RaidFieldOptionItem,
+  isRisqueAttention,
 } from "@/lib/raid-labels";
-import { scoreCriticite } from "@/lib/utils-pmo";
 
 const RAID_TYPE_ORDER = ["Action", "Risque", "Information", "Décision"] as const;
 
@@ -368,7 +368,7 @@ function PersonalRaidTypeTable({
         (r) =>
           r.probabilite &&
           r.impact &&
-          scoreCriticite(r.impact, r.probabilite) >= 12
+          isRisqueAttention(r)
       );
     }
     return result;
@@ -534,7 +534,7 @@ function PersonalRaidTypeTable({
             <MultiSelect
               options={Object.entries(PROBABILITE_LABELS).map(([k, label]) => ({
                 value: k,
-                label: `${k} - ${label}`,
+                label,
               }))}
               selected={filterProb}
               onChange={setFilterProb}
@@ -545,7 +545,7 @@ function PersonalRaidTypeTable({
             <MultiSelect
               options={Object.entries(IMPACT_LABELS).map(([k, label]) => ({
                 value: k,
-                label: `${k} - ${label}`,
+                label,
               }))}
               selected={filterImpact}
               onChange={setFilterImpact}

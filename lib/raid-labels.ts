@@ -401,22 +401,129 @@ export const STRATEGIE_LIST = [
   "Accepter",
 ] as const;
 
-// ── Probabilité / Impact ─────────────────────────────
+// ── Probabilité / Impact (échelle programme 1–3) ─────
+/** Probabilité : adjectifs féminins. 1 Faible, 2 Moyenne, 3 Élevée. */
 export const PROBABILITE_LABELS: Record<number, string> = {
-  1: "Rare",
-  2: "Peu probable",
-  3: "Possible",
-  4: "Probable",
-  5: "Quasi-certain",
+  1: "Faible",
+  2: "Moyenne",
+  3: "Élevée",
 };
 
+/** Impact : adjectifs masculins. 1 Faible, 2 Moyen, 3 Élevé. */
 export const IMPACT_LABELS: Record<number, string> = {
-  1: "Négligeable",
-  2: "Mineur",
-  3: "Modéré",
-  4: "Majeur",
-  5: "Critique",
+  1: "Faible",
+  2: "Moyen",
+  3: "Élevé",
 };
+
+export const PROBABILITE_SCALE = [1, 2, 3] as const;
+export const IMPACT_SCALE = [1, 2, 3] as const;
+
+export const NIVEAU_RISQUE_VALUES = ["Faible", "Modéré", "Élevé"] as const;
+export type NiveauRisque = (typeof NIVEAU_RISQUE_VALUES)[number];
+
+/** Axe Y de la matrice dashboard (bas → haut). */
+export const NIVEAU_RISQUE_ORDER = ["Faible", "Modéré", "Élevé"] as const;
+
+export const NIVEAU_MAITRISE_VALUES = ["Élevé", "Modéré", "Faible"] as const;
+export type NiveauMaitrise = (typeof NIVEAU_MAITRISE_VALUES)[number];
+
+/** Axe X de la matrice dashboard (gauche → droite), comme le cadre programme. */
+export const NIVEAU_MAITRISE_ORDER = ["Élevé", "Modéré", "Faible"] as const;
+
+export const CRITICITE_VALUES = [
+  "Faible",
+  "Modérée",
+  "Majeure",
+  "Critique",
+] as const;
+export type CriticiteLabel = (typeof CRITICITE_VALUES)[number];
+
+/**
+ * Niveau de risque = Probabilité × Impact (avant traitement).
+ * Index [probabilite 1–3][impact 1–3].
+ */
+const NIVEAU_RISQUE_MATRIX: NiveauRisque[][] = [
+  ["Faible", "Faible", "Modéré"],
+  ["Faible", "Modéré", "Élevé"],
+  ["Modéré", "Élevé", "Élevé"],
+];
+
+export function isNiveauMaitrise(value: string | null | undefined): value is NiveauMaitrise {
+  return (
+    value === "Élevé" || value === "Modéré" || value === "Faible"
+  );
+}
+
+export function getNiveauRisque(
+  probabilite: number | null | undefined,
+  impact: number | null | undefined
+): NiveauRisque | null {
+  if (
+    probabilite == null ||
+    impact == null ||
+    probabilite < 1 ||
+    probabilite > 3 ||
+    impact < 1 ||
+    impact > 3
+  ) {
+    return null;
+  }
+  return NIVEAU_RISQUE_MATRIX[probabilite - 1][impact - 1];
+}
+
+const CRITICITE_MATRIX: Record<
+  NiveauRisque,
+  Record<NiveauMaitrise, CriticiteLabel>
+> = {
+  Élevé: { Élevé: "Modérée", Modéré: "Majeure", Faible: "Critique" },
+  Modéré: { Élevé: "Modérée", Modéré: "Modérée", Faible: "Majeure" },
+  Faible: { Élevé: "Faible", Modéré: "Modérée", Faible: "Modérée" },
+};
+
+export function getCriticiteResiduelle(
+  niveauRisque: NiveauRisque | null | undefined,
+  maitrise: string | null | undefined
+): CriticiteLabel | null {
+  if (!niveauRisque || !isNiveauMaitrise(maitrise)) return null;
+  return CRITICITE_MATRIX[niveauRisque][maitrise];
+}
+
+export function evaluateRaidRisque(r: {
+  probabilite?: number | null;
+  impact?: number | null;
+  niveau_maitrise?: string | null;
+}): { niveauRisque: NiveauRisque | null; criticite: CriticiteLabel | null } {
+  const niveauRisque = getNiveauRisque(r.probabilite, r.impact);
+  return {
+    niveauRisque,
+    criticite: getCriticiteResiduelle(niveauRisque, r.niveau_maitrise),
+  };
+}
+
+/** Majeure ou Critique — suivi programme / KPI « Risques critiques ». */
+export function isRisqueAttention(r: {
+  probabilite?: number | null;
+  impact?: number | null;
+  niveau_maitrise?: string | null;
+}): boolean {
+  const c = evaluateRaidRisque(r).criticite;
+  return c === "Majeure" || c === "Critique";
+}
+
+export function isRisqueCritique(r: {
+  probabilite?: number | null;
+  impact?: number | null;
+  niveau_maitrise?: string | null;
+}): boolean {
+  return evaluateRaidRisque(r).criticite === "Critique";
+}
+
+export function criticiteRank(label: CriticiteLabel | null | undefined): number {
+  if (!label) return 0;
+  const i = CRITICITE_VALUES.indexOf(label);
+  return i + 1;
+}
 
 /** Libellés français des champs RAID pour le journal d'audit. */
 export const RAID_AUDIT_FIELD_LABELS: Record<string, string> = {
@@ -442,31 +549,60 @@ export const RAID_AUDIT_FIELD_LABELS: Record<string, string> = {
   commentaires: "Commentaires",
   comiteId: "Comité",
   comment: "Commentaire",
+  niveau_maitrise: "Niveau de maîtrise",
 };
 
-// ── Criticité (score = probabilité × impact) ─────────
+// ── Criticité résiduelle (risque × maîtrise) — couleurs du cadre programme ─
 export const CRITICITE_LABELS: Record<string, string> = {
-  Négligeable: "Négligeable",
-  Mineur: "Mineur",
-  Modéré: "Modéré",
-  Majeur: "Majeur",
+  Faible: "Faible",
+  Modérée: "Modérée",
+  Majeure: "Majeure",
   Critique: "Critique",
 };
 
 export const CRITICITE_COLORS: Record<string, string> = {
-  Négligeable: "#22c55e",
-  Mineur: "#84cc16",
-  Modéré: "#f59e0b",
-  Majeur: "#f97316",
-  Critique: "#dc2626",
+  Faible: "#B3E5FC",
+  Modérée: "#FFE0B2",
+  Majeure: "#F8BBD0",
+  Critique: "#EF9A9A",
 };
 
-export function getCriticiteLabel(score: number): string {
-  if (score <= 3) return "Négligeable";
-  if (score <= 6) return "Mineur";
-  if (score <= 10) return "Modéré";
-  if (score <= 15) return "Majeur";
-  return "Critique";
+/** Texte sur pastels du cadre (pas de blanc). */
+export const CRITICITE_FG = "#1e293b";
+
+export function getCriticiteLabel(
+  probabilite: number | null | undefined,
+  impact: number | null | undefined,
+  maitrise?: string | null
+): CriticiteLabel | null {
+  return evaluateRaidRisque({
+    probabilite,
+    impact,
+    niveau_maitrise: maitrise,
+  }).criticite;
+}
+
+export function emptyRisqueMaitriseMatrix(): number[][] {
+  return Array.from({ length: 3 }, () => Array(3).fill(0));
+}
+
+export function incrementRisqueMaitriseMatrix(
+  matrix: number[][],
+  niveauRisque: NiveauRisque,
+  maitrise: NiveauMaitrise
+) {
+  const ri = NIVEAU_RISQUE_ORDER.indexOf(niveauRisque);
+  const ci = NIVEAU_MAITRISE_ORDER.indexOf(maitrise);
+  if (ri >= 0 && ci >= 0) matrix[ri][ci]++;
+}
+
+export function cellCriticite(
+  risqueIndex: number,
+  maitriseIndex: number
+): CriticiteLabel {
+  const risque = NIVEAU_RISQUE_ORDER[risqueIndex];
+  const maitrise = NIVEAU_MAITRISE_ORDER[maitriseIndex];
+  return CRITICITE_MATRIX[risque][maitrise];
 }
 
 // ── Dynamic Status Helpers (from DB StatusConfig) ────

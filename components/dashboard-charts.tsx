@@ -35,6 +35,10 @@ import {
   STATUT_ACTION_COLORS,
   RAID_TYPE_COLORS,
   CRITICITE_COLORS,
+  CRITICITE_FG,
+  NIVEAU_RISQUE_ORDER,
+  NIVEAU_MAITRISE_ORDER,
+  cellCriticite,
 } from "@/lib/raid-labels";
 
 // ── 1. Statuts Actions (Donut) ──────────────────────
@@ -276,68 +280,83 @@ export function RaidTypePieChart({ raidTypeCounts }: RaidTypeChartProps) {
   );
 }
 
-// ── 5. Matrice des Risques (Heatmap 5×5) ────────────
+// ── 5. Matrice des Risques (niveau de risque × maîtrise) ─
 
 interface RiskMatrixProps {
   riskMatrix: number[][];
 }
 
-const PROB_LABELS = ["Rare", "Peu probable", "Possible", "Probable", "Quasi-certain"];
-const IMPACT_SHORT = ["Négl.", "Mineur", "Modéré", "Majeur", "Critique"];
-
-function getHeatColor(prob: number, impact: number): string {
-  const score = (prob + 1) * (impact + 1);
-  if (score <= 3) return "#22c55e";
-  if (score <= 6) return "#84cc16";
-  if (score <= 10) return "#f59e0b";
-  if (score <= 15) return "#f97316";
-  return "#dc2626";
-}
-
 export function RiskMatrixChart({ riskMatrix }: RiskMatrixProps) {
   const router = useRouter();
+  const rows = [...NIVEAU_RISQUE_ORDER].reverse();
 
   return (
     <div className="overflow-x-auto">
+      <p className="mb-2 text-[11px] text-muted-foreground">
+        Niveau de risque \ Niveau de maîtrise
+      </p>
       <table className="w-full text-xs border-collapse">
         <thead>
           <tr>
-            <th className="p-2 text-left text-muted-foreground">Prob. \ Impact</th>
-            {IMPACT_SHORT.map((l) => (
+            <th className="p-2 text-left text-muted-foreground font-medium">Risque \ Maîtrise</th>
+            {NIVEAU_MAITRISE_ORDER.map((l) => (
               <th key={l} className="p-2 text-center font-medium">{l}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {[...riskMatrix].reverse().map((row, ri) => {
-            const probIdx = 4 - ri;
+          {rows.map((risqueLabel) => {
+            const ri = NIVEAU_RISQUE_ORDER.indexOf(risqueLabel);
+            const row = riskMatrix[ri] ?? [0, 0, 0];
             return (
-              <tr key={probIdx}>
-                <td className="p-2 text-muted-foreground whitespace-nowrap">{PROB_LABELS[probIdx]}</td>
-                {row.map((count, ci) => (
-                  <td key={ci} className="p-1 text-center">
-                    <div
-                      className={`mx-auto flex size-10 items-center justify-center rounded-md text-sm font-bold text-white ${count > 0 ? "cursor-pointer ring-offset-background transition-shadow hover:ring-2 hover:ring-ring hover:ring-offset-1" : ""}`}
-                      style={{
-                        backgroundColor: getHeatColor(probIdx, ci),
-                        opacity: count > 0 ? 1 : 0.25,
-                      }}
-                      onClick={() => {
-                        if (count > 0) {
-                          router.push(`/raid/risques?prob=${probIdx + 1}&impact=${ci + 1}&scope=all`);
+              <tr key={risqueLabel}>
+                <td className="p-2 text-muted-foreground whitespace-nowrap">{risqueLabel}</td>
+                {row.map((count, ci) => {
+                  const criticite = cellCriticite(ri, ci);
+                  const maitriseLabel = NIVEAU_MAITRISE_ORDER[ci];
+                  return (
+                    <td key={maitriseLabel} className="p-1 text-center">
+                      <div
+                        className={`mx-auto flex size-11 items-center justify-center rounded-md text-sm font-bold ${count > 0 ? "cursor-pointer ring-offset-background transition-shadow hover:ring-2 hover:ring-ring hover:ring-offset-1" : ""}`}
+                        style={{
+                          backgroundColor: CRITICITE_COLORS[criticite],
+                          color: CRITICITE_FG,
+                          opacity: count > 0 ? 1 : 0.28,
+                        }}
+                        onClick={() => {
+                          if (count > 0) {
+                            router.push(
+                              `/raid/risques?risque=${encodeURIComponent(risqueLabel)}&maitrise=${encodeURIComponent(maitriseLabel)}&scope=all`
+                            );
+                          }
+                        }}
+                        title={
+                          count > 0
+                            ? `${count} risque(s) — risque ${risqueLabel} / maîtrise ${maitriseLabel} (${criticite})\nCliquez pour filtrer`
+                            : `${criticite}`
                         }
-                      }}
-                      title={count > 0 ? `${count} risque(s) — ${PROB_LABELS[probIdx]} / ${IMPACT_SHORT[ci]}\nCliquez pour filtrer` : ""}
-                    >
-                      {count > 0 ? count : ""}
-                    </div>
-                  </td>
-                ))}
+                      >
+                        {count > 0 ? count : ""}
+                      </div>
+                    </td>
+                  );
+                })}
               </tr>
             );
           })}
         </tbody>
       </table>
+      <div className="mt-3 flex flex-wrap gap-3 text-[10px] text-muted-foreground">
+        {(["Faible", "Modérée", "Majeure", "Critique"] as const).map((c) => (
+          <span key={c} className="inline-flex items-center gap-1.5">
+            <span
+              className="size-2.5 rounded-sm"
+              style={{ backgroundColor: CRITICITE_COLORS[c] }}
+            />
+            {c}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -706,11 +725,11 @@ export function RiskEvolutionChart({ riskEvolutionData }: RiskEvolutionProps) {
         <Tooltip
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           formatter={(value: any, name: any) =>
-            name === "avgScore" ? [`${value}/25`, "Score moyen"] : [value, "Risques"]
+            name === "avgScore" ? [`${value}/4`, "Criticité moyenne"] : [value, "Risques"]
           }
         />
         <Legend />
-        <Line type="monotone" dataKey="avgScore" stroke="#dc2626" name="Score moyen" strokeWidth={2} dot={{ r: 4 }} />
+        <Line type="monotone" dataKey="avgScore" stroke="#dc2626" name="Criticité moyenne" strokeWidth={2} dot={{ r: 4 }} />
       </LineChart>
     </ResponsiveContainer>
   );

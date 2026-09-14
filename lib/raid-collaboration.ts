@@ -172,7 +172,7 @@ export function formatScoreAuditLabel(
   if (n == null) return AUDIT_EMPTY;
   const labels = kind === "probabilite" ? PROBABILITE_LABELS : IMPACT_LABELS;
   const label = labels[n];
-  return label ? `${n} — ${label}` : String(n);
+  return label || String(n);
 }
 
 function summaryForAuditChange(

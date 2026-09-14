@@ -31,16 +31,21 @@ import { CalendarView, type CalendarEvent } from "./calendar-view";
 import { ActionKanban } from "./action-kanban";
 import { RaidExcelExportButton } from "./raid-excel-export-button";
 import { deleteRaid, fetchRaidFormEditContext } from "@/app/(app)/actions";
-import { scoreCriticite } from "@/lib/utils-pmo";
+
 import { useCanWritePage, useUser } from "@/components/user-provider";
 import {
   RAID_TYPE_COLORS,
   RAID_TYPE_LABELS,
   getStatutColor,
-  getCriticiteLabel,
+  evaluateRaidRisque,
+  isRisqueAttention,
+  criticiteRank,
   CRITICITE_COLORS,
+  CRITICITE_FG,
   PROBABILITE_LABELS,
   IMPACT_LABELS,
+  NIVEAU_MAITRISE_VALUES,
+  NIVEAU_RISQUE_VALUES,
   STATUT_ACTION_ORDER,
   getStatutsForType,
   getStatutsFromConfig,
@@ -79,6 +84,7 @@ interface RaidRow {
   domaine: string;
   probabilite: number | null;
   impact: number | null;
+  niveau_maitrise?: string | null;
   strategie: string;
   mitigation: string;
   responsable: string;
@@ -124,6 +130,8 @@ interface Props {
   filterType?: string;
   initialProbabilite?: number;
   initialImpact?: number;
+  initialRisque?: string;
+  initialMaitrise?: string;
   initialStatut?: string;
   initialOverdue?: boolean;
   initialCritical?: boolean;
@@ -249,6 +257,8 @@ function RaidTable({
   onDelete,
   initialProbabilite,
   initialImpact,
+  initialRisque,
+  initialMaitrise,
   initialStatut,
   initialOverdue,
   initialCritical,
@@ -265,6 +275,8 @@ function RaidTable({
   onDelete: (id: string) => void;
   initialProbabilite?: number;
   initialImpact?: number;
+  initialRisque?: string;
+  initialMaitrise?: string;
   initialStatut?: string;
   initialOverdue?: boolean;
   initialCritical?: boolean;
@@ -288,6 +300,12 @@ function RaidTable({
   );
   const [filterImpact, setFilterImpact] = useState<string[]>(
     initialImpact ? [String(initialImpact)] : []
+  );
+  const [filterRisque, setFilterRisque] = useState<string[]>(
+    initialRisque ? [initialRisque] : []
+  );
+  const [filterMaitrise, setFilterMaitrise] = useState<string[]>(
+    initialMaitrise ? [initialMaitrise] : []
   );
   const [filterStatut, setFilterStatut] = useState<string[]>(
     initialStatut === "active"
@@ -433,6 +451,19 @@ function RaidTable({
         (r) => r.impact != null && filterImpact.includes(String(r.impact))
       );
     }
+    if (filterRisque.length > 0) {
+      result = result.filter((r) => {
+        const { niveauRisque } = evaluateRaidRisque(r);
+        return niveauRisque != null && filterRisque.includes(niveauRisque);
+      });
+    }
+    if (filterMaitrise.length > 0) {
+      result = result.filter(
+        (r) =>
+          !!r.niveau_maitrise &&
+          filterMaitrise.includes(r.niveau_maitrise)
+      );
+    }
     if (filterStatut.length > 0) {
       result = result.filter((r) =>
         filterStatut.some((s) => {
@@ -470,12 +501,10 @@ function RaidTable({
     }
     // Critical filter (risks with score >= 12)
     if (filterCritical) {
-      result = result.filter(
-        (r) => r.probabilite && r.impact && scoreCriticite(r.impact, r.probabilite) >= 12
-      );
+      result = result.filter((r) => isRisqueAttention(r));
     }
     return result;
-  }, [items, search, filterCategorie, filterDomaine, filterProb, filterImpact, filterStatut, filterChantier, filterComite, filterOverdue, filterCritical, now, accessibleChantierIds]);
+  }, [items, search, filterCategorie, filterDomaine, filterProb, filterImpact, filterRisque, filterMaitrise, filterStatut, filterChantier, filterComite, filterOverdue, filterCritical, now, accessibleChantierIds]);
 
   const sorted = useMemo(() => {
     if (!sortField) return filtered;
@@ -513,8 +542,8 @@ function RaidTable({
           break;
         }
         case "criticite": {
-          const sa = a.probabilite && a.impact ? scoreCriticite(a.impact, a.probabilite) : 0;
-          const sb = b.probabilite && b.impact ? scoreCriticite(b.impact, b.probabilite) : 0;
+          const sa = criticiteRank(evaluateRaidRisque(a).criticite);
+          const sb = criticiteRank(evaluateRaidRisque(b).criticite);
           cmp = sa - sb;
           break;
         }
@@ -538,7 +567,7 @@ function RaidTable({
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, filterCategorie, filterDomaine, filterProb, filterImpact, filterStatut, filterChantier, filterComite, filterOverdue, filterCritical]);
+  }, [search, filterCategorie, filterDomaine, filterProb, filterImpact, filterRisque, filterMaitrise, filterStatut, filterChantier, filterComite, filterOverdue, filterCritical]);
 
   const statutList = statusConfigs?.length
     ? getStatutsFromConfig(itemType, statusConfigs)
@@ -557,6 +586,8 @@ function RaidTable({
     filterDomaine.length > 0 ||
     filterProb.length > 0 ||
     filterImpact.length > 0 ||
+    filterRisque.length > 0 ||
+    filterMaitrise.length > 0 ||
     filterStatut.length > 0 ||
     filterChantier.length > 0 ||
     filterComite.length > 0 ||
@@ -658,23 +689,45 @@ function RaidTable({
             <MultiSelect
               options={Object.entries(PROBABILITE_LABELS).map(([k, label]) => ({
                 value: k,
-                label: `${k} - ${label}`,
+                label,
               }))}
               selected={filterProb}
               onChange={setFilterProb}
               placeholder="Probabilité"
-              className="w-[180px]"
+              className="w-[160px]"
               chips={false}
             />
             <MultiSelect
               options={Object.entries(IMPACT_LABELS).map(([k, label]) => ({
                 value: k,
-                label: `${k} - ${label}`,
+                label,
               }))}
               selected={filterImpact}
               onChange={setFilterImpact}
               placeholder="Impact"
-              className="w-[160px]"
+              className="w-[140px]"
+              chips={false}
+            />
+            <MultiSelect
+              options={NIVEAU_RISQUE_VALUES.map((m) => ({
+                value: m,
+                label: m,
+              }))}
+              selected={filterRisque}
+              onChange={setFilterRisque}
+              placeholder="Niv. risque"
+              className="w-[140px]"
+              chips={false}
+            />
+            <MultiSelect
+              options={NIVEAU_MAITRISE_VALUES.map((m) => ({
+                value: m,
+                label: m,
+              }))}
+              selected={filterMaitrise}
+              onChange={setFilterMaitrise}
+              placeholder="Maîtrise"
+              className="w-[140px]"
               chips={false}
             />
           </>
@@ -689,6 +742,8 @@ function RaidTable({
               setFilterDomaine([]);
               setFilterProb([]);
               setFilterImpact([]);
+              setFilterRisque([]);
+              setFilterMaitrise([]);
               setFilterStatut([]);
               setFilterChantier([]);
               setFilterComite([]);
@@ -778,8 +833,7 @@ function RaidTable({
           </TableHeader>
           <TableBody>
             {paginated.map((r) => {
-              const score = r.probabilite && r.impact ? scoreCriticite(r.impact, r.probabilite) : null;
-              const critLabel = score ? getCriticiteLabel(score) : null;
+              const critLabel = evaluateRaidRisque(r).criticite;
 
               return (
                 <TableRow
@@ -837,13 +891,16 @@ function RaidTable({
                   </TableCell>
                   {isRisqueView && (
                     <TableCell className="p-1.5">
-                      {score ? (
+                      {critLabel ? (
                         <Badge
                           className="text-[10px]"
-                          style={{ backgroundColor: CRITICITE_COLORS[critLabel!] ?? "#6b7280", color: "white" }}
-                          title={`${score}/25 ${critLabel}`}
+                          style={{
+                            backgroundColor: CRITICITE_COLORS[critLabel] ?? "#6b7280",
+                            color: CRITICITE_FG,
+                          }}
+                          title={critLabel}
                         >
-                          {score}
+                          {critLabel}
                         </Badge>
                       ) : "—"}
                     </TableCell>
@@ -1024,7 +1081,7 @@ function RaidScopeToggles({
   );
 }
 
-export function RaidList({ items, filterType, initialProbabilite, initialImpact, initialStatut, initialOverdue, initialCritical, initialRaidScope = "mine", statusConfigs, fieldOptions, chantiers = [], comites = [] }: Props) {
+export function RaidList({ items, filterType, initialProbabilite, initialImpact, initialRisque, initialMaitrise, initialStatut, initialOverdue, initialCritical, initialRaidScope = "mine", statusConfigs, fieldOptions, chantiers = [], comites = [] }: Props) {
   const { ressourceId, displayName } = useUser();
   const canWriteRaid = useCanWritePage("/raid");
   const filteredIdsRef = useRef<Record<string, string[]>>({});
@@ -1179,6 +1236,8 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
               onDelete={(id) => { setDeleteError(null); setDeleteId(id); }}
               initialProbabilite={initialProbabilite}
               initialImpact={initialImpact}
+              initialRisque={initialRisque}
+              initialMaitrise={initialMaitrise}
               initialStatut={initialStatut}
               initialOverdue={initialOverdue}
               initialCritical={initialCritical}

@@ -3,12 +3,14 @@ import { getRaidItems, getStatusConfigs, getRaidFieldOptions, getChantiersForSel
 import { Card, CardContent } from "@/components/ui/card";
 import { RaidList } from "@/components/raid-list";
 import { AddRaidButton } from "@/components/add-raid-button";
-import { scoreCriticite } from "@/lib/utils-pmo";
+import { isRisqueAttention } from "@/lib/raid-labels";
 
 interface Props {
   searchParams: Promise<{
     prob?: string;
     impact?: string;
+    risque?: string;
+    maitrise?: string;
     statut?: string;
     critical?: string;
     scope?: string;
@@ -25,12 +27,12 @@ export default async function RaidRisquesPage({ searchParams }: Props) {
     getChantiersForSelect().catch(() => []),
     getComitesForSelect().catch(() => []),
   ]);
-  const criticalCount = items.filter(
-    (r) => r.probabilite && r.impact && scoreCriticite(r.impact, r.probabilite) >= 12
-  ).length;
+  const criticalCount = items.filter((r) => isRisqueAttention(r)).length;
 
   const initialProb = params.prob ? Number(params.prob) : undefined;
   const initialImpact = params.impact ? Number(params.impact) : undefined;
+  const initialRisque = params.risque || undefined;
+  const initialMaitrise = params.maitrise || undefined;
   const initialStatut = params.statut || undefined;
   const initialCritical = params.critical === "true" || undefined;
   const initialRaidScope = params.scope === "all" ? "all" : "mine";
@@ -54,6 +56,8 @@ export default async function RaidRisquesPage({ searchParams }: Props) {
               filterType="Risque"
               initialProbabilite={initialProb}
               initialImpact={initialImpact}
+              initialRisque={initialRisque}
+              initialMaitrise={initialMaitrise}
               initialStatut={initialStatut}
               initialCritical={initialCritical}
               initialRaidScope={initialRaidScope}

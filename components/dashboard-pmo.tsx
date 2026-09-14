@@ -114,7 +114,7 @@ export function DashboardPMO({
           icon={ShieldAlert}
           label="Risques Critiques"
           value={String(stats.criticalRisks)}
-          subtitle="Score >= 12/25"
+          subtitle="Majeure ou Critique"
           variant={stats.criticalRisks > 0 ? "destructive" : "default"}
           href="/raid/risques?critical=true&scope=all"
         />
