@@ -321,6 +321,7 @@ function RaidTable({
 
   const isRisqueView = items.length > 0 && items.every((i) => i.type === "Risque");
   const isActionView = items.length > 0 && items.every((i) => i.type === "Action");
+  const itemType = items.length > 0 ? items[0].type : "Action";
 
   const categorieFilterOptions = useMemo(
     () =>
@@ -520,7 +521,7 @@ function RaidTable({
       }
       return sortDir === "desc" ? -cmp : cmp;
     });
-  }, [filtered, sortField, sortDir]);
+  }, [filtered, sortField, sortDir, itemType, statusConfigs]);
 
   const onFilteredChangeRef = useRef(onFilteredChange);
   onFilteredChangeRef.current = onFilteredChange;
@@ -539,7 +540,6 @@ function RaidTable({
     setCurrentPage(1);
   }, [search, filterCategorie, filterDomaine, filterProb, filterImpact, filterStatut, filterChantier, filterComite, filterOverdue, filterCritical]);
 
-  const itemType = items.length > 0 ? items[0].type : "Action";
   const statutList = statusConfigs?.length
     ? getStatutsFromConfig(itemType, statusConfigs)
     : getStatutsForType(itemType);
