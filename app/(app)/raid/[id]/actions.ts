@@ -220,7 +220,7 @@ export async function addRaidComment(raidId: string, body: string) {
     raidId,
     action: "commented",
     field: "comment",
-    newValue: text.slice(0, 200),
+    newValue: text.slice(0, 500),
     summary: `${actor.actorName} a ajouté un commentaire`,
     actorUserId: actor.actorUserId,
     actorName: actor.actorName,
@@ -308,13 +308,25 @@ async function applyRaidStatusChange(
     },
   });
 
+  const notePreview =
+    note.length > 200 ? `${note.slice(0, 200)}…` : note;
   await writeRaidAudit({
     raidId: raid.id,
     action: "status_changed",
     field: "statut",
     oldValue: oldStatut,
     newValue: statut,
-    summary: `Statut : « ${oldStatut || "—"} » → « ${statut} » — ${actor.actorName}`,
+    summary: `Statut : « ${oldStatut || "—"} » → « ${statut} » — ${actor.actorName} — ${notePreview}`,
+    actorUserId: actor.actorUserId,
+    actorName: actor.actorName,
+    actorRessourceId: actor.actorRessourceId,
+  });
+  await writeRaidAudit({
+    raidId: raid.id,
+    action: "commented",
+    field: "comment",
+    newValue: note.slice(0, 500),
+    summary: `${actor.actorName} a ajouté un commentaire (changement de statut)`,
     actorUserId: actor.actorUserId,
     actorName: actor.actorName,
     actorRessourceId: actor.actorRessourceId,

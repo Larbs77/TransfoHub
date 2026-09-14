@@ -1,6 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import type { SessionData } from "@/lib/auth";
 import { getRoleByCode } from "@/lib/roles";
+import { INSTANCE_LABELS } from "@/lib/comite-labels";
+import {
+  IMPACT_LABELS,
+  PROBABILITE_LABELS,
+  RAID_AUDIT_FIELD_LABELS,
+} from "@/lib/raid-labels";
 
 export type RaidAuditAction =
   | "created"
@@ -100,6 +106,146 @@ export async function writeRaidAudit(params: {
       ...(params.createdAt ? { createdAt: params.createdAt } : {}),
     },
   });
+}
+
+const AUDIT_EMPTY = "—";
+const AUDIT_VALUE_MAX = 500;
+
+export type RaidAuditChange = {
+  field: string;
+  oldValue: string;
+  newValue: string;
+  action?: RaidAuditAction;
+  label?: string;
+};
+
+function clipAuditValue(value: string, max = AUDIT_VALUE_MAX): string {
+  const t = value.trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max)}…`;
+}
+
+function displayAuditValue(value: string | null | undefined): string {
+  const t = (value ?? "").trim();
+  return t.length ? t : AUDIT_EMPTY;
+}
+
+/** Calendar day as dd/MM/yyyy (ISO date key to stay consistent with the RAID form). */
+export function formatRaidAuditDate(
+  value: Date | string | null | undefined
+): string {
+  if (value == null || value === "") return AUDIT_EMPTY;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return AUDIT_EMPTY;
+  const key = d.toISOString().slice(0, 10);
+  const [y, m, day] = key.split("-");
+  return `${day}/${m}/${y}`;
+}
+
+export function formatChantierAuditLabel(
+  c: { code: string; nom: string } | null | undefined
+): string {
+  if (!c) return AUDIT_EMPTY;
+  const nom = c.nom.trim();
+  return nom ? `${c.code} — ${nom}` : c.code;
+}
+
+export function formatComiteAuditLabel(
+  c: { instance: string; numero: number } | null | undefined
+): string {
+  if (!c) return AUDIT_EMPTY;
+  const inst = INSTANCE_LABELS[c.instance] ?? c.instance;
+  return `${inst} n°${c.numero}`;
+}
+
+export function formatEquipeAuditLabel(
+  e: { name: string } | null | undefined
+): string {
+  const name = e?.name?.trim();
+  return name || AUDIT_EMPTY;
+}
+
+export function formatScoreAuditLabel(
+  n: number | null | undefined,
+  kind: "probabilite" | "impact"
+): string {
+  if (n == null) return AUDIT_EMPTY;
+  const labels = kind === "probabilite" ? PROBABILITE_LABELS : IMPACT_LABELS;
+  const label = labels[n];
+  return label ? `${n} — ${label}` : String(n);
+}
+
+function summaryForAuditChange(
+  action: RaidAuditAction,
+  label: string,
+  oldValue: string,
+  newValue: string,
+  actorName: string
+): string {
+  switch (action) {
+    case "status_changed":
+      return `Statut : « ${oldValue} » → « ${newValue} » — ${actorName}`;
+    case "assigned":
+      return `Assigné à ${newValue} par ${actorName}`;
+    case "unassigned":
+      return `Désassignation (était ${oldValue}) par ${actorName}`;
+    case "commented":
+      return `${actorName} a modifié les commentaires`;
+    default:
+      return `${label} : « ${oldValue} » → « ${newValue} » — ${actorName}`;
+  }
+}
+
+/**
+ * Writes one RaidAuditLog row per actual field change (skips identical values).
+ * Used by the RAID edit form so every modification is visible in the journal.
+ */
+export async function writeRaidFieldChangeAudits(params: {
+  raidId: string;
+  actorUserId?: string | null;
+  actorName: string;
+  actorRessourceId?: string | null;
+  changes: RaidAuditChange[];
+}): Promise<number> {
+  let t = Date.now();
+  let written = 0;
+  for (const change of params.changes) {
+    const oldValue = clipAuditValue(displayAuditValue(change.oldValue));
+    const newValue = clipAuditValue(displayAuditValue(change.newValue));
+    const action = change.action ?? "field_updated";
+    // Assignation : tracer même si le libellé (nom) est identique (ids différents).
+    if (
+      oldValue === newValue &&
+      action !== "assigned" &&
+      action !== "unassigned"
+    ) {
+      continue;
+    }
+    const label =
+      change.label ??
+      RAID_AUDIT_FIELD_LABELS[change.field] ??
+      change.field;
+    await writeRaidAudit({
+      raidId: params.raidId,
+      action,
+      field: change.field,
+      oldValue,
+      newValue,
+      summary: summaryForAuditChange(
+        action,
+        label,
+        oldValue,
+        newValue,
+        params.actorName
+      ),
+      actorUserId: params.actorUserId,
+      actorName: params.actorName,
+      actorRessourceId: params.actorRessourceId,
+      createdAt: new Date(t++),
+    });
+    written++;
+  }
+  return written;
 }
 
 export type RaidAccessShape = {

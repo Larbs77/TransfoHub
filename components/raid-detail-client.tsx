@@ -51,6 +51,7 @@ import {
 import {
   RAID_TYPE_COLORS,
   RAID_TYPE_LABELS,
+  RAID_AUDIT_FIELD_LABELS,
   getStatutColor,
   getStatutsForType,
   getCriticiteLabel,
@@ -172,6 +173,8 @@ function actionColor(action: string): string {
       return "#f59e0b";
     case "commented":
       return "#7c3aed";
+    case "field_updated":
+      return "#0369a1";
     default:
       return "#6b7280";
   }
@@ -806,9 +809,9 @@ export function RaidDetailClient({
                         {log.field ? (
                           <Badge
                             variant="outline"
-                            className="max-w-full break-all font-mono text-[10px] font-normal"
+                            className="max-w-full break-all text-[10px] font-normal"
                           >
-                            {log.field}
+                            {RAID_AUDIT_FIELD_LABELS[log.field] ?? log.field}
                           </Badge>
                         ) : null}
                       </div>

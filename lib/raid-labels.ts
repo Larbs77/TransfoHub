@@ -418,6 +418,32 @@ export const IMPACT_LABELS: Record<number, string> = {
   5: "Critique",
 };
 
+/** Libellés français des champs RAID pour le journal d'audit. */
+export const RAID_AUDIT_FIELD_LABELS: Record<string, string> = {
+  type: "Type",
+  intitule: "Intitulé",
+  description: "Description",
+  categorie: "Catégorie",
+  chantierId: "Chantier",
+  domaine: "Domaine",
+  probabilite: "Probabilité",
+  impact: "Impact",
+  strategie: "Stratégie",
+  mitigation: "Mitigation",
+  responsable: "Responsable",
+  responsableRessourceId: "Responsable",
+  equipeId: "Équipe",
+  statut: "Statut",
+  date_identification: "Date d'identification",
+  date_revision: "Date de révision",
+  date_echeance: "Échéance initiale",
+  date_echeance_actualisee: "Échéance actualisée",
+  date_fin_reelle: "Fin réelle",
+  commentaires: "Commentaires",
+  comiteId: "Comité",
+  comment: "Commentaire",
+};
+
 // ── Criticité (score = probabilité × impact) ─────────
 export const CRITICITE_LABELS: Record<string, string> = {
   Négligeable: "Négligeable",

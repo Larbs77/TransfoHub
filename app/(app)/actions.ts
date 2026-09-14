@@ -20,10 +20,17 @@ import { getRoleByCode, resolveRaidCreateScope } from "@/lib/roles";
 import {
   canDeleteRaid,
   canEditRaidForm,
+  formatChantierAuditLabel,
+  formatComiteAuditLabel,
+  formatEquipeAuditLabel,
+  formatRaidAuditDate,
+  formatScoreAuditLabel,
   getActorDisplay,
   getRaidFormEditContext,
   getSpecialRaidCategoriesForSession,
   writeRaidAudit,
+  writeRaidFieldChangeAudits,
+  type RaidAuditAction,
 } from "@/lib/raid-collaboration";
 import {
   assertCanManageComiteSeance,
@@ -1799,13 +1806,30 @@ export async function updateRaid(
     select: {
       id: true,
       code: true,
+      type: true,
       intitule: true,
+      description: true,
+      categorie: true,
       chantierId: true,
+      domaine: true,
+      probabilite: true,
+      impact: true,
+      strategie: true,
+      mitigation: true,
+      responsable: true,
       responsableRessourceId: true,
+      equipeId: true,
       statut: true,
+      date_identification: true,
+      date_revision: true,
       date_echeance: true,
       date_echeance_actualisee: true,
       date_fin_reelle: true,
+      commentaires: true,
+      comiteId: true,
+      chantier: { select: { code: true, nom: true } },
+      comite: { select: { instance: true, numero: true } },
+      equipe: { select: { name: true } },
     },
   });
   if (!existing) throw new Error("Entrée RAID introuvable.");
@@ -1855,6 +1879,41 @@ export async function updateRaid(
   const actuFinale = data.date_echeance_actualisee
     ? new Date(data.date_echeance_actualisee)
     : firstInitiale;
+  const now = new Date();
+  const dateFinReelle = becomingClosed
+    ? existing.date_fin_reelle ?? now
+    : reopening
+      ? null
+      : existing.date_fin_reelle;
+  const nextComiteId = data.comiteId || null;
+  const nextResponsableId = data.responsableRessourceId || null;
+
+  const [nextChantier, nextComite, nextEquipe] = await Promise.all([
+    chantierId
+      ? chantierId === existing.chantierId
+        ? Promise.resolve(existing.chantier)
+        : prisma.chantier.findUnique({
+            where: { id: chantierId },
+            select: { code: true, nom: true },
+          })
+      : Promise.resolve(null),
+    nextComiteId
+      ? nextComiteId === existing.comiteId
+        ? Promise.resolve(existing.comite)
+        : prisma.comite.findUnique({
+            where: { id: nextComiteId },
+            select: { instance: true, numero: true },
+          })
+      : Promise.resolve(null),
+    teamAssign.equipeId
+      ? teamAssign.equipeId === existing.equipeId
+        ? Promise.resolve(existing.equipe)
+        : prisma.equipe.findUnique({
+            where: { id: teamAssign.equipeId },
+            select: { name: true },
+          })
+      : Promise.resolve(null),
+  ]);
 
   // code immuable ; échéance initiale figée dès qu'elle est renseignée
   await prisma.raid.update({
@@ -1871,32 +1930,152 @@ export async function updateRaid(
       strategie: data.strategie,
       mitigation: data.mitigation,
       responsable: data.responsable,
-      responsableRessourceId: data.responsableRessourceId || null,
+      responsableRessourceId: nextResponsableId,
       equipeId: teamAssign.equipeId,
       statut: data.statut,
       date_identification: data.date_identification ? new Date(data.date_identification) : null,
       date_revision: data.date_revision ? new Date(data.date_revision) : null,
       ...(firstInitiale ? { date_echeance: firstInitiale } : {}),
       date_echeance_actualisee: actuFinale,
-      date_fin_reelle: becomingClosed
-        ? existing.date_fin_reelle ?? new Date()
-        : reopening
-          ? null
-          : existing.date_fin_reelle,
+      date_fin_reelle: dateFinReelle,
       commentaires: data.commentaires,
-      comiteId: data.comiteId || null,
+      comiteId: nextComiteId,
     },
   });
 
   const assigneeChanged =
-    (data.responsableRessourceId || null) !==
-    (existing.responsableRessourceId || null);
-  if (assigneeChanged && data.responsableRessourceId) {
+    nextResponsableId !== (existing.responsableRessourceId || null);
+  const teamHint = teamAssign.equipeName
+    ? ` · ${teamAssign.kind === "fonctionnelle" ? "équipe chantier" : "équipe institutionnelle"} « ${teamAssign.equipeName} »`
+    : "";
+  const assignedLabel = assigneeChanged
+    ? nextResponsableId
+      ? `${data.responsable || "ressource"}${teamHint}`
+      : ""
+    : "";
+
+  await writeRaidFieldChangeAudits({
+    raidId: id,
+    actorUserId: actor.actorUserId,
+    actorName: actor.actorName,
+    actorRessourceId: actor.actorRessourceId,
+    changes: [
+      { field: "type", oldValue: existing.type, newValue: data.type },
+      { field: "intitule", oldValue: existing.intitule, newValue: data.intitule },
+      {
+        field: "description",
+        oldValue: existing.description,
+        newValue: data.description,
+      },
+      {
+        field: "categorie",
+        oldValue: existing.categorie,
+        newValue: data.categorie,
+      },
+      {
+        field: "chantierId",
+        oldValue: formatChantierAuditLabel(existing.chantier),
+        newValue: formatChantierAuditLabel(nextChantier),
+      },
+      { field: "domaine", oldValue: existing.domaine, newValue: data.domaine },
+      {
+        field: "probabilite",
+        oldValue: formatScoreAuditLabel(existing.probabilite, "probabilite"),
+        newValue: formatScoreAuditLabel(data.probabilite, "probabilite"),
+      },
+      {
+        field: "impact",
+        oldValue: formatScoreAuditLabel(existing.impact, "impact"),
+        newValue: formatScoreAuditLabel(data.impact, "impact"),
+      },
+      {
+        field: "strategie",
+        oldValue: existing.strategie,
+        newValue: data.strategie,
+      },
+      {
+        field: "mitigation",
+        oldValue: existing.mitigation,
+        newValue: data.mitigation,
+      },
+      {
+        field: "statut",
+        oldValue: existing.statut,
+        newValue: data.statut,
+        action: "status_changed",
+      },
+      ...(assigneeChanged
+        ? [
+            {
+              field: "responsableRessourceId",
+              oldValue: existing.responsable || "",
+              newValue: assignedLabel,
+              action: (nextResponsableId
+                ? "assigned"
+                : "unassigned") as RaidAuditAction,
+            },
+          ]
+        : [
+            {
+              field: "responsable",
+              oldValue: existing.responsable,
+              newValue: data.responsable,
+            },
+          ]),
+      {
+        field: "equipeId",
+        oldValue: formatEquipeAuditLabel(existing.equipe),
+        newValue: formatEquipeAuditLabel(nextEquipe),
+      },
+      {
+        field: "date_identification",
+        oldValue: formatRaidAuditDate(existing.date_identification),
+        newValue: formatRaidAuditDate(
+          data.date_identification ? new Date(data.date_identification) : null
+        ),
+      },
+      {
+        field: "date_revision",
+        oldValue: formatRaidAuditDate(existing.date_revision),
+        newValue: formatRaidAuditDate(
+          data.date_revision ? new Date(data.date_revision) : null
+        ),
+      },
+      {
+        field: "date_echeance",
+        oldValue: formatRaidAuditDate(existing.date_echeance),
+        newValue: formatRaidAuditDate(initialeFinale),
+      },
+      {
+        field: "date_echeance_actualisee",
+        oldValue: formatRaidAuditDate(existing.date_echeance_actualisee),
+        newValue: formatRaidAuditDate(actuFinale),
+      },
+      {
+        field: "date_fin_reelle",
+        oldValue: formatRaidAuditDate(existing.date_fin_reelle),
+        newValue: formatRaidAuditDate(dateFinReelle),
+      },
+      {
+        field: "commentaires",
+        oldValue: existing.commentaires,
+        newValue: data.commentaires,
+        action: "commented",
+      },
+      {
+        field: "comiteId",
+        oldValue: formatComiteAuditLabel(existing.comite),
+        newValue: formatComiteAuditLabel(nextComite),
+      },
+    ],
+  });
+
+  if (assigneeChanged && nextResponsableId) {
     await notifyRaidAssigned({
       raidId: id,
       code: existing.code,
       intitule: data.intitule || existing.intitule,
-      assigneeRessourceId: data.responsableRessourceId,
+      assigneeRessourceId: nextResponsableId,
       actorUserId: actor.actorUserId,
       actorName: actor.actorName,
     });
@@ -1905,7 +2084,7 @@ export async function updateRaid(
     raidId: id,
     code: existing.code,
     intitule: data.intitule || existing.intitule,
-    chantierId: data.chantierId || existing.chantierId,
+    chantierId: chantierId || existing.chantierId,
     summary: assigneeChanged
       ? `Modification formulaire (assignation → ${data.responsable || "—"})`
       : "Modification via formulaire",
