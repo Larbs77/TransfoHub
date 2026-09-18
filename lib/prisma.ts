@@ -10,7 +10,7 @@ const globalForPrisma = globalThis as unknown as {
  * Bump whenever the Prisma schema gains fields/models so HMR drops a stale
  * singleton (otherwise findUnique/update rejects unknown fields).
  */
-const PRISMA_MODEL_STAMP = "raid-matrice-maitrise-v1";
+const PRISMA_MODEL_STAMP = "raid-soft-delete-v1";
 
 function clientLooksCurrent(client: PrismaClient): boolean {
   try {
@@ -33,6 +33,7 @@ function clientLooksCurrent(client: PrismaClient): boolean {
       workstream?: { findMany?: unknown };
       activite?: { findMany?: unknown };
       userChantierConsultation?: { findMany?: unknown };
+      adherenceDependant?: { findMany?: unknown };
       _runtimeDataModel?: {
         models?: Record<
           string,
@@ -59,6 +60,7 @@ function clientLooksCurrent(client: PrismaClient): boolean {
     if (typeof c.workstream?.findMany !== "function") return false;
     if (typeof c.activite?.findMany !== "function") return false;
     if (typeof c.userChantierConsultation?.findMany !== "function") return false;
+    if (typeof c.adherenceDependant?.findMany !== "function") return false;
 
     const comiteModel = c._runtimeDataModel?.models?.Comite;
     if (comiteModel?.fields) {
@@ -97,6 +99,23 @@ function clientLooksCurrent(client: PrismaClient): boolean {
         ? fields.some((f) => f.name === "niveau_maitrise")
         : "niveau_maitrise" in fields;
       if (!hasMaitrise) return false;
+      const hasRisqueLie = Array.isArray(fields)
+        ? fields.some((f) => f.name === "risqueLieId")
+        : "risqueLieId" in fields;
+      if (!hasRisqueLie) return false;
+      const hasRaidDeletedAt = Array.isArray(fields)
+        ? fields.some((f) => f.name === "deletedAt")
+        : "deletedAt" in fields;
+      if (!hasRaidDeletedAt) return false;
+    }
+
+    const adherenceModel = c._runtimeDataModel?.models?.Adherence;
+    if (adherenceModel?.fields) {
+      const fields = adherenceModel.fields;
+      const hasDeletedAt = Array.isArray(fields)
+        ? fields.some((f) => f.name === "deletedAt")
+        : "deletedAt" in fields;
+      if (!hasDeletedAt) return false;
     }
 
     return true;

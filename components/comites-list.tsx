@@ -35,6 +35,7 @@ import { ComiteFormDialog } from "./comite-form-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import { RaidFormDialog } from "./raid-form-dialog";
 import { RaidExcelExportOnceButton } from "./raid-excel-export-button";
+import { ComiteRaidExcelButtons } from "./comite-raid-excel-dialog";
 import { CalendarView, type CalendarEvent } from "./calendar-view";
 import { deleteComite, deleteRaid } from "@/app/(app)/actions";
 import {
@@ -362,12 +363,18 @@ function ComiteRaidSection({
             {raids.length} élément{raids.length !== 1 ? "s" : ""}
           </Badge>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {onAddRaid && canActOn && (
-            <Button size="xs" onClick={() => onAddRaid(comite.id)}>
-              <Plus className="size-3" />
-              Ajouter RAID
-            </Button>
+            <>
+              <Button size="xs" onClick={() => onAddRaid(comite.id)}>
+                <Plus className="size-3" />
+                Ajouter RAID
+              </Button>
+              <ComiteRaidExcelButtons
+                comiteId={comite.id}
+                comiteLabel={`${comite.instance} #${comite.numero}`}
+              />
+            </>
           )}
           <RaidExcelExportOnceButton
             ids={raids.map((r) => r.id)}

@@ -237,7 +237,9 @@ export default async function ChantierDetailPage({ params }: Props) {
                     burnRateTotals: burnRate?.totals ?? null,
                     questions: consultationQuestions.map((q) => ({ statut: q.statut, priorite: q.priorite })),
                     adherencesSource: chantier.adherencesSource.map((a) => ({ criticite: a.criticite })),
-                    adherencesDependant: chantier.adherencesDependant.map((a) => ({ criticite: a.criticite })),
+                    adherencesDependant: chantier.adherenceDependantLinks.map((l) => ({
+                      criticite: l.adherence.criticite,
+                    })),
                     chantierCode: chantier.code,
                   }}
                 />
@@ -315,14 +317,19 @@ export default async function ChantierDetailPage({ params }: Props) {
               <CardContent>
                 <ChantierAdherencesTab
                   asSource={chantier.adherencesSource}
-                  asDependant={chantier.adherencesDependant}
+                  asDependant={chantier.adherenceDependantLinks.map(
+                    (l) => l.adherence
+                  )}
                   chantierCode={chantier.code}
                   chantierId={chantier.id}
                 />
               </CardContent>
             </Card>
           }
-          adherencesCount={chantier.adherencesSource.length + chantier.adherencesDependant.length}
+          adherencesCount={
+            chantier.adherencesSource.length +
+            chantier.adherenceDependantLinks.length
+          }
           capaciteTab={
             <Card>
               <CardHeader>

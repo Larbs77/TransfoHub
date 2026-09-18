@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Calendar, Search, Clock, ShieldAlert, Columns3, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle } from "lucide-react";
+import { Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Calendar, Search, Clock, ShieldAlert, Columns3, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,7 +30,7 @@ import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import { CalendarView, type CalendarEvent } from "./calendar-view";
 import { ActionKanban } from "./action-kanban";
 import { RaidExcelExportButton } from "./raid-excel-export-button";
-import { deleteRaid, fetchRaidFormEditContext } from "@/app/(app)/actions";
+import { deleteRaid, restoreRaid, fetchRaidFormEditContext } from "@/app/(app)/actions";
 
 import { useCanWritePage, useUser } from "@/components/user-provider";
 import {
@@ -57,11 +57,21 @@ import {
   isRaidAssignee,
   isRaidOverdue,
   isRaidInitialEcheancePast,
+  isRaidClosed,
+  risqueAActionsLieesOuvertes,
   raidEffectiveEcheance,
   type StatusConfigItem,
   type RaidFieldOptionItem,
 } from "@/lib/raid-labels";
-import { INSTANCE_LABELS } from "@/lib/comite-labels";
+import { formatComiteSeanceLabel, INSTANCE_LABELS } from "@/lib/comite-labels";
+import {
+  parseRaidListQuery,
+  serializeRaidListQuery,
+  isRaidRegisterPath,
+  RAID_LIST_RETURN_KEY,
+  type RaidListQuery,
+  type RaidListView,
+} from "@/lib/raid-list-query";
 
 type RaidFormEditCtx = {
   chantierScopeAll: boolean;
@@ -98,6 +108,12 @@ interface RaidRow {
   commentaires: string;
   comiteId: string | null;
   comite?: { id: string; instance: string; numero: number; date?: Date | null } | null;
+  risqueLieId?: string | null;
+  risqueLie?: { id: string; code: string; intitule: string } | null;
+  actionsLiees?: Array<{ id: string; statut: string }>;
+  deletedAt?: Date | string | null;
+  deletedByName?: string | null;
+  deleteMotif?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -108,21 +124,20 @@ type ComiteFilterOption = {
   instance: string;
   numero: number;
   date?: Date | string | null;
+  chantier?: { id?: string; code?: string; nom?: string } | null;
 };
 
 const EMPTY_ROWS: RaidRow[] = [];
 const EMPTY_CHANTIERS: ChantierFilterOption[] = [];
 const EMPTY_COMITES: ComiteFilterOption[] = [];
 
-function comiteSelectLabel(co: { instance: string; numero: number }) {
-  return `${INSTANCE_LABELS[co.instance] ?? co.instance} #${co.numero}`;
-}
-
-function comiteSelectDate(d: Date | string | null | undefined) {
-  if (d == null || d === "") return "";
-  const date = d instanceof Date ? d : new Date(d);
-  if (Number.isNaN(date.getTime())) return "";
-  return format(date, "dd MMM yyyy", { locale: fr });
+function comiteSelectLabel(co: {
+  instance: string;
+  numero: number;
+  date?: Date | string | null;
+  chantier?: { id?: string; code?: string; nom?: string } | null;
+}) {
+  return formatComiteSeanceLabel(co, undefined, { withChantier: true });
 }
 
 interface Props {
@@ -255,6 +270,7 @@ function RaidTable({
   showType,
   onEdit,
   onDelete,
+  onRestore,
   initialProbabilite,
   initialImpact,
   initialRisque,
@@ -268,11 +284,14 @@ function RaidTable({
   chantiers = EMPTY_CHANTIERS,
   comites = EMPTY_COMITES,
   onFilteredChange,
+  urlQuery,
+  onQueryPatch,
 }: {
   items: RaidRow[];
   showType: boolean;
   onEdit: (r: RaidRow) => void;
   onDelete: (id: string) => void;
+  onRestore: (id: string) => void;
   initialProbabilite?: number;
   initialImpact?: number;
   initialRisque?: string;
@@ -286,44 +305,122 @@ function RaidTable({
   chantiers?: ChantierFilterOption[];
   comites?: ComiteFilterOption[];
   onFilteredChange?: (rows: RaidRow[]) => void;
+  urlQuery?: RaidListQuery;
+  onQueryPatch?: (partial: Partial<RaidListQuery>) => void;
 }) {
   const router = useRouter();
   const canWriteRaid = useCanWritePage("/raid");
   const { ressourceId } = useUser();
-  const [sortField, setSortField] = useState<SortField | null>(null);
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [search, setSearch] = useState("");
-  const [filterCategorie, setFilterCategorie] = useState<string[]>([]);
-  const [filterDomaine, setFilterDomaine] = useState<string[]>([]);
-  const [filterProb, setFilterProb] = useState<string[]>(
-    initialProbabilite ? [String(initialProbabilite)] : []
+  const [sortField, setSortField] = useState<SortField | null>(
+    () => (urlQuery?.sort as SortField | undefined) || null
   );
-  const [filterImpact, setFilterImpact] = useState<string[]>(
-    initialImpact ? [String(initialImpact)] : []
+  const [sortDir, setSortDir] = useState<SortDir>(
+    () => urlQuery?.dir ?? "asc"
   );
-  const [filterRisque, setFilterRisque] = useState<string[]>(
-    initialRisque ? [initialRisque] : []
+  const [search, setSearch] = useState(() => urlQuery?.q ?? "");
+  const [filterCategorie, setFilterCategorie] = useState<string[]>(
+    () => urlQuery?.cat ?? []
   );
-  const [filterMaitrise, setFilterMaitrise] = useState<string[]>(
-    initialMaitrise ? [initialMaitrise] : []
+  const [filterDomaine, setFilterDomaine] = useState<string[]>(
+    () => urlQuery?.dom ?? []
   );
-  const [filterStatut, setFilterStatut] = useState<string[]>(
-    initialStatut === "active"
-      ? ["__active__"]
-      : initialStatut === "open"
-        ? ["__open__"]
-        : initialStatut
-          ? [initialStatut]
-          : []
+  const [filterProb, setFilterProb] = useState<string[]>(() =>
+    urlQuery?.prob?.length
+      ? urlQuery.prob
+      : initialProbabilite
+        ? [String(initialProbabilite)]
+        : []
   );
-  const [filterOverdue, setFilterOverdue] = useState(initialOverdue ?? false);
-  const [filterCritical, setFilterCritical] = useState(initialCritical ?? false);
-  const [filterChantier, setFilterChantier] = useState<string[]>([]);
-  const [filterComite, setFilterComite] = useState<string[]>([]);
+  const [filterImpact, setFilterImpact] = useState<string[]>(() =>
+    urlQuery?.impact?.length
+      ? urlQuery.impact
+      : initialImpact
+        ? [String(initialImpact)]
+        : []
+  );
+  const [filterRisque, setFilterRisque] = useState<string[]>(() =>
+    urlQuery?.risque?.length
+      ? urlQuery.risque
+      : initialRisque
+        ? [initialRisque]
+        : []
+  );
+  const [filterMaitrise, setFilterMaitrise] = useState<string[]>(() =>
+    urlQuery?.maitrise?.length
+      ? urlQuery.maitrise
+      : initialMaitrise
+        ? [initialMaitrise]
+        : []
+  );
+  const [filterStatut, setFilterStatut] = useState<string[]>(() => {
+    if (urlQuery?.statut?.length) return urlQuery.statut;
+    if (initialStatut === "active") return ["__active__"];
+    if (initialStatut === "open") return ["__open__"];
+    if (initialStatut) return [initialStatut];
+    return [];
+  });
+  const [filterOverdue, setFilterOverdue] = useState(
+    () => urlQuery?.overdue ?? initialOverdue ?? false
+  );
+  const [filterCritical, setFilterCritical] = useState(
+    () => urlQuery?.critical ?? initialCritical ?? false
+  );
+  const [filterChantier, setFilterChantier] = useState<string[]>(
+    () => urlQuery?.chantier ?? []
+  );
+  const [filterComite, setFilterComite] = useState<string[]>(
+    () => urlQuery?.comite ?? []
+  );
+  const [filterDeleted, setFilterDeleted] = useState<
+    "active" | "deleted" | "all"
+  >(() => urlQuery?.deleted ?? "active");
 
-  // Pagination
-  const [pageSize, setPageSize] = useState<number>(10);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(() =>
+    urlQuery?.size !== undefined ? urlQuery.size : 10
+  );
+  const [currentPage, setCurrentPage] = useState(() => urlQuery?.page ?? 1);
+
+  const onQueryPatchRef = useRef(onQueryPatch);
+  onQueryPatchRef.current = onQueryPatch;
+  useEffect(() => {
+    onQueryPatchRef.current?.({
+      q: search,
+      cat: filterCategorie,
+      dom: filterDomaine,
+      prob: filterProb,
+      impact: filterImpact,
+      risque: filterRisque,
+      maitrise: filterMaitrise,
+      statut: filterStatut,
+      chantier: filterChantier,
+      comite: filterComite,
+      overdue: filterOverdue,
+      critical: filterCritical,
+      deleted: filterDeleted,
+      page: currentPage,
+      size: pageSize,
+      sort: sortField ?? "",
+      dir: sortDir,
+    });
+  }, [
+    search,
+    filterCategorie,
+    filterDomaine,
+    filterProb,
+    filterImpact,
+    filterRisque,
+    filterMaitrise,
+    filterStatut,
+    filterChantier,
+    filterComite,
+    filterOverdue,
+    filterCritical,
+    filterDeleted,
+    currentPage,
+    pageSize,
+    sortField,
+    sortDir,
+  ]);
 
   function handleSort(field: SortField) {
     if (sortField === field) {
@@ -413,6 +510,11 @@ function RaidTable({
 
   const filtered = useMemo(() => {
     let result = items;
+    if (filterDeleted === "active") {
+      result = result.filter((r) => !r.deletedAt);
+    } else if (filterDeleted === "deleted") {
+      result = result.filter((r) => !!r.deletedAt);
+    }
     if (search) {
       const q = search.toLowerCase();
       result = result.filter((r) => {
@@ -504,7 +606,7 @@ function RaidTable({
       result = result.filter((r) => isRisqueAttention(r));
     }
     return result;
-  }, [items, search, filterCategorie, filterDomaine, filterProb, filterImpact, filterRisque, filterMaitrise, filterStatut, filterChantier, filterComite, filterOverdue, filterCritical, now, accessibleChantierIds]);
+  }, [items, search, filterDeleted, filterCategorie, filterDomaine, filterProb, filterImpact, filterRisque, filterMaitrise, filterStatut, filterChantier, filterComite, filterOverdue, filterCritical, now, accessibleChantierIds]);
 
   const sorted = useMemo(() => {
     if (!sortField) return filtered;
@@ -567,7 +669,7 @@ function RaidTable({
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, filterCategorie, filterDomaine, filterProb, filterImpact, filterRisque, filterMaitrise, filterStatut, filterChantier, filterComite, filterOverdue, filterCritical]);
+  }, [search, filterCategorie, filterDomaine, filterProb, filterImpact, filterRisque, filterMaitrise, filterStatut, filterChantier, filterComite, filterOverdue, filterCritical, filterDeleted]);
 
   const statutList = statusConfigs?.length
     ? getStatutsFromConfig(itemType, statusConfigs)
@@ -592,7 +694,8 @@ function RaidTable({
     filterChantier.length > 0 ||
     filterComite.length > 0 ||
     filterOverdue ||
-    filterCritical;
+    filterCritical ||
+    filterDeleted !== "active";
 
   return (
     <div className="space-y-3">
@@ -622,6 +725,21 @@ function RaidTable({
               truncate
             />
           )}
+          <Select
+            value={filterDeleted}
+            onValueChange={(v) =>
+              setFilterDeleted(v as "active" | "deleted" | "all")
+            }
+          >
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Visibilité" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Actives</SelectItem>
+              <SelectItem value="deleted">Supprimées</SelectItem>
+              <SelectItem value="all">Toutes</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       <div className="flex flex-wrap items-center gap-2">
         <MultiSelect
@@ -654,7 +772,6 @@ function RaidTable({
             ...comiteFilterOptions.map((co) => ({
               value: co.id,
               label: comiteSelectLabel(co),
-              description: comiteSelectDate(co.date) || undefined,
             })),
           ]}
           selected={filterComite}
@@ -749,6 +866,7 @@ function RaidTable({
               setFilterComite([]);
               setFilterOverdue(false);
               setFilterCritical(false);
+              setFilterDeleted("active");
             }}
           >
             Effacer filtres
@@ -834,15 +952,29 @@ function RaidTable({
           <TableBody>
             {paginated.map((r) => {
               const critLabel = evaluateRaidRisque(r).criticite;
+              const warnActionsOuvertes =
+                r.type === "Risque" &&
+                isRaidClosed(r.statut) &&
+                risqueAActionsLieesOuvertes(r.actionsLiees);
 
               return (
                 <TableRow
                   key={r.id}
-                  className="cursor-pointer hover:bg-muted/50 transition-colors"
+                  className={`cursor-pointer hover:bg-muted/50 transition-colors ${r.deletedAt ? "bg-muted/40 opacity-80" : ""}`}
                   onClick={() => router.push(`/raid/${r.id}`)}
                 >
-                  <TableCell className="max-w-0 truncate p-1.5 text-[11px] font-mono font-semibold text-[#0A3C74] dark:text-foreground" title={r.code || undefined}>
-                    {r.code || "—"}
+                  <TableCell className="max-w-0 p-1.5 text-[11px] font-mono font-semibold text-[#0A3C74] dark:text-foreground" title={r.code || undefined}>
+                    <span className="truncate">{r.code || "—"}</span>
+                    {r.deletedAt ? (
+                      <p
+                        className="mt-0.5 truncate text-[10px] font-normal text-destructive"
+                        title={r.deleteMotif || undefined}
+                      >
+                        Supprimée
+                        {` le ${format(new Date(r.deletedAt), "dd/MM/yyyy", { locale: fr })}`}
+                        {r.deleteMotif ? ` — ${r.deleteMotif}` : ""}
+                      </p>
+                    ) : null}
                   </TableCell>
                   {showType && (
                     <TableCell className="p-1.5">
@@ -860,6 +992,17 @@ function RaidTable({
                     </div>
                     {r.domaine && (
                       <div className="truncate text-[10px] text-muted-foreground" title={r.domaine}>{r.domaine}</div>
+                    )}
+                    {warnActionsOuvertes && (
+                      <div
+                        className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-medium text-amber-700 dark:text-amber-400"
+                        title="Des actions liées ne sont pas encore clôturées"
+                      >
+                        <AlertTriangle className="size-3 shrink-0" />
+                        <span className="truncate">
+                          Actions liées non clôturées
+                        </span>
+                      </div>
                     )}
                     {isRaidInitialEcheancePast(
                       r.statut,
@@ -963,7 +1106,8 @@ function RaidTable({
                       >
                         <ExternalLink className="size-3.5" />
                       </Button>
-                      {formEditCtx &&
+                      {!r.deletedAt &&
+                        formEditCtx &&
                         canEditRaidFormClient(r, formEditCtx) &&
                         (canWriteRaid ||
                           isRaidAssignee(ressourceId, r.responsableRessourceId)) && (
@@ -977,14 +1121,25 @@ function RaidTable({
                           </Button>
                         )}
                       {formEditCtx?.chantierScopeAll && canWriteRaid && (
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          title="Supprimer"
-                          onClick={() => onDelete(r.id)}
-                        >
-                          <Trash2 className="size-3.5 text-destructive" />
-                        </Button>
+                        r.deletedAt ? (
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            title="Restaurer"
+                            onClick={() => onRestore(r.id)}
+                          >
+                            <RotateCcw className="size-3.5" />
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            title="Supprimer"
+                            onClick={() => onDelete(r.id)}
+                          >
+                            <Trash2 className="size-3.5 text-destructive" />
+                          </Button>
+                        )
                       )}
                     </div>
                   </TableCell>
@@ -1084,12 +1239,56 @@ function RaidScopeToggles({
 export function RaidList({ items, filterType, initialProbabilite, initialImpact, initialRisque, initialMaitrise, initialStatut, initialOverdue, initialCritical, initialRaidScope = "mine", statusConfigs, fieldOptions, chantiers = [], comites = [] }: Props) {
   const { ressourceId, displayName } = useUser();
   const canWriteRaid = useCanWritePage("/raid");
-  const filteredIdsRef = useRef<Record<string, string[]>>({});
-  const [raidScope, setRaidScope] = useState<RaidScope>(
-    initialRaidScope === "all" ? "all" : "mine"
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const urlSync = isRaidRegisterPath(pathname);
+  const urlQuery = useMemo(
+    () => parseRaidListQuery(searchParams),
+    [searchParams]
   );
+  const patchQuery = useCallback(
+    (partial: Partial<RaidListQuery>) => {
+      if (!urlSync) return;
+      const merged = { ...parseRaidListQuery(searchParams), ...partial };
+      const qs = serializeRaidListQuery(merged);
+      const next = qs ? `${pathname}?${qs}` : pathname;
+      const prev = searchParams.toString()
+        ? `${pathname}?${searchParams.toString()}`
+        : pathname;
+      if (next !== prev) {
+        router.replace(next, { scroll: false });
+      }
+    },
+    [urlSync, pathname, router, searchParams]
+  );
+
+  useEffect(() => {
+    if (!urlSync) return;
+    try {
+      const qs = searchParams.toString();
+      sessionStorage.setItem(
+        RAID_LIST_RETURN_KEY,
+        qs ? `${pathname}?${qs}` : pathname
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [urlSync, pathname, searchParams]);
+
+  const filteredIdsRef = useRef<Record<string, string[]>>({});
+  const [raidScope, setRaidScope] = useState<RaidScope>(() => {
+    if (urlSync && searchParams.get("scope") === "all") return "all";
+    if (urlSync && searchParams.get("scope") === "mine") return "mine";
+    return initialRaidScope === "all" ? "all" : "mine";
+  });
+  const [localView, setLocalView] = useState<RaidListView>(
+    () => (urlSync ? urlQuery.view : "table")
+  );
+  const [localTypeTab, setLocalTypeTab] = useState("");
   const [editItem, setEditItem] = useState<RaidRow | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [restoreId, setRestoreId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [formEditCtx, setFormEditCtx] = useState<RaidFormEditCtx | null>(null);
 
@@ -1120,7 +1319,9 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
 
   const mineCount = useMemo(
     () =>
-      items.filter((r) => isRaidAssignedToMe(r, ressourceId, displayName)).length,
+      items.filter(
+        (r) => !r.deletedAt && isRaidAssignedToMe(r, ressourceId, displayName)
+      ).length,
     [items, ressourceId, displayName]
   );
 
@@ -1129,20 +1330,25 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
     return items.filter((r) => isRaidAssignedToMe(r, ressourceId, displayName));
   }, [items, raidScope, ressourceId, displayName]);
 
-  // Group by type
+  const activeScopedItems = useMemo(
+    () => scopedItems.filter((r) => !r.deletedAt),
+    [scopedItems]
+  );
+
+  // Group by type (actives — kanban / calendrier / compteurs d'onglets)
   const grouped = useMemo(() => {
     const map = new Map<string, RaidRow[]>();
-    for (const r of scopedItems) {
+    for (const r of activeScopedItems) {
       const list = map.get(r.type) ?? [];
       list.push(r);
       map.set(r.type, list);
     }
     return map;
-  }, [scopedItems]);
+  }, [activeScopedItems]);
 
   // Calendar events
   const calendarEvents: CalendarEvent[] = useMemo(() => {
-    return scopedItems
+    return activeScopedItems
       .filter(
         (r) =>
           r.date_echeance_actualisee ||
@@ -1181,27 +1387,42 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
           },
         };
       });
-  }, [scopedItems]);
+  }, [activeScopedItems]);
 
   const typeOrder = ["Action", "Risque", "Information", "Décision"] as const;
 
   const scopeBar = (
     <RaidScopeToggles
       scope={raidScope}
-      onChange={setRaidScope}
+      onChange={(s) => {
+        setRaidScope(s);
+        patchQuery({ scope: s });
+      }}
       mineCount={mineCount}
-      allCount={items.length}
+      allCount={items.filter((r) => !r.deletedAt).length}
     />
   );
 
   // If filtered to a single type, show table directly (no type tabs)
   if (filterType) {
     const typeItems = grouped.get(filterType) ?? EMPTY_ROWS;
+    const typeTableItems = scopedItems.filter((r) => r.type === filterType);
     const typeCalendar = calendarEvents.filter((e) => e.type === filterType);
     return (
       <>
         <div className="mb-4">{scopeBar}</div>
-        <Tabs defaultValue="table" className="space-y-4" key={`scope-${raidScope}-${filterType}`}>
+        <Tabs
+          value={(() => {
+            const v = urlSync ? urlQuery.view : localView;
+            return v === "kanban" && filterType !== "Action" ? "table" : v || "table";
+          })()}
+          onValueChange={(v) => {
+            const next = v as RaidListView;
+            if (urlSync) patchQuery({ view: next });
+            else setLocalView(next);
+          }}
+          className="space-y-4"
+        >
           <div className="flex flex-wrap items-center justify-between gap-2">
           <TabsList>
             <TabsTrigger value="table" className="gap-2">
@@ -1230,10 +1451,11 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
           </div>
           <TabsContent value="table">
             <RaidTable
-              items={typeItems}
+              items={typeTableItems}
               showType={false}
               onEdit={setEditItem}
               onDelete={(id) => { setDeleteError(null); setDeleteId(id); }}
+              onRestore={(id) => { setDeleteError(null); setRestoreId(id); }}
               initialProbabilite={initialProbabilite}
               initialImpact={initialImpact}
               initialRisque={initialRisque}
@@ -1246,6 +1468,8 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
               formEditCtx={formEditCtx}
               chantiers={chantiers}
               comites={comites}
+              urlQuery={urlSync ? urlQuery : undefined}
+              onQueryPatch={urlSync ? patchQuery : undefined}
               onFilteredChange={(rows) => {
                 filteredIdsRef.current[filterType] = rows.map((r) => r.id);
               }}
@@ -1278,6 +1502,9 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
           open={!!deleteId && !!formEditCtx?.chantierScopeAll && canWriteRaid}
           onOpenChange={(open) => !open && setDeleteId(null)}
           requireMotif
+          title="Supprimer l'élément RAID"
+          description="L'entrée ne sera plus visible dans les listes actives, le kanban, le calendrier et les fiches. Vous pourrez la retrouver via le filtre « Supprimées » et la restaurer."
+          motifLabel="Motif de la suppression"
           onConfirm={async (motif) => {
             try {
               if (deleteId) await deleteRaid(deleteId, { motif });
@@ -1286,7 +1513,25 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
               throw err;
             }
           }}
-          title="Supprimer l'élément"
+        />
+        <DeleteConfirmDialog
+          open={!!restoreId && !!formEditCtx?.chantierScopeAll && canWriteRaid}
+          onOpenChange={(open) => !open && setRestoreId(null)}
+          requireMotif
+          title="Restaurer l'élément RAID"
+          description="L'entrée redeviendra active (listes, kanban, calendrier, fiches)."
+          motifLabel="Commentaire de restauration"
+          motifPlaceholder="Expliquez pourquoi cette entrée est restaurée…"
+          confirmLabel="Restaurer"
+          confirmVariant="default"
+          onConfirm={async (motif) => {
+            try {
+              if (restoreId) await restoreRaid(restoreId, { motif });
+            } catch (err) {
+              setDeleteError(err instanceof Error ? err.message : "Erreur de restauration");
+              throw err;
+            }
+          }}
         />
         {deleteError && <p className="text-xs text-destructive mt-2">{deleteError}</p>}
       </>
@@ -1295,14 +1540,30 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
 
   // Full RAID view with tabs per type
   const firstType = typeOrder.find((t) => grouped.has(t)) ?? "Action";
+  const typeTab = (() => {
+    const raw = urlSync ? urlQuery.ttype : localTypeTab;
+    if (
+      raw === "calendrier" ||
+      typeOrder.includes(raw as (typeof typeOrder)[number])
+    ) {
+      return raw;
+    }
+    return firstType;
+  })();
 
   return (
     <>
       <div className="mb-4">{scopeBar}</div>
       <Tabs
-        defaultValue={firstType}
+        value={typeTab}
+        onValueChange={(v) => {
+          if (urlSync) patchQuery({ ttype: v, view: "table" });
+          else {
+            setLocalTypeTab(v);
+            setLocalView("table");
+          }
+        }}
         className="space-y-4"
-        key={`scope-${raidScope}-all`}
       >
         <TabsList className="h-auto p-1 gap-1 flex-wrap">
           {typeOrder.map((t) => {
@@ -1330,7 +1591,18 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
           const tItems = grouped.get(t) ?? EMPTY_ROWS;
           return (
             <TabsContent key={t} value={t}>
-              <Tabs defaultValue="table" className="space-y-4">
+              <Tabs
+                value={(() => {
+                  const v = urlSync ? urlQuery.view : localView;
+                  return v === "kanban" && t !== "Action" ? "table" : v || "table";
+                })()}
+                onValueChange={(v) => {
+                  const next = v as RaidListView;
+                  if (urlSync) patchQuery({ view: next });
+                  else setLocalView(next);
+                }}
+                className="space-y-4"
+              >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                 <TabsList>
                   <TabsTrigger value="table" className="gap-2">
@@ -1358,20 +1630,27 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
                 />
                 </div>
                 <TabsContent value="table">
+                  {typeTab === t ? (
                   <RaidTable
-                    items={tItems}
+                    items={scopedItems.filter((r) => r.type === t)}
                     showType={false}
                     onEdit={setEditItem}
                     onDelete={(id) => { setDeleteError(null); setDeleteId(id); }}
+                    onRestore={(id) => { setDeleteError(null); setRestoreId(id); }}
                     statusConfigs={statusConfigs}
                     fieldOptions={fieldOptions}
                     formEditCtx={formEditCtx}
                     chantiers={chantiers}
                     comites={comites}
+                    urlQuery={urlSync ? urlQuery : undefined}
+                    onQueryPatch={
+                      urlSync && typeTab === t ? patchQuery : undefined
+                    }
                     onFilteredChange={(rows) => {
                       filteredIdsRef.current[t] = rows.map((r) => r.id);
                     }}
                   />
+                  ) : null}
                 </TabsContent>
                 {t === "Action" && (
                   <TabsContent value="kanban">
@@ -1408,6 +1687,9 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
         open={!!deleteId && !!formEditCtx?.chantierScopeAll && canWriteRaid}
         onOpenChange={(open) => !open && setDeleteId(null)}
         requireMotif
+        title="Supprimer l'élément RAID"
+        description="L'entrée ne sera plus visible dans les listes actives, le kanban, le calendrier et les fiches. Vous pourrez la retrouver via le filtre « Supprimées » et la restaurer."
+        motifLabel="Motif de la suppression"
         onConfirm={async (motif) => {
           try {
             if (deleteId) await deleteRaid(deleteId, { motif });
@@ -1416,7 +1698,25 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
             throw err;
           }
         }}
-        title="Supprimer l'élément"
+      />
+      <DeleteConfirmDialog
+        open={!!restoreId && !!formEditCtx?.chantierScopeAll && canWriteRaid}
+        onOpenChange={(open) => !open && setRestoreId(null)}
+        requireMotif
+        title="Restaurer l'élément RAID"
+        description="L'entrée redeviendra active (listes, kanban, calendrier, fiches)."
+        motifLabel="Commentaire de restauration"
+        motifPlaceholder="Expliquez pourquoi cette entrée est restaurée…"
+        confirmLabel="Restaurer"
+        confirmVariant="default"
+        onConfirm={async (motif) => {
+          try {
+            if (restoreId) await restoreRaid(restoreId, { motif });
+          } catch (err) {
+            setDeleteError(err instanceof Error ? err.message : "Erreur de restauration");
+            throw err;
+          }
+        }}
       />
       {deleteError && <p className="text-xs text-destructive mt-2">{deleteError}</p>}
     </>

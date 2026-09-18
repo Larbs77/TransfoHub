@@ -19,6 +19,7 @@ import {
   ADHERENCE_TYPE_COLORS,
   ADHERENCE_STATUT_COLORS,
   ADHERENCE_CRITICITE_COLORS,
+  chantiersFromDependants,
 } from "@/lib/adherence-labels";
 import { AdherenceGraph } from "@/components/adherence-graph";
 import Link from "next/link";
@@ -34,11 +35,10 @@ interface ChantierRef {
 interface AdherenceRow {
   id: string;
   code: string;
-  chantierDependantId: string | null;
-  chantierDependant?: ChantierRef | null;
   chantierSourceId: string;
   chantierSource?: ChantierRef | null;
   chantierDependantLabel: string;
+  dependants?: Array<{ chantier: ChantierRef }>;
   type: string;
   domaine: string;
   description: string;
@@ -90,26 +90,33 @@ function AdherenceTable({
         </TableHeader>
         <TableBody>
           {items.map((a) => {
-            const relatedChantier =
-              direction === "source" ? a.chantierDependant : a.chantierSource;
+            const related =
+              direction === "source"
+                ? chantiersFromDependants(a.dependants)
+                : a.chantierSource
+                  ? [a.chantierSource]
+                  : [];
             return (
               <TableRow key={a.id}>
                 <TableCell className="font-mono text-xs font-medium">
                   {a.code}
                 </TableCell>
                 <TableCell>
-                  {relatedChantier ? (
-                    <Link
-                      href={`/chantiers/${relatedChantier.id}`}
-                      className="hover:underline"
-                    >
-                      <span className="text-xs font-medium">
-                        {relatedChantier.code}
-                      </span>
-                      <p className="text-xs text-muted-foreground truncate max-w-[180px]">
-                        {relatedChantier.nom}
-                      </p>
-                    </Link>
+                  {related.length ? (
+                    <div className="flex flex-col gap-1">
+                      {related.map((c) => (
+                        <Link
+                          key={c.id}
+                          href={`/chantiers/${c.id}`}
+                          className="hover:underline"
+                        >
+                          <span className="text-xs font-medium">{c.code}</span>
+                          <p className="max-w-[180px] truncate text-xs text-muted-foreground">
+                            {c.nom}
+                          </p>
+                        </Link>
+                      ))}
+                    </div>
                   ) : (
                     <span className="text-xs text-muted-foreground italic">
                       {a.chantierDependantLabel || "Transverse"}

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { readRaidListReturnUrl } from "@/lib/raid-list-query";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import {
@@ -55,6 +56,8 @@ import {
   getStatutColor,
   getStatutsForType,
   evaluateRaidRisque,
+  formatRisqueLienLabel,
+  risqueAActionsLieesOuvertes,
   CRITICITE_COLORS,
   CRITICITE_FG,
   PROBABILITE_LABELS,
@@ -111,6 +114,9 @@ type RaidDetail = {
   date_echeance_actualisee?: Date | string | null;
   date_fin_reelle?: Date | string | null;
   commentaires: string;
+  deletedAt?: Date | string | null;
+  deletedByName?: string | null;
+  deleteMotif?: string | null;
   createdByName: string;
   createdAt: Date | string;
   updatedAt: Date | string;
@@ -129,6 +135,14 @@ type RaidDetail = {
     equipeHierarchie: { id: string; name: string } | null;
   } | null;
   equipe: { id: string; name: string; type?: string | null } | null;
+  risqueLie?: { id: string; code: string; intitule: string } | null;
+  actionsLiees?: Array<{
+    id: string;
+    code: string;
+    description: string;
+    intitule: string;
+    statut: string;
+  }>;
   raidComments: Comment[];
   auditLogs: AuditLog[];
 };
@@ -234,7 +248,8 @@ export function RaidDetailClient({
 
   const typeColor = RAID_TYPE_COLORS[raid.type] ?? "#6b7280";
   const TypeIcon = typeIcon(raid.type);
-  const closed = isRaidClosed(raid.statut);
+  const isDeleted = !!raid.deletedAt;
+  const closed = isRaidClosed(raid.statut) || isDeleted;
   const isMine =
     currentUser.ressourceId &&
     raid.responsableRessourceId === currentUser.ressourceId;
@@ -242,6 +257,15 @@ export function RaidDetailClient({
   const statuts = getStatutsForType(raid.type);
 
   const { niveauRisque, criticite: critLabel } = evaluateRaidRisque(raid);
+  const actionsLiees = raid.actionsLiees ?? [];
+  const warnActionsOuvertes =
+    raid.type === "Risque" &&
+    isRaidClosed(raid.statut) &&
+    risqueAActionsLieesOuvertes(actionsLiees);
+  const warnClotureStatut =
+    raid.type === "Risque" &&
+    isRaidClosed(newStatut) &&
+    risqueAActionsLieesOuvertes(actionsLiees);
 
   const timeline = useMemo(() => {
     return [...raid.auditLogs].sort(
@@ -292,15 +316,14 @@ export function RaidDetailClient({
         <div className="relative mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-8">
           <div className="mb-4 flex flex-wrap items-center gap-2.5">
             <Button
-              asChild
+              type="button"
               variant="outline"
               size="sm"
               className="border-[#0A3C74]/15 bg-white/80 text-[#0A3C74] shadow-sm hover:bg-white hover:text-[#0A3C74]"
+              onClick={() => router.push(readRaidListReturnUrl(raid.type))}
             >
-              <Link href="/raid">
-                <ArrowLeft className="size-4" />
-                RAID
-              </Link>
+              <ArrowLeft className="size-4" />
+              RAID
             </Button>
             <Badge
               variant="outline"
@@ -325,12 +348,17 @@ export function RaidDetailClient({
             >
               {raid.statut || "Sans statut"}
             </Badge>
-            {closed && (
+            {isRaidClosed(raid.statut) && (
               <Badge
                 variant="secondary"
                 className="text-xs bg-slate-100 text-slate-600 dark:bg-muted"
               >
                 Clôturé
+              </Badge>
+            )}
+            {isDeleted && (
+              <Badge variant="destructive" className="text-xs">
+                Supprimée
               </Badge>
             )}
             {unassigned && (
@@ -450,6 +478,34 @@ export function RaidDetailClient({
             {error}
           </div>
         )}
+        {isDeleted && (
+          <div
+            className="flex gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            role="status"
+          >
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <p>
+              Entrée supprimée
+              {raid.deletedAt
+                ? ` le ${format(new Date(raid.deletedAt), "dd/MM/yyyy", { locale: fr })}`
+                : ""}
+              {raid.deletedByName ? ` par ${raid.deletedByName}` : ""}
+              {raid.deleteMotif ? ` — ${raid.deleteMotif}` : ""}.
+              Elle n&apos;apparaît plus dans les listes actives.
+            </p>
+          </div>
+        )}
+        {warnActionsOuvertes && (
+          <div
+            className="flex gap-2 rounded-lg border border-amber-500/35 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100"
+            role="status"
+          >
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+            <p>
+              Attention : des actions liées ne sont pas encore clôturées.
+            </p>
+          </div>
+        )}
 
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Main column */}
@@ -546,8 +602,62 @@ export function RaidDetailClient({
                     )}
                   </div>
                 )}
+                {raid.type === "Action" && raid.risqueLie ? (
+                  <div className="rounded-lg border bg-muted/20 p-3 text-sm">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Risque lié
+                    </p>
+                    <Link
+                      href={`/raid/${raid.risqueLie.id}`}
+                      className="mt-1 inline-block font-medium text-primary hover:underline"
+                    >
+                      {formatRisqueLienLabel(
+                        raid.risqueLie.code,
+                        raid.risqueLie.intitule
+                      )}
+                    </Link>
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
+
+            {raid.type === "Risque" ? (
+              <Card className="overflow-hidden border-0 shadow-md ring-1 ring-black/5 dark:ring-white/10">
+                <CardHeader className="border-b bg-muted/30">
+                  <CardTitle className="text-base">Actions liées</CardTitle>
+                  <CardDescription>
+                    Actions du RAID rattachées à ce risque
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  {actionsLiees.length === 0 ? (
+                    <p className="text-sm italic text-muted-foreground">
+                      Aucune action liée.
+                    </p>
+                  ) : (
+                    <ul className="divide-y rounded-lg border">
+                      {actionsLiees.map((a) => (
+                        <li key={a.id} className="px-3 py-2.5">
+                          <Link
+                            href={`/raid/${a.id}`}
+                            className="font-mono text-xs font-semibold text-[#0A3C74] hover:underline dark:text-foreground"
+                          >
+                            {a.code}
+                          </Link>
+                          <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground/90">
+                            {a.description?.trim() || (
+                              <span className="italic text-muted-foreground">
+                                {a.intitule}
+                              </span>
+                            )}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </CardContent>
+              </Card>
+            ) : null}
 
             {/* Comments */}
             <Card className="border-0 shadow-md ring-1 ring-black/5 dark:ring-white/10">
@@ -906,6 +1016,18 @@ export function RaidDetailClient({
                 Obligatoire — sera visible dans la conversation et le journal.
               </p>
             </div>
+            {warnClotureStatut ? (
+              <div
+                className="flex gap-2 rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100"
+                role="status"
+              >
+                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+                <p>
+                  Attention : des actions liées ne sont pas encore clôturées.
+                  Vous pouvez quand même clôturer ce risque.
+                </p>
+              </div>
+            ) : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setStatusOpen(false)}>

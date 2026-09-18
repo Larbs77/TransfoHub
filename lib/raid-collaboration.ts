@@ -16,7 +16,8 @@ export type RaidAuditAction =
   | "unassigned"
   | "commented"
   | "field_updated"
-  | "deleted";
+  | "deleted"
+  | "restored";
 
 export {
   isRaidClosed,

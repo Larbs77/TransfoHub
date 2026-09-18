@@ -7,6 +7,8 @@ import {
   getChantiersForSelect,
   getChantiersForRaidCreate,
   getComitesForRaidCreate,
+  getComiteParametresCatalog,
+  getRisquesForActionLink,
   getRessourcesForSelect,
   getRaidFieldOptions,
 } from "@/app/(app)/actions";
@@ -46,14 +48,18 @@ import {
   getStatutsForType,
   getStatutsFromConfig,
   evaluateRaidRisque,
+  raidRisqueSaisieError,
   CRITICITE_COLORS,
   getLabelsForKind,
   actionRequiresEcheance,
+  isRaidClosed,
+  risqueAActionsLieesOuvertes,
   type StatusConfigItem,
   type RaidFieldOptionItem,
 } from "@/lib/raid-labels";
-import { format } from "date-fns";
-import { INSTANCE_LABELS } from "@/lib/comite-labels";
+import type { ComiteParametreOption } from "@/lib/comite-labels";
+import { ComiteDrilldownSelect } from "@/components/comite-drilldown-select";
+import { RisqueLienSelect } from "@/components/risque-lien-select";
 
 interface RaidData {
   id: string;
@@ -79,6 +85,9 @@ interface RaidData {
   date_fin_reelle?: Date | null;
   commentaires: string;
   comiteId: string | null;
+  risqueLieId?: string | null;
+  risqueLie?: { id: string; code: string; intitule: string } | null;
+  actionsLiees?: Array<{ id: string; statut: string }>;
 }
 
 interface Props {
@@ -99,6 +108,8 @@ function toDateInput(d: Date | null) {
   return new Date(d).toISOString().split("T")[0];
 }
 
+const RAID_FIELD_NONE = "__none__";
+
 export function RaidFormDialog({
   open,
   onOpenChange,
@@ -116,8 +127,16 @@ export function RaidFormDialog({
   const [error, setError] = useState<string | null>(null);
   const [chantiers, setChantiers] = useState<{ id: string; code: string; nom: string }[]>([]);
   const [comites, setComites] = useState<
-    { id: string; instance: string; numero: number; date: Date; chantierId?: string | null }[]
+    {
+      id: string;
+      instance: string;
+      numero: number;
+      date: Date;
+      chantierId?: string | null;
+      chantier?: { id: string; code: string; nom: string } | null;
+    }[]
   >([]);
+  const [comiteParams, setComiteParams] = useState<ComiteParametreOption[]>([]);
   const [fieldOptions, setFieldOptions] = useState<RaidFieldOptionItem[]>(
     fieldOptionsProp ?? []
   );
@@ -157,8 +176,19 @@ export function RaidFormDialog({
   );
   const [commentaires, setCommentaires] = useState(raid?.commentaires ?? "");
   const [comiteId, setComiteId] = useState(raid?.comiteId ?? defaultComiteId ?? "__none__");
+  const [risqueLieId, setRisqueLieId] = useState(
+    raid?.risqueLieId ?? "__none__"
+  );
+  const [risquesLien, setRisquesLien] = useState<
+    { id: string; code: string | null; intitule: string }[]
+  >([]);
 
   const isRisque = type === "Risque";
+  const isAction = type === "Action";
+  const warnActionsOuvertes =
+    isRisque &&
+    isRaidClosed(statut) &&
+    risqueAActionsLieesOuvertes(raid?.actionsLiees);
   const risqueEval = isRisque
     ? evaluateRaidRisque({
         probabilite: probabilite ? Number(probabilite) : null,
@@ -189,15 +219,32 @@ export function RaidFormDialog({
       Promise.all([
         isEdit ? getChantiersForSelect() : getChantiersForRaidCreate(),
         getComitesForRaidCreate(isEdit ? raid?.comiteId : null),
+        getComiteParametresCatalog().catch(() => [] as ComiteParametreOption[]),
         getRessourcesForSelect(),
         fieldOptionsProp?.length
           ? Promise.resolve(fieldOptionsProp)
           : getRaidFieldOptions().catch(() => [] as RaidFieldOptionItem[]),
-      ]).then(([c, co, res, fo]) => {
+        getRisquesForActionLink().catch(
+          () => [] as { id: string; code: string | null; intitule: string }[]
+        ),
+      ]).then(([c, co, params, res, fo, risques]) => {
         setChantiers(c);
         setComites(co);
+        setComiteParams(params);
         setRessources(res);
         setFieldOptions(fo);
+        const list = [...risques];
+        if (
+          raid?.risqueLie?.id &&
+          !list.some((r) => r.id === raid.risqueLie!.id)
+        ) {
+          list.unshift({
+            id: raid.risqueLie.id,
+            code: raid.risqueLie.code,
+            intitule: raid.risqueLie.intitule,
+          });
+        }
+        setRisquesLien(list);
       });
     }
   }, [open, isEdit, fieldOptionsProp, raid?.comiteId]);
@@ -238,6 +285,16 @@ export function RaidFormDialog({
       return;
     }
     const initialeVide = isEdit && !raid?.date_echeance;
+    const risqueError = raidRisqueSaisieError({
+      type,
+      probabilite: probabilite ? Number(probabilite) : null,
+      impact: impact ? Number(impact) : null,
+      niveau_maitrise: niveauMaitrise || null,
+    });
+    if (risqueError) {
+      setError(risqueError);
+      return;
+    }
     if (
       type === "Action" &&
       actionRequiresEcheance(statut) &&
@@ -285,6 +342,7 @@ export function RaidFormDialog({
           : null,
       commentaires,
       comiteId: comiteId && comiteId !== "__none__" ? comiteId : null,
+      risqueLieId: isAction && risqueLieId !== "__none__" ? risqueLieId : null,
     };
     try {
       if (isEdit) {
@@ -318,7 +376,21 @@ export function RaidFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[min(94vh,920px)] w-[min(100vw-1.5rem,68rem)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
+      <DialogContent
+        className="flex max-h-[min(94vh,920px)] w-[min(100vw-1.5rem,68rem)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
+        onInteractOutside={(e) => {
+          const el = e.target as HTMLElement | null;
+          if (el?.closest?.("[data-comite-picker],[data-risque-lien-picker]")) {
+            e.preventDefault();
+          }
+        }}
+        onFocusOutside={(e) => {
+          const el = e.target as HTMLElement | null;
+          if (el?.closest?.("[data-comite-picker],[data-risque-lien-picker]")) {
+            e.preventDefault();
+          }
+        }}
+      >
         {/* Header BOA */}
         <div className="shrink-0 border-b bg-gradient-to-br from-white via-[#f7fbfd] to-[#eef8f8] px-6 pb-5 pt-6 dark:from-background dark:via-background dark:to-muted/30">
           <div className="mb-3 flex flex-wrap items-center gap-2 pr-8">
@@ -445,13 +517,18 @@ export function RaidFormDialog({
                 <div className="grid gap-1.5">
                   <label className="text-sm font-medium">Catégorie</label>
                   <Select
-                    value={categorie || undefined}
-                    onValueChange={setCategorie}
+                    value={categorie || RAID_FIELD_NONE}
+                    onValueChange={(v) =>
+                      setCategorie(v === RAID_FIELD_NONE ? "" : v)
+                    }
                   >
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Sélectionner" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value={RAID_FIELD_NONE}>
+                        Sélectionner
+                      </SelectItem>
                       {categorieOptions.map((c) => (
                         <SelectItem key={c} value={c}>
                           {c}
@@ -463,13 +540,18 @@ export function RaidFormDialog({
                 <div className="grid gap-1.5">
                   <label className="text-sm font-medium">Domaine</label>
                   <Select
-                    value={domaine || undefined}
-                    onValueChange={setDomaine}
+                    value={domaine || RAID_FIELD_NONE}
+                    onValueChange={(v) =>
+                      setDomaine(v === RAID_FIELD_NONE ? "" : v)
+                    }
                   >
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Sélectionner" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value={RAID_FIELD_NONE}>
+                        Sélectionner
+                      </SelectItem>
                       {domaineOptions.map((d) => (
                         <SelectItem key={d} value={d}>
                           {d}
@@ -534,24 +616,31 @@ export function RaidFormDialog({
                 </div>
                 <div className="grid min-w-0 gap-1.5">
                   <label className="text-sm font-medium">Comité</label>
-                  <Select value={comiteId} onValueChange={setComiteId}>
-                    <SelectTrigger className="w-full overflow-hidden">
-                      <span className="truncate">
-                        <SelectValue placeholder="Aucun" />
-                      </span>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Aucun</SelectItem>
-                      {comites.map((co) => (
-                        <SelectItem key={co.id} value={co.id}>
-                          {INSTANCE_LABELS[co.instance] ?? co.instance} #
-                          {co.numero}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <ComiteDrilldownSelect
+                    comites={comites}
+                    params={comiteParams}
+                    value={comiteId}
+                    onChange={setComiteId}
+                    noneValue="__none__"
+                    placeholder="Aucun"
+                  />
                 </div>
               </div>
+              {isAction ? (
+                <div className="grid min-w-0 gap-1.5">
+                  <label className="text-sm font-medium">Risque lié</label>
+                  <RisqueLienSelect
+                    risques={risquesLien}
+                    value={risqueLieId}
+                    onChange={setRisqueLieId}
+                    noneValue="__none__"
+                    placeholder="Aucun"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Optionnel — relie cette action à un risque du registre.
+                  </p>
+                </div>
+              ) : null}
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="grid gap-1.5">
                   <label className="text-sm font-medium">
@@ -589,6 +678,19 @@ export function RaidFormDialog({
               </div>
             </section>
 
+            {warnActionsOuvertes ? (
+              <div
+                className="flex gap-2 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-950 dark:text-amber-100"
+                role="status"
+              >
+                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+                <p>
+                  Attention : des actions liées ne sont pas encore clôturées.
+                  Vous pouvez quand même clôturer ce risque.
+                </p>
+              </div>
+            ) : null}
+
             {/* Risque */}
             {isRisque && (
               <section className="space-y-3 rounded-xl border border-amber-500/25 bg-amber-500/5 p-4">
@@ -598,13 +700,15 @@ export function RaidFormDialog({
                 </h3>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   <div className="grid gap-1.5">
-                    <label className="text-sm font-medium">Probabilité</label>
+                    <label className="text-sm font-medium">
+                      Probabilité <span className="text-destructive">*</span>
+                    </label>
                     <Select
-                      value={probabilite ? String(probabilite) : ""}
+                      value={probabilite ? String(probabilite) : undefined}
                       onValueChange={(v) => setProbabilite(Number(v))}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue placeholder="—" />
+                        <SelectValue placeholder="Sélectionner" />
                       </SelectTrigger>
                       <SelectContent>
                         {Object.entries(PROBABILITE_LABELS).map(
@@ -618,13 +722,15 @@ export function RaidFormDialog({
                     </Select>
                   </div>
                   <div className="grid gap-1.5">
-                    <label className="text-sm font-medium">Impact</label>
+                    <label className="text-sm font-medium">
+                      Impact <span className="text-destructive">*</span>
+                    </label>
                     <Select
-                      value={impact ? String(impact) : ""}
+                      value={impact ? String(impact) : undefined}
                       onValueChange={(v) => setImpact(Number(v))}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue placeholder="—" />
+                        <SelectValue placeholder="Sélectionner" />
                       </SelectTrigger>
                       <SelectContent>
                         {Object.entries(IMPACT_LABELS).map(([k, label]) => (
@@ -656,19 +762,17 @@ export function RaidFormDialog({
                   </div>
                   <div className="grid gap-1.5">
                     <label className="text-sm font-medium">
-                      Niveau de maîtrise
+                      Niveau de maîtrise{" "}
+                      <span className="text-destructive">*</span>
                     </label>
                     <Select
-                      value={niveauMaitrise || "__none__"}
-                      onValueChange={(v) =>
-                        setNiveauMaitrise(v === "__none__" ? "" : v)
-                      }
+                      value={niveauMaitrise || undefined}
+                      onValueChange={setNiveauMaitrise}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue placeholder="—" />
+                        <SelectValue placeholder="Sélectionner" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="__none__">—</SelectItem>
                         {NIVEAU_MAITRISE_VALUES.map((m) => (
                           <SelectItem key={m} value={m}>
                             {m}
@@ -706,30 +810,32 @@ export function RaidFormDialog({
                     </p>
                   </div>
                 </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="grid gap-1.5">
-                    <label className="text-sm font-medium">Stratégie</label>
-                    <Select value={strategie} onValueChange={setStrategie}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Sélectionner" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {STRATEGIE_LIST.map((s) => (
-                          <SelectItem key={s} value={s}>
-                            {s}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid gap-1.5">
-                    <label className="text-sm font-medium">Mitigation</label>
-                    <Input
-                      value={mitigation}
-                      onChange={(e) => setMitigation(e.target.value)}
-                      placeholder="Mesures de mitigation"
-                    />
-                  </div>
+                <div className="grid gap-1.5 sm:max-w-md">
+                  <label className="text-sm font-medium">Stratégie</label>
+                  <Select
+                    value={strategie || undefined}
+                    onValueChange={setStrategie}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Sélectionner" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STRATEGIE_LIST.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-sm font-medium">Mitigation</label>
+                  <textarea
+                    className={fieldClass}
+                    value={mitigation}
+                    onChange={(e) => setMitigation(e.target.value)}
+                    placeholder="Mesures de mitigation, plan de traitement…"
+                  />
                 </div>
               </section>
             )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { createAdherence, updateAdherence } from "@/app/(app)/actions";
 import {
   Dialog,
@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
+import { ChantierSelect, ChantierMultiSelect } from "@/components/chantier-select";
 import {
   ADHERENCE_TYPES,
   ADHERENCE_STATUTS,
@@ -36,8 +37,8 @@ interface AdherenceData {
   id: string;
   code: string;
   chantierSourceId: string;
-  chantierDependantId: string | null;
   chantierDependantLabel: string;
+  dependants?: Array<{ chantier: { id: string; code: string; nom: string } }>;
   type: string;
   domaine: string;
   description: string;
@@ -55,6 +56,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   adherence?: AdherenceData | null;
   chantiers: ChantierOption[];
+  chantiersDependant?: ChantierOption[];
   nextCode: string;
   defaultSourceId?: string;
 }
@@ -65,61 +67,111 @@ function toDateInput(d: Date | null | undefined): string {
   return dt.toISOString().slice(0, 10);
 }
 
+const FIELD_NONE = "__none__";
+
 export function AdherenceFormDialog({
   open,
   onOpenChange,
   adherence,
   chantiers,
+  chantiersDependant,
   nextCode,
   defaultSourceId,
 }: Props) {
   const isEdit = !!adherence;
+  const dependantOptions = chantiersDependant?.length
+    ? chantiersDependant
+    : chantiers;
+  const sourceOptions = useMemo(() => {
+    const list = [...chantiers];
+    const currentId = adherence?.chantierSourceId ?? defaultSourceId;
+    if (currentId && !list.some((c) => c.id === currentId)) {
+      const extra = dependantOptions.find((c) => c.id === currentId);
+      if (extra) list.unshift(extra);
+    }
+    return list;
+  }, [chantiers, dependantOptions, adherence?.chantierSourceId, defaultSourceId]);
   const [loading, setLoading] = useState(false);
 
   const [code, setCode] = useState(adherence?.code ?? nextCode);
   const [chantierSourceId, setChantierSourceId] = useState(adherence?.chantierSourceId ?? defaultSourceId ?? "");
-  const [chantierDependantId, setChantierDependantId] = useState(adherence?.chantierDependantId ?? "");
+  const [chantierDependantIds, setChantierDependantIds] = useState<string[]>(
+    adherence?.dependants?.map((d) => d.chantier.id) ?? []
+  );
   const [chantierDependantLabel, setChantierDependantLabel] = useState(adherence?.chantierDependantLabel ?? "");
-  const [type, setType] = useState(adherence?.type ?? "Technique");
+  const [error, setError] = useState<string | null>(null);
+  const [type, setType] = useState(adherence?.type ?? "");
   const [domaine, setDomaine] = useState(adherence?.domaine ?? "");
   const [description, setDescription] = useState(adherence?.description ?? "");
-  const [criticite, setCriticite] = useState(adherence?.criticite ?? "MODÉRÉE");
-  const [statut, setStatut] = useState(adherence?.statut ?? "Planifié");
+  const [criticite, setCriticite] = useState(adherence?.criticite ?? "");
+  const [statut, setStatut] = useState(adherence?.statut ?? "");
   const [dateIdent, setDateIdent] = useState(toDateInput(adherence?.date_identification));
   const [dateResolution, setDateResolution] = useState(toDateInput(adherence?.date_resolution_prevue));
   const [responsable, setResponsable] = useState(adherence?.responsable ?? "");
   const [contratInterface, setContratInterface] = useState(adherence?.contrat_interface ?? "");
   const [commentaires, setCommentaires] = useState(adherence?.commentaires ?? "");
-  const [isTransverse, setIsTransverse] = useState(!adherence?.chantierDependantId && !!adherence?.chantierDependantLabel);
+  const [isTransverse, setIsTransverse] = useState(
+    !adherence?.dependants?.length && !!adherence?.chantierDependantLabel
+  );
 
   useEffect(() => {
     if (open) {
+      setError(null);
       setCode(adherence?.code ?? nextCode);
       setChantierSourceId(adherence?.chantierSourceId ?? defaultSourceId ?? "");
-      setChantierDependantId(adherence?.chantierDependantId ?? "");
+      setChantierDependantIds(
+        adherence?.dependants?.map((d) => d.chantier.id) ?? []
+      );
       setChantierDependantLabel(adherence?.chantierDependantLabel ?? "");
-      setType(adherence?.type ?? "Technique");
+      setType(adherence?.type ?? "");
       setDomaine(adherence?.domaine ?? "");
       setDescription(adherence?.description ?? "");
-      setCriticite(adherence?.criticite ?? "MODÉRÉE");
-      setStatut(adherence?.statut ?? "Planifié");
+      setCriticite(adherence?.criticite ?? "");
+      setStatut(adherence?.statut ?? "");
       setDateIdent(toDateInput(adherence?.date_identification));
       setDateResolution(toDateInput(adherence?.date_resolution_prevue));
       setResponsable(adherence?.responsable ?? "");
       setContratInterface(adherence?.contrat_interface ?? "");
       setCommentaires(adherence?.commentaires ?? "");
-      setIsTransverse(!adherence?.chantierDependantId && !!adherence?.chantierDependantLabel);
+      setIsTransverse(
+        !adherence?.dependants?.length && !!adherence?.chantierDependantLabel
+      );
     }
   }, [open, adherence, nextCode, defaultSourceId]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
+    if (!chantierSourceId) {
+      setError("Le chantier source est obligatoire.");
+      return;
+    }
+    if (!isTransverse && chantierDependantIds.length === 0) {
+      setError(
+        "Sélectionnez au moins un chantier dépendant, ou cochez Transverse."
+      );
+      return;
+    }
+    if (!type.trim()) {
+      setError("Le type est obligatoire.");
+      return;
+    }
+    if (!criticite.trim()) {
+      setError("La criticité est obligatoire.");
+      return;
+    }
+    if (!statut.trim()) {
+      setError("Le statut est obligatoire.");
+      return;
+    }
     setLoading(true);
     const data = {
       code,
       chantierSourceId,
-      chantierDependantId: isTransverse ? null : (chantierDependantId || null),
-      chantierDependantLabel: isTransverse ? chantierDependantLabel : "",
+      chantierDependantIds: isTransverse ? [] : chantierDependantIds,
+      chantierDependantLabel: isTransverse
+        ? chantierDependantLabel.trim() || "Tous chantiers"
+        : "",
       type,
       domaine,
       description,
@@ -131,18 +183,33 @@ export function AdherenceFormDialog({
       contrat_interface: contratInterface,
       commentaires,
     };
-    if (isEdit) {
-      await updateAdherence(adherence.id, data);
-    } else {
-      await createAdherence(data);
+    try {
+      if (isEdit) {
+        await updateAdherence(adherence.id, data);
+      } else {
+        await createAdherence(data);
+      }
+      onOpenChange(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Enregistrement impossible.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-    onOpenChange(false);
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent
+        className="flex max-h-[90vh] w-[min(100vw-1.5rem,64rem)] max-w-none flex-col overflow-y-auto sm:max-w-none"
+        onInteractOutside={(e) => {
+          const el = e.target as HTMLElement | null;
+          if (el?.closest?.("[data-chantier-picker]")) e.preventDefault();
+        }}
+        onFocusOutside={(e) => {
+          const el = e.target as HTMLElement | null;
+          if (el?.closest?.("[data-chantier-picker]")) e.preventDefault();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>
             {isEdit ? "Modifier l'adhérence" : "Nouvelle adhérence"}
@@ -156,10 +223,18 @@ export function AdherenceFormDialog({
               <Input value={code} onChange={(e) => setCode(e.target.value)} required />
             </div>
             <div className="grid gap-1.5">
-              <label className="text-sm font-medium">Type</label>
-              <Select value={type} onValueChange={setType}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <label className="text-sm font-medium">
+                Type <span className="text-destructive">*</span>
+              </label>
+              <Select
+                value={type || FIELD_NONE}
+                onValueChange={(v) => setType(v === FIELD_NONE ? "" : v)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Sélectionner" />
+                </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={FIELD_NONE}>Sélectionner</SelectItem>
                   {ADHERENCE_TYPES.map((t) => (
                     <SelectItem key={t} value={t}>{t}</SelectItem>
                   ))}
@@ -167,10 +242,18 @@ export function AdherenceFormDialog({
               </Select>
             </div>
             <div className="grid gap-1.5">
-              <label className="text-sm font-medium">Criticité</label>
-              <Select value={criticite} onValueChange={setCriticite}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <label className="text-sm font-medium">
+                Criticité <span className="text-destructive">*</span>
+              </label>
+              <Select
+                value={criticite || FIELD_NONE}
+                onValueChange={(v) => setCriticite(v === FIELD_NONE ? "" : v)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Sélectionner" />
+                </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={FIELD_NONE}>Sélectionner</SelectItem>
                   {ADHERENCE_CRITICITES.map((c) => (
                     <SelectItem key={c} value={c}>{c}</SelectItem>
                   ))}
@@ -180,27 +263,39 @@ export function AdherenceFormDialog({
           </div>
 
           {/* Chantier Source */}
-          <div className="grid gap-1.5">
-            <label className="text-sm font-medium">Chantier Source (dépend de)</label>
-            <Select value={chantierSourceId} onValueChange={setChantierSourceId}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Sélectionner..." /></SelectTrigger>
-              <SelectContent>
-                {chantiers.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.code} — {c.nom}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="grid min-w-0 gap-1.5">
+            <label className="text-sm font-medium">
+              Chantier Source (dépend de){" "}
+              <span className="text-destructive">*</span>
+            </label>
+            <ChantierSelect
+              chantiers={sourceOptions}
+              value={chantierSourceId}
+              onChange={(id) => {
+                setChantierSourceId(id);
+                setChantierDependantIds((prev) =>
+                  prev.filter((d) => d !== id)
+                );
+              }}
+              placeholder="Sélectionner…"
+            />
           </div>
 
           {/* Chantier Dépendant */}
-          <div className="grid gap-1.5">
-            <div className="flex items-center gap-3">
-              <label className="text-sm font-medium">Chantier Dépendant</label>
+          <div className="grid min-w-0 gap-1.5">
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="text-sm font-medium">
+                Chantier Dépendant <span className="text-destructive">*</span>
+              </label>
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <input
                   type="checkbox"
                   checked={isTransverse}
-                  onChange={(e) => setIsTransverse(e.target.checked)}
+                  onChange={(e) => {
+                  const next = e.target.checked;
+                  setIsTransverse(next);
+                  if (next) setChantierDependantIds([]);
+                }}
                   className="rounded"
                 />
                 Transverse (tous chantiers)
@@ -213,14 +308,13 @@ export function AdherenceFormDialog({
                 placeholder="Ex: Tous chantiers applicatifs"
               />
             ) : (
-              <Select value={chantierDependantId} onValueChange={setChantierDependantId}>
-                <SelectTrigger className="w-full"><SelectValue placeholder="Sélectionner..." /></SelectTrigger>
-                <SelectContent>
-                  {chantiers.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.code} — {c.nom}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <ChantierMultiSelect
+                chantiers={dependantOptions}
+                value={chantierDependantIds}
+                onChange={setChantierDependantIds}
+                excludeId={chantierSourceId || undefined}
+                placeholder="Sélectionner un ou plusieurs chantiers…"
+              />
             )}
           </div>
 
@@ -238,9 +332,15 @@ export function AdherenceFormDialog({
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-1.5">
               <label className="text-sm font-medium">Domaine</label>
-              <Select value={domaine} onValueChange={setDomaine}>
-                <SelectTrigger className="w-full"><SelectValue placeholder="Sélectionner..." /></SelectTrigger>
+              <Select
+                value={domaine || FIELD_NONE}
+                onValueChange={(v) => setDomaine(v === FIELD_NONE ? "" : v)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Sélectionner" />
+                </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={FIELD_NONE}>Sélectionner</SelectItem>
                   {ADHERENCE_DOMAINES.map((d) => (
                     <SelectItem key={d} value={d}>{d}</SelectItem>
                   ))}
@@ -248,10 +348,18 @@ export function AdherenceFormDialog({
               </Select>
             </div>
             <div className="grid gap-1.5">
-              <label className="text-sm font-medium">Statut</label>
-              <Select value={statut} onValueChange={setStatut}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <label className="text-sm font-medium">
+                Statut <span className="text-destructive">*</span>
+              </label>
+              <Select
+                value={statut || FIELD_NONE}
+                onValueChange={(v) => setStatut(v === FIELD_NONE ? "" : v)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Sélectionner" />
+                </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={FIELD_NONE}>Sélectionner</SelectItem>
                   {ADHERENCE_STATUTS.map((s) => (
                     <SelectItem key={s} value={s}>{s}</SelectItem>
                   ))}
@@ -290,14 +398,25 @@ export function AdherenceFormDialog({
             <Input value={commentaires} onChange={(e) => setCommentaires(e.target.value)} placeholder="Notes additionnelles..." />
           </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Annuler
-            </Button>
-            <Button type="submit" disabled={loading || !chantierSourceId}>
-              {loading && <Loader2 className="size-4 animate-spin" />}
-              {isEdit ? "Enregistrer" : "Créer"}
-            </Button>
+          {error ? (
+            <p className="text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          ) : null}
+
+          <DialogFooter className="sm:justify-between">
+            <p className="hidden text-xs text-muted-foreground sm:block">
+              Les champs marqués d&apos;un astérisque sont obligatoires.
+            </p>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Annuler
+              </Button>
+              <Button type="submit" disabled={loading}>
+                {loading && <Loader2 className="size-4 animate-spin" />}
+                {isEdit ? "Enregistrer" : "Créer"}
+              </Button>
+            </div>
           </DialogFooter>
         </form>
       </DialogContent>

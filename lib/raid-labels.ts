@@ -17,6 +17,30 @@ export function isRaidClosed(statut: string): boolean {
   return RAID_CLOSED_STATUTS.has(statut);
 }
 
+const RISQUE_LIEN_INTITULE_MAX = 265;
+
+/** Code + intitulé tronqué (265 car.) pour la liste « risque lié ». */
+export function formatRisqueLienLabel(
+  code: string | null | undefined,
+  intitule: string | null | undefined
+): string {
+  const c = (code ?? "").trim() || "—";
+  const t = (intitule ?? "").trim();
+  if (!t) return c;
+  const libelle =
+    t.length > RISQUE_LIEN_INTITULE_MAX
+      ? `${t.slice(0, RISQUE_LIEN_INTITULE_MAX)}..`
+      : t;
+  return `${c} — ${libelle}`;
+}
+
+export function risqueAActionsLieesOuvertes(
+  actions: Array<{ statut: string }> | null | undefined
+): boolean {
+  if (!actions?.length) return false;
+  return actions.some((a) => !isRaidClosed(a.statut));
+}
+
 /**
  * Échéance de pilotage RAID : **actualisée** en priorité, sinon initiale (legacy).
  */
@@ -455,6 +479,45 @@ export function isNiveauMaitrise(value: string | null | undefined): value is Niv
   );
 }
 
+function isProbabiliteOuImpactSaisi(value: number | null | undefined): boolean {
+  return value != null && value >= 1 && value <= 3;
+}
+
+/**
+ * Probabilité, Impact et maîtrise sont obligatoires à la création et à la
+ * modification d'un risque. Retourne un message d'erreur, ou null si OK.
+ */
+export function raidRisqueSaisieError(data: {
+  type?: string | null;
+  probabilite?: number | null;
+  impact?: number | null;
+  niveau_maitrise?: string | null;
+}): string | null {
+  if (data.type !== "Risque") return null;
+  const missing: string[] = [];
+  if (!isProbabiliteOuImpactSaisi(data.probabilite)) missing.push("Probabilité");
+  if (!isProbabiliteOuImpactSaisi(data.impact)) missing.push("Impact");
+  if (!isNiveauMaitrise(data.niveau_maitrise?.trim())) {
+    missing.push("Niveau de maîtrise");
+  }
+  if (!missing.length) return null;
+  if (missing.length === 1) {
+    return `${missing[0]} est obligatoire pour un risque.`;
+  }
+  const last = missing.pop();
+  return `${missing.join(", ")} et ${last} sont obligatoires pour un risque.`;
+}
+
+export function assertRaidRisqueSaisie(data: {
+  type?: string | null;
+  probabilite?: number | null;
+  impact?: number | null;
+  niveau_maitrise?: string | null;
+}): void {
+  const message = raidRisqueSaisieError(data);
+  if (message) throw new Error(message);
+}
+
 export function getNiveauRisque(
   probabilite: number | null | undefined,
   impact: number | null | undefined
@@ -550,6 +613,7 @@ export const RAID_AUDIT_FIELD_LABELS: Record<string, string> = {
   comiteId: "Comité",
   comment: "Commentaire",
   niveau_maitrise: "Niveau de maîtrise",
+  risqueLieId: "Risque lié",
 };
 
 // ── Criticité résiduelle (risque × maîtrise) — couleurs du cadre programme ─

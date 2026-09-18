@@ -36,7 +36,7 @@ function revalidateRaid(id: string, chantierId?: string | null) {
 }
 
 async function loadRaidForCollab(id: string) {
-  return prisma.raid.findUnique({
+  const raid = await prisma.raid.findUnique({
     where: { id },
     select: {
       id: true,
@@ -50,8 +50,15 @@ async function loadRaidForCollab(id: string) {
       chantierId: true,
       categorie: true,
       date_echeance: true,
+      deletedAt: true,
     },
   });
+  if (raid?.deletedAt) {
+    throw new Error(
+      "Cette entrée RAID est supprimée : restaurez-la avant de la modifier."
+    );
+  }
+  return raid;
 }
 
 /**
@@ -138,6 +145,18 @@ export async function getRaidDetail(id: string) {
         },
       },
       equipe: { select: { id: true, name: true, type: true } },
+      risqueLie: { select: { id: true, code: true, intitule: true } },
+      actionsLiees: {
+        where: { deletedAt: null },
+        select: {
+          id: true,
+          code: true,
+          description: true,
+          intitule: true,
+          statut: true,
+        },
+        orderBy: { code: "asc" },
+      },
       raidComments: {
         orderBy: { createdAt: "asc" },
       },

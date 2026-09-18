@@ -43,3 +43,32 @@ export const ADHERENCE_DOMAINES = [
   "Outillage",
   "Support",
 ] as const;
+
+export type AdherenceChantierRef = {
+  id: string;
+  code: string;
+  nom: string;
+  domaine?: string;
+  statut?: string;
+};
+
+export function chantiersFromDependants(
+  dependants:
+    | Array<{ chantier: AdherenceChantierRef }>
+    | null
+    | undefined
+): AdherenceChantierRef[] {
+  if (!dependants?.length) return [];
+  return dependants
+    .map((d) => d.chantier)
+    .filter(Boolean)
+    .sort((a, b) => a.code.localeCompare(b.code, "fr"));
+}
+
+export function formatAdherenceDependantCodes(
+  dependants: AdherenceChantierRef[],
+  transverseLabel?: string | null
+): string {
+  if (!dependants.length) return (transverseLabel ?? "").trim() || "Transverse";
+  return dependants.map((d) => d.code).join(", ");
+}

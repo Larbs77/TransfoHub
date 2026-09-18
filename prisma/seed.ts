@@ -984,8 +984,10 @@ async function main() {
       data: {
         code: a.code,
         chantierSourceId: sourceId,
-        chantierDependantId: dependantId,
         chantierDependantLabel: a.dependantLabel,
+        dependants: dependantId
+          ? { create: [{ chantierId: dependantId }] }
+          : undefined,
         type: a.type,
         domaine: a.domaine,
         description: a.description,

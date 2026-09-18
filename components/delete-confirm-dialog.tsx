@@ -17,9 +17,13 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   onConfirm: (motif?: string) => Promise<void>;
   title?: string;
+  description?: string;
   /** When set, a non-empty motif is required before confirming. */
   requireMotif?: boolean;
   motifLabel?: string;
+  motifPlaceholder?: string;
+  confirmLabel?: string;
+  confirmVariant?: "destructive" | "default";
 }
 
 export function DeleteConfirmDialog({
@@ -27,8 +31,12 @@ export function DeleteConfirmDialog({
   onOpenChange,
   onConfirm,
   title = "Confirmer la suppression",
+  description = "Etes-vous sûr de vouloir supprimer cet élément ? Cette action est irréversible.",
   requireMotif = false,
   motifLabel = "Motif de la suppression",
+  motifPlaceholder = "Expliquez pourquoi cet élément est supprimé…",
+  confirmLabel = "Supprimer",
+  confirmVariant = "destructive",
 }: Props) {
   const [loading, setLoading] = useState(false);
   const [motif, setMotif] = useState("");
@@ -50,6 +58,10 @@ export function DeleteConfirmDialog({
     try {
       await onConfirm(requireMotif ? motif.trim() : undefined);
       onOpenChange(false);
+    } catch (err) {
+      setMotifError(
+        err instanceof Error ? err.message : "Action impossible."
+      );
     } finally {
       setLoading(false);
     }
@@ -60,10 +72,7 @@ export function DeleteConfirmDialog({
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>
-            Etes-vous sûr de vouloir supprimer cet élément ? Cette action est
-            irréversible.
-          </DialogDescription>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         {requireMotif && (
           <div className="grid gap-1.5">
@@ -77,7 +86,7 @@ export function DeleteConfirmDialog({
                 setMotif(e.target.value);
                 setMotifError("");
               }}
-              placeholder="Expliquez pourquoi cet élément est supprimé…"
+              placeholder={motifPlaceholder}
             />
             {motifError && (
               <p className="text-xs text-destructive">{motifError}</p>
@@ -93,12 +102,12 @@ export function DeleteConfirmDialog({
             Annuler
           </Button>
           <Button
-            variant="destructive"
+            variant={confirmVariant}
             onClick={handleConfirm}
             disabled={loading}
           >
             {loading && <Loader2 className="size-4 animate-spin" />}
-            Supprimer
+            {confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

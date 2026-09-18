@@ -10,7 +10,10 @@ import {
   resolveAllowedWritePages,
   resolveRaidCreateScope,
 } from "@/lib/roles";
-import { getUserConsultationChantierIds } from "@/lib/auth";
+import {
+  getUserConsultationChantierIds,
+  getUserMemberChantierIds,
+} from "@/lib/auth";
 import {
   LEGACY_ROLE_COLORS,
   LEGACY_ROLE_LABELS,
@@ -59,6 +62,11 @@ export default async function AppLayout({
   const consultationChantierIds = canUseApp
     ? await getUserConsultationChantierIds(session)
     : [];
+  const memberChantierIdsRaw = canUseApp
+    ? await getUserMemberChantierIds(session)
+    : [];
+  const memberChantierIds =
+    memberChantierIdsRaw === "all" ? [] : memberChantierIdsRaw;
   const roleLabel =
     role?.label ?? LEGACY_ROLE_LABELS[session.role] ?? session.role;
   const roleColor =
@@ -95,6 +103,7 @@ export default async function AppLayout({
               : "none"
           : "none",
         consultationChantierIds: canUseApp ? consultationChantierIds : [],
+        memberChantierIds: canUseApp ? memberChantierIds : [],
       }}
     >
       <UserThemeSync preference={themePreference} />

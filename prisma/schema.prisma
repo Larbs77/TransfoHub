@@ -34,8 +34,8 @@ model Chantier {
   avancement             Int                    @default(0)
   createdAt              DateTime               @default(now())
   updatedAt              DateTime               @updatedAt
-  adherencesDependant    Adherence[]            @relation("AdherenceDependant")
   adherencesSource       Adherence[]            @relation("AdherenceSource")
+  adherenceDependantLinks AdherenceDependant[]
   rmds                   ChantierRmd[]
   consultationQuestions  ConsultationQuestion[]
   favoris                FavoriChantier?
@@ -315,7 +315,17 @@ model Raid {
   /// Date de clôture effective (statuts terminaux).
   date_fin_reelle        DateTime?
   commentaires           String     @default("")
+  /// Suppression logique
+  deletedAt              DateTime?
+  deletedByUserId        String?
+  deletedByName          String     @default("")
+  deleteMotif            String     @default("")
+  restoredAt             DateTime?
+  restoredByName         String     @default("")
+  restoreMotif           String     @default("")
   comiteId               String?
+  /// Action → risque lié (optionnel). Plusieurs actions peuvent pointer le même risque.
+  risqueLieId            String?
   /// Creator (app user) for audit / circulation.
   createdByUserId        String?
   createdByName          String     @default("")
@@ -325,6 +335,8 @@ model Raid {
   responsableRessource   Ressource? @relation(fields: [responsableRessourceId], references: [id])
   chantier               Chantier?  @relation(fields: [chantierId], references: [id])
   equipe                 Equipe?    @relation(fields: [equipeId], references: [id], onDelete: SetNull)
+  risqueLie              Raid?      @relation("RaidActionRisque", fields: [risqueLieId], references: [id], onDelete: SetNull)
+  actionsLiees           Raid[]     @relation("RaidActionRisque")
   raidComments           RaidComment[]
   auditLogs              RaidAuditLog[]
 
@@ -333,6 +345,8 @@ model Raid {
   @@index([equipeId])
   @@index([chantierId])
   @@index([date_echeance_actualisee])
+  @@index([deletedAt])
+  @@index([risqueLieId])
 }
 
 /// Per-type autoincrement for Raid.code (Action→A_, Risque→R_, …).
@@ -530,7 +544,7 @@ model Adherence {
   id                     String    @id @default(uuid())
   code                   String    @unique
   chantierSourceId       String
-  chantierDependantId    String?
+  /// Libellé si transverse (tous chantiers) — pas de lignes AdherenceDependant.
   chantierDependantLabel String    @default("")
   type                   String
   domaine                String    @default("")
@@ -542,15 +556,35 @@ model Adherence {
   responsable            String    @default("")
   contrat_interface      String    @default("")
   commentaires           String    @default("")
+  /// Suppression logique
+  deletedAt              DateTime?
+  deletedByUserId        String?
+  deletedByName          String    @default("")
+  deleteMotif            String    @default("")
+  restoredAt             DateTime?
+  restoredByName         String    @default("")
+  restoreMotif           String    @default("")
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
-  chantierDependant      Chantier? @relation("AdherenceDependant", fields: [chantierDependantId], references: [id])
   chantierSource         Chantier  @relation("AdherenceSource", fields: [chantierSourceId], references: [id])
+  dependants             AdherenceDependant[]
 
   @@index([chantierSourceId])
-  @@index([chantierDependantId])
   @@index([criticite])
   @@index([statut])
+  @@index([deletedAt])
+}
+
+/// Chantiers dépendants d'une adhérence (1 source → N dépendants).
+model AdherenceDependant {
+  id          String     @id @default(uuid())
+  adherenceId String
+  chantierId  String
+  adherence   Adherence  @relation(fields: [adherenceId], references: [id], onDelete: Cascade)
+  chantier    Chantier   @relation(fields: [chantierId], references: [id], onDelete: Restrict)
+
+  @@unique([adherenceId, chantierId])
+  @@index([chantierId])
 }
 
 model Jalon {

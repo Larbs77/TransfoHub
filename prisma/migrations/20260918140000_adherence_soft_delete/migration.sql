@@ -1,0 +1,11 @@
+-- AlterTable
+ALTER TABLE "Adherence" ADD COLUMN IF NOT EXISTS "deletedAt" TIMESTAMP(3);
+ALTER TABLE "Adherence" ADD COLUMN IF NOT EXISTS "deletedByUserId" TEXT;
+ALTER TABLE "Adherence" ADD COLUMN IF NOT EXISTS "deletedByName" TEXT NOT NULL DEFAULT '';
+ALTER TABLE "Adherence" ADD COLUMN IF NOT EXISTS "deleteMotif" TEXT NOT NULL DEFAULT '';
+ALTER TABLE "Adherence" ADD COLUMN IF NOT EXISTS "restoredAt" TIMESTAMP(3);
+ALTER TABLE "Adherence" ADD COLUMN IF NOT EXISTS "restoredByName" TEXT NOT NULL DEFAULT '';
+ALTER TABLE "Adherence" ADD COLUMN IF NOT EXISTS "restoreMotif" TEXT NOT NULL DEFAULT '';
+
+-- CreateIndex
+CREATE INDEX IF NOT EXISTS "Adherence_deletedAt_idx" ON "Adherence"("deletedAt");

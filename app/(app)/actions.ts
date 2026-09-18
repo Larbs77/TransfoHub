@@ -62,10 +62,12 @@ import {
   isRaidClosed,
   isRaidOverdue,
   actionRequiresEcheance,
+  formatRisqueLienLabel,
   evaluateRaidRisque,
   incrementRisqueMaitriseMatrix,
   emptyRisqueMaitriseMatrix,
   isNiveauMaitrise,
+  assertRaidRisqueSaisie,
   isRisqueAttention,
   isRisqueCritique,
   criticiteRank,
@@ -132,12 +134,16 @@ async function recalculateChantierProgress(chantierId: string) {
 
 // ── Read ──────────────────────────────────────────────
 
-export async function getRaidItems(type?: string) {
+export async function getRaidItems(
+  type?: string,
+  opts?: { includeDeleted?: boolean }
+) {
   const session = await requireAuth();
   const chantierIds = await getUserChantierIds(session);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const where: any = {};
   if (type) where.type = type;
+  if (!opts?.includeDeleted) where.deletedAt = null;
 
   if (chantierIds !== "all") {
     // Visible if: on my chantiers OR assigned to me OR same institutional team
@@ -173,14 +179,84 @@ export async function getRaidItems(type?: string) {
   return prisma.raid.findMany({
     where,
     orderBy: { createdAt: "desc" },
-    include: { chantier: true, comite: true },
+    include: {
+      chantier: true,
+      comite: true,
+      risqueLie: { select: { id: true, code: true, intitule: true } },
+      actionsLiees: {
+        where: { deletedAt: null },
+        select: {
+          id: true,
+          code: true,
+          description: true,
+          intitule: true,
+          statut: true,
+        },
+        orderBy: { code: "asc" },
+      },
+    },
   });
+}
+
+const risqueLienSelect = {
+  id: true,
+  code: true,
+  intitule: true,
+} as const;
+
+/** Risques visibles pour lier une action (mêmes droits que le registre RAID). */
+export async function getRisquesForActionLink() {
+  const rows = await getRaidItems("Risque");
+  return rows
+    .map((r) => ({
+      id: r.id,
+      code: r.code,
+      intitule: r.intitule,
+    }))
+    .sort((a, b) => (a.code || "").localeCompare(b.code || "", "fr"));
+}
+
+async function resolveRisqueLieId(
+  type: string,
+  rawId: string | null | undefined,
+  excludeRaidId?: string
+): Promise<string | null> {
+  if (type !== "Action") return null;
+  const id = (rawId ?? "").trim();
+  if (!id || id === "__none__") return null;
+  if (excludeRaidId && id === excludeRaidId) {
+    throw new Error("Une action ne peut pas être liée à elle-même.");
+  }
+  const risque = await prisma.raid.findUnique({
+    where: { id },
+    select: { id: true, type: true, code: true, intitule: true, deletedAt: true },
+  });
+  if (!risque || risque.type !== "Risque" || risque.deletedAt) {
+    throw new Error("Le risque lié est introuvable.");
+  }
+  return risque.id;
 }
 
 export async function getSettings() {
   await requireAuth();
   return prisma.settings.findFirst({ where: { id: 1 } });
 }
+
+const chantierRefSelect = {
+  id: true,
+  code: true,
+  nom: true,
+  domaine: true,
+  statut: true,
+} as const;
+
+const adherenceChantierInclude = {
+  chantierSource: { select: chantierRefSelect },
+  dependants: {
+    include: { chantier: { select: chantierRefSelect } },
+    orderBy: { chantier: { code: "asc" as const } },
+  },
+} as const;
 
 export async function getChantiers() {
   const session = await requireAuth();
@@ -189,8 +265,8 @@ export async function getChantiers() {
     where: chantierIds === "all" ? undefined : { id: { in: chantierIds } },
     orderBy: { code: "asc" },
     include: {
-      _count: { select: { raids: true } },
-      raids: { select: { type: true, statut: true } },
+      _count: { select: { raids: { where: { deletedAt: null } } } },
+      raids: { where: { deletedAt: null }, select: { type: true, statut: true } },
       rmds: { include: { rmd: true } },
       membres: {
         where: { is_directeur: true },
@@ -227,10 +303,23 @@ export async function getChantierById(id: string) {
     where: { id },
     include: {
       raids: {
+        where: { deletedAt: null },
         orderBy: { createdAt: "desc" },
         include: {
           comite: true,
           chantier: { select: { id: true, code: true, nom: true } },
+          risqueLie: { select: { id: true, code: true, intitule: true } },
+          actionsLiees: {
+            where: { deletedAt: null },
+            select: {
+              id: true,
+              code: true,
+              description: true,
+              intitule: true,
+              statut: true,
+            },
+            orderBy: { code: "asc" },
+          },
         },
       },
       rmds: { include: { rmd: true } },
@@ -250,17 +339,16 @@ export async function getChantierById(id: string) {
         },
       },
       adherencesSource: {
+        where: { deletedAt: null },
         orderBy: { code: "asc" },
-        include: {
-          chantierSource: { select: { id: true, code: true, nom: true, domaine: true, statut: true } },
-          chantierDependant: { select: { id: true, code: true, nom: true, domaine: true, statut: true } },
-        },
+        include: adherenceChantierInclude,
       },
-      adherencesDependant: {
-        orderBy: { code: "asc" },
+      adherenceDependantLinks: {
+        where: { adherence: { deletedAt: null } },
         include: {
-          chantierSource: { select: { id: true, code: true, nom: true, domaine: true, statut: true } },
-          chantierDependant: { select: { id: true, code: true, nom: true, domaine: true, statut: true } },
+          adherence: {
+            include: adherenceChantierInclude,
+          },
         },
       },
     },
@@ -274,24 +362,23 @@ export async function getChantiersByIds(ids: string[]) {
     where: { id: { in: ids } },
     orderBy: { code: "asc" },
     include: {
-      raids: { orderBy: { createdAt: "desc" } },
+      raids: { where: { deletedAt: null }, orderBy: { createdAt: "desc" } },
       membres: {
         orderBy: [{ equipe: "asc" }, { role: "asc" }],
         include: membreEquipeInclude,
       },
       jalons: { orderBy: [{ phase: "asc" }, { ordre: "asc" }] },
       adherencesSource: {
+        where: { deletedAt: null },
         orderBy: { code: "asc" },
-        include: {
-          chantierSource: { select: { id: true, code: true, nom: true } },
-          chantierDependant: { select: { id: true, code: true, nom: true } },
-        },
+        include: adherenceChantierInclude,
       },
-      adherencesDependant: {
-        orderBy: { code: "asc" },
+      adherenceDependantLinks: {
+        where: { adherence: { deletedAt: null } },
         include: {
-          chantierSource: { select: { id: true, code: true, nom: true } },
-          chantierDependant: { select: { id: true, code: true, nom: true } },
+          adherence: {
+            include: adherenceChantierInclude,
+          },
         },
       },
     },
@@ -306,6 +393,28 @@ export async function getChantiersForSelect() {
     orderBy: { code: "asc" },
     select: { id: true, code: true, nom: true },
   });
+}
+
+/**
+ * Listes du formulaire adhérence :
+ * - source : chantiers visibles (tous / assignés+consultation)
+ * - dependant : tous les chantiers si périmètre « assignés », sinon identique à source
+ */
+export async function getChantiersForAdherenceForm() {
+  const session = await requireAuth();
+  const chantierIds = await getUserChantierIds(session);
+  const all = await prisma.chantier.findMany({
+    orderBy: { code: "asc" },
+    select: { id: true, code: true, nom: true },
+  });
+  if (chantierIds === "all") {
+    return { source: all, dependant: all };
+  }
+  const allowed = new Set(chantierIds);
+  return {
+    source: all.filter((c) => allowed.has(c.id)),
+    dependant: all,
+  };
 }
 
 /**
@@ -347,6 +456,7 @@ const comiteSelectFields = {
   numero: true,
   date: true,
   chantierId: true,
+  chantier: { select: { id: true, code: true, nom: true } },
 } as const;
 
 export async function getComitesForSelect() {
@@ -378,10 +488,32 @@ export async function getComitesForRaidCreate(includeId?: string | null) {
   return rows;
 }
 
+/** Catalogue des types de comité (libellé court + niveau) — lecture authentifiée. */
+export async function getComiteParametresCatalog() {
+  await requireAuth();
+  return prisma.comiteParametre.findMany({
+    orderBy: [{ position: "asc" }, { name: "asc" }],
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      frequency: true,
+      niveau: true,
+      owner: true,
+      equipeId: true,
+      short_label: true,
+      color: true,
+      position: true,
+      is_active: true,
+    },
+  });
+}
+
 export async function getDashboardStats() {
   await requireAuth();
   const [raids, settings, chantiers, comites, consultationQuestions] = await Promise.all([
     prisma.raid.findMany({
+      where: { deletedAt: null },
       orderBy: { createdAt: "desc" },
       include: { chantier: true },
     }),
@@ -712,7 +844,10 @@ export async function getDashboardPMO() {
 
   const [raids, chantiers, settings] = await Promise.all([
     prisma.raid.findMany({
-      where: chantierIds === "all" ? undefined : chantierScope,
+      where:
+        chantierIds === "all"
+          ? { deletedAt: null }
+          : { ...chantierScope, deletedAt: null },
       orderBy: { createdAt: "desc" },
       include: { chantier: true },
     }),
@@ -1085,6 +1220,7 @@ export async function getPersonalDashboard() {
   const specialCats = await getSpecialRaidCategoriesForSession(session);
   const raidsRaw = await prisma.raid.findMany({
     where: {
+      deletedAt: null,
       OR: [
         { responsableRessourceId: session.ressourceId },
         ...(chantierIds.length > 0
@@ -1322,6 +1458,7 @@ export async function getAlerts() {
     prisma.raid.findMany({
       where: {
         ...chantierScope,
+        deletedAt: null,
         type: "Action",
         statut: { notIn: ["Clôturé", "Abandonné", "NA", "Doublon"] },
         OR: [
@@ -1623,8 +1760,8 @@ export async function getChantiersFavoris() {
     where: { id: { in: allowedFavIds } },
     orderBy: { code: "asc" },
     include: {
-      _count: { select: { raids: true } },
-      raids: { select: { type: true, statut: true } },
+      _count: { select: { raids: { where: { deletedAt: null } } } },
+      raids: { where: { deletedAt: null }, select: { type: true, statut: true } },
       rmds: { include: { rmd: true } },
       membres: {
         where: { is_directeur: true },
@@ -1664,6 +1801,7 @@ export async function createRaid(data: {
   date_echeance_actualisee?: string | null;
   commentaires: string;
   comiteId: string | null;
+  risqueLieId?: string | null;
 }) {
   await requirePageWrite("/raid");
   let chantierId = data.chantierId || null;
@@ -1692,6 +1830,8 @@ export async function createRaid(data: {
     chantierId,
   });
   const code = await allocateNextRaidCode(data.type);
+  assertRaidRisqueSaisie(data);
+  const risqueLieId = await resolveRisqueLieId(data.type, data.risqueLieId);
   if (
     data.type === "Action" &&
     actionRequiresEcheance(data.statut) &&
@@ -1732,6 +1872,7 @@ export async function createRaid(data: {
       date_fin_reelle: closedOnCreate ? new Date() : null,
       commentaires: data.commentaires,
       comiteId: data.comiteId || null,
+      risqueLieId,
       createdByUserId: actor.actorUserId,
       createdByName: actor.actorName,
     },
@@ -1785,6 +1926,12 @@ export async function createRaid(data: {
   revalidatePath("/chantiers");
   revalidatePath("/comites");
   revalidatePath("/ressources");
+  return {
+    id: created.id,
+    code: created.code,
+    type: created.type,
+    intitule: created.intitule,
+  };
 }
 
 export async function updateRaid(
@@ -1812,6 +1959,7 @@ export async function updateRaid(
     date_echeance_actualisee?: string | null;
     commentaires: string;
     comiteId: string | null;
+    risqueLieId?: string | null;
   }
 ) {
   const session = await requireAuth();
@@ -1841,13 +1989,21 @@ export async function updateRaid(
       date_echeance_actualisee: true,
       date_fin_reelle: true,
       commentaires: true,
+      deletedAt: true,
       comiteId: true,
+      risqueLieId: true,
       chantier: { select: { code: true, nom: true } },
       comite: { select: { instance: true, numero: true } },
       equipe: { select: { name: true } },
+      risqueLie: { select: { id: true, code: true, intitule: true } },
     },
   });
   if (!existing) throw new Error("Entrée RAID introuvable.");
+  if (existing.deletedAt) {
+    throw new Error(
+      "Cette entrée RAID est supprimée : restaurez-la avant de la modifier."
+    );
+  }
   await requireRaidWriteOrAssignee(existing);
 
   // Edit form: scope « tous », assignee, or DC / suppléant / PMO du chantier lié
@@ -1882,6 +2038,7 @@ export async function updateRaid(
       ? new Date(data.date_echeance)
       : null;
   const initialeFinale = existing.date_echeance ?? firstInitiale;
+  assertRaidRisqueSaisie(data);
   if (
     data.type === "Action" &&
     actionRequiresEcheance(data.statut) &&
@@ -1902,8 +2059,9 @@ export async function updateRaid(
       : existing.date_fin_reelle;
   const nextComiteId = data.comiteId || null;
   const nextResponsableId = data.responsableRessourceId || null;
+  const risqueLieId = await resolveRisqueLieId(data.type, data.risqueLieId, id);
 
-  const [nextChantier, nextComite, nextEquipe] = await Promise.all([
+  const [nextChantier, nextComite, nextEquipe, nextRisque] = await Promise.all([
     chantierId
       ? chantierId === existing.chantierId
         ? Promise.resolve(existing.chantier)
@@ -1926,6 +2084,14 @@ export async function updateRaid(
         : prisma.equipe.findUnique({
             where: { id: teamAssign.equipeId },
             select: { name: true },
+          })
+      : Promise.resolve(null),
+    risqueLieId
+      ? risqueLieId === existing.risqueLieId
+        ? Promise.resolve(existing.risqueLie)
+        : prisma.raid.findUnique({
+            where: { id: risqueLieId },
+            select: risqueLienSelect,
           })
       : Promise.resolve(null),
   ]);
@@ -1956,6 +2122,7 @@ export async function updateRaid(
       date_fin_reelle: dateFinReelle,
       commentaires: data.commentaires,
       comiteId: nextComiteId,
+      risqueLieId,
     },
   });
 
@@ -2047,6 +2214,18 @@ export async function updateRaid(
         field: "equipeId",
         oldValue: formatEquipeAuditLabel(existing.equipe),
         newValue: formatEquipeAuditLabel(nextEquipe),
+      },
+      {
+        field: "risqueLieId",
+        oldValue: existing.risqueLie
+          ? formatRisqueLienLabel(
+              existing.risqueLie.code,
+              existing.risqueLie.intitule
+            )
+          : "",
+        newValue: nextRisque
+          ? formatRisqueLienLabel(nextRisque.code, nextRisque.intitule)
+          : "",
       },
       {
         field: "date_identification",
@@ -2141,10 +2320,22 @@ export async function deleteRaid(id: string, options?: { motif?: string }) {
   }
   const raid = await prisma.raid.findUnique({
     where: { id },
-    select: { id: true, code: true, intitule: true },
+    select: { id: true, code: true, intitule: true, deletedAt: true },
   });
   if (!raid) throw new Error("Élément RAID introuvable.");
+  if (raid.deletedAt) {
+    throw new Error("Cette entrée RAID est déjà supprimée.");
+  }
   const actor = await getActorDisplay(session);
+  await prisma.raid.update({
+    where: { id },
+    data: {
+      deletedAt: new Date(),
+      deletedByUserId: actor.actorUserId,
+      deletedByName: actor.actorName,
+      deleteMotif: motif,
+    },
+  });
   await writeRaidAudit({
     raidId: raid.id,
     action: "deleted",
@@ -2154,7 +2345,50 @@ export async function deleteRaid(id: string, options?: { motif?: string }) {
     actorName: actor.actorName,
     actorRessourceId: actor.actorRessourceId,
   });
-  await prisma.raid.delete({ where: { id } });
+  revalidatePath("/");
+  revalidatePath("/raid");
+  revalidatePath("/chantiers");
+  revalidatePath("/comites");
+}
+
+export async function restoreRaid(id: string, options?: { motif?: string }) {
+  const session = await requirePageWrite("/raid");
+  if (!(await canDeleteRaid(session))) {
+    throw new Error(
+      "Restauration non autorisée : réservée aux rôles avec le périmètre « tous les chantiers »."
+    );
+  }
+  const motif = options?.motif?.trim() ?? "";
+  if (!motif) {
+    throw new Error("Le commentaire de restauration est obligatoire.");
+  }
+  const raid = await prisma.raid.findUnique({
+    where: { id },
+    select: { id: true, code: true, intitule: true, deletedAt: true },
+  });
+  if (!raid) throw new Error("Élément RAID introuvable.");
+  if (!raid.deletedAt) {
+    throw new Error("Cette entrée RAID n'est pas supprimée.");
+  }
+  const actor = await getActorDisplay(session);
+  await prisma.raid.update({
+    where: { id },
+    data: {
+      deletedAt: null,
+      restoredAt: new Date(),
+      restoredByName: actor.actorName,
+      restoreMotif: motif,
+    },
+  });
+  await writeRaidAudit({
+    raidId: raid.id,
+    action: "restored",
+    summary: `${raid.code} « ${raid.intitule} » restauré par ${actor.actorName} — motif : ${motif}`,
+    newValue: motif,
+    actorUserId: actor.actorUserId,
+    actorName: actor.actorName,
+    actorRessourceId: actor.actorRessourceId,
+  });
   revalidatePath("/");
   revalidatePath("/raid");
   revalidatePath("/chantiers");
@@ -5312,21 +5546,36 @@ export async function deleteActivite(
 
 // ── Adhérences (Dependencies) ────────────────────────
 
+function uniqueDependantIds(
+  sourceId: string,
+  ids: string[] | null | undefined
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of ids ?? []) {
+    const id = (raw ?? "").trim();
+    if (!id || id === sourceId || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
 export async function getAdherences() {
   const session = await requireAuth();
   const chantierIds = await getUserChantierIds(session);
   return prisma.adherence.findMany({
-    where: chantierIds === "all" ? undefined : {
-      OR: [
-        { chantierSourceId: { in: chantierIds } },
-        { chantierDependantId: { in: chantierIds } },
-      ],
-    },
+    where:
+      chantierIds === "all"
+        ? undefined
+        : {
+            OR: [
+              { chantierSourceId: { in: chantierIds } },
+              { dependants: { some: { chantierId: { in: chantierIds } } } },
+            ],
+          },
     orderBy: { code: "asc" },
-    include: {
-      chantierSource: { select: { id: true, code: true, nom: true, domaine: true, statut: true } },
-      chantierDependant: { select: { id: true, code: true, nom: true, domaine: true, statut: true } },
-    },
+    include: adherenceChantierInclude,
   });
 }
 
@@ -5334,20 +5583,17 @@ export async function getAdherencesForChantier(chantierId: string) {
   await requireAuth();
   const [asSource, asDependant] = await Promise.all([
     prisma.adherence.findMany({
-      where: { chantierSourceId: chantierId },
+      where: { chantierSourceId: chantierId, deletedAt: null },
       orderBy: { code: "asc" },
-      include: {
-        chantierSource: { select: { id: true, code: true, nom: true, domaine: true, statut: true } },
-        chantierDependant: { select: { id: true, code: true, nom: true, domaine: true, statut: true } },
-      },
+      include: adherenceChantierInclude,
     }),
     prisma.adherence.findMany({
-      where: { chantierDependantId: chantierId },
-      orderBy: { code: "asc" },
-      include: {
-        chantierSource: { select: { id: true, code: true, nom: true, domaine: true, statut: true } },
-        chantierDependant: { select: { id: true, code: true, nom: true, domaine: true, statut: true } },
+      where: {
+        deletedAt: null,
+        dependants: { some: { chantierId } },
       },
+      orderBy: { code: "asc" },
+      include: adherenceChantierInclude,
     }),
   ]);
   return { asSource, asDependant };
@@ -5356,7 +5602,7 @@ export async function getAdherencesForChantier(chantierId: string) {
 export async function createAdherence(data: {
   code: string;
   chantierSourceId: string;
-  chantierDependantId: string | null;
+  chantierDependantIds?: string[];
   chantierDependantLabel: string;
   type: string;
   domaine: string;
@@ -5370,23 +5616,52 @@ export async function createAdherence(data: {
   commentaires: string;
 }) {
   await requirePageWrite("/adherences");
+  if (!data.chantierSourceId?.trim()) {
+    throw new Error("Le chantier source est obligatoire.");
+  }
+  if (!data.type?.trim()) {
+    throw new Error("Le type est obligatoire.");
+  }
+  if (!data.criticite?.trim()) {
+    throw new Error("La criticité est obligatoire.");
+  }
+  if (!data.statut?.trim()) {
+    throw new Error("Le statut est obligatoire.");
+  }
   await requireChantierAccess(data.chantierSourceId);
+  const isTransverse = !!(data.chantierDependantLabel ?? "").trim();
+  const dependantIds = isTransverse
+    ? []
+    : uniqueDependantIds(data.chantierSourceId, data.chantierDependantIds);
+  if (!isTransverse && dependantIds.length === 0) {
+    throw new Error(
+      "Sélectionnez au moins un chantier dépendant, ou cochez Transverse."
+    );
+  }
   await prisma.adherence.create({
     data: {
       code: data.code,
       chantierSourceId: data.chantierSourceId,
-      chantierDependantId: data.chantierDependantId || null,
-      chantierDependantLabel: data.chantierDependantLabel,
+      chantierDependantLabel: isTransverse
+        ? data.chantierDependantLabel.trim()
+        : "",
       type: data.type,
       domaine: data.domaine,
       description: data.description,
       criticite: data.criticite,
       statut: data.statut,
-      date_identification: data.date_identification ? new Date(data.date_identification) : null,
-      date_resolution_prevue: data.date_resolution_prevue ? new Date(data.date_resolution_prevue) : null,
+      date_identification: data.date_identification
+        ? new Date(data.date_identification)
+        : null,
+      date_resolution_prevue: data.date_resolution_prevue
+        ? new Date(data.date_resolution_prevue)
+        : null,
       responsable: data.responsable,
       contrat_interface: data.contrat_interface,
       commentaires: data.commentaires,
+      dependants: dependantIds.length
+        ? { create: dependantIds.map((chantierId) => ({ chantierId })) }
+        : undefined,
     },
   });
   revalidatePath("/");
@@ -5399,7 +5674,7 @@ export async function updateAdherence(
   data: {
     code: string;
     chantierSourceId: string;
-    chantierDependantId: string | null;
+    chantierDependantIds?: string[];
     chantierDependantLabel: string;
     type: string;
     domaine: string;
@@ -5414,24 +5689,101 @@ export async function updateAdherence(
   }
 ) {
   await requirePageWrite("/adherences");
+  const existingRow = await prisma.adherence.findUnique({
+    where: { id },
+    select: { deletedAt: true },
+  });
+  if (!existingRow) throw new Error("Adhérence introuvable.");
+  if (existingRow.deletedAt) {
+    throw new Error("Cette adhérence est supprimée : restaurez-la avant de la modifier.");
+  }
+  if (!data.chantierSourceId?.trim()) {
+    throw new Error("Le chantier source est obligatoire.");
+  }
+  if (!data.type?.trim()) {
+    throw new Error("Le type est obligatoire.");
+  }
+  if (!data.criticite?.trim()) {
+    throw new Error("La criticité est obligatoire.");
+  }
+  if (!data.statut?.trim()) {
+    throw new Error("Le statut est obligatoire.");
+  }
   await requireChantierAccess(data.chantierSourceId);
+  const isTransverse = !!(data.chantierDependantLabel ?? "").trim();
+  const dependantIds = isTransverse
+    ? []
+    : uniqueDependantIds(data.chantierSourceId, data.chantierDependantIds);
+  if (!isTransverse && dependantIds.length === 0) {
+    throw new Error(
+      "Sélectionnez au moins un chantier dépendant, ou cochez Transverse."
+    );
+  }
+  await prisma.$transaction([
+    prisma.adherenceDependant.deleteMany({ where: { adherenceId: id } }),
+    prisma.adherence.update({
+      where: { id },
+      data: {
+        code: data.code,
+        chantierSourceId: data.chantierSourceId,
+        chantierDependantLabel: isTransverse
+          ? data.chantierDependantLabel.trim()
+          : "",
+        type: data.type,
+        domaine: data.domaine,
+        description: data.description,
+        criticite: data.criticite,
+        statut: data.statut,
+        date_identification: data.date_identification
+          ? new Date(data.date_identification)
+          : null,
+        date_resolution_prevue: data.date_resolution_prevue
+          ? new Date(data.date_resolution_prevue)
+          : null,
+        responsable: data.responsable,
+        contrat_interface: data.contrat_interface,
+        commentaires: data.commentaires,
+        dependants: dependantIds.length
+          ? { create: dependantIds.map((chantierId) => ({ chantierId })) }
+          : undefined,
+      },
+    }),
+  ]);
+  revalidatePath("/");
+  revalidatePath("/adherences");
+  revalidatePath("/chantiers");
+}
+
+export async function deleteAdherence(id: string, motif?: string) {
+  await requirePageWrite("/adherences");
+  const comment = (motif ?? "").trim();
+  if (!comment) {
+    throw new Error("Le motif de suppression est obligatoire.");
+  }
+  const existing = await prisma.adherence.findUnique({
+    where: { id },
+    select: { chantierSourceId: true, deletedAt: true },
+  });
+  if (!existing) throw new Error("Adhérence introuvable.");
+  if (existing.deletedAt) {
+    throw new Error("Cette adhérence est déjà supprimée.");
+  }
+  try {
+    await requireChantierAccess(existing.chantierSourceId);
+  } catch {
+    throw new Error(
+      "Vous ne pouvez supprimer que les adhérences dont vous êtes le chantier source."
+    );
+  }
+  const session = await requireAuth();
+  const actor = await getActorDisplay(session);
   await prisma.adherence.update({
     where: { id },
     data: {
-      code: data.code,
-      chantierSourceId: data.chantierSourceId,
-      chantierDependantId: data.chantierDependantId || null,
-      chantierDependantLabel: data.chantierDependantLabel,
-      type: data.type,
-      domaine: data.domaine,
-      description: data.description,
-      criticite: data.criticite,
-      statut: data.statut,
-      date_identification: data.date_identification ? new Date(data.date_identification) : null,
-      date_resolution_prevue: data.date_resolution_prevue ? new Date(data.date_resolution_prevue) : null,
-      responsable: data.responsable,
-      contrat_interface: data.contrat_interface,
-      commentaires: data.commentaires,
+      deletedAt: new Date(),
+      deletedByUserId: actor.actorUserId,
+      deletedByName: actor.actorName,
+      deleteMotif: comment,
     },
   });
   revalidatePath("/");
@@ -5439,15 +5791,38 @@ export async function updateAdherence(
   revalidatePath("/chantiers");
 }
 
-export async function deleteAdherence(id: string) {
+export async function restoreAdherence(id: string, motif?: string) {
   await requirePageWrite("/adherences");
+  const comment = (motif ?? "").trim();
+  if (!comment) {
+    throw new Error("Le commentaire de restauration est obligatoire.");
+  }
   const existing = await prisma.adherence.findUnique({
     where: { id },
-    select: { chantierSourceId: true },
+    select: { chantierSourceId: true, deletedAt: true },
   });
   if (!existing) throw new Error("Adhérence introuvable.");
-  await requireChantierAccess(existing.chantierSourceId);
-  await prisma.adherence.delete({ where: { id } });
+  if (!existing.deletedAt) {
+    throw new Error("Cette adhérence n'est pas supprimée.");
+  }
+  try {
+    await requireChantierAccess(existing.chantierSourceId);
+  } catch {
+    throw new Error(
+      "Vous ne pouvez restaurer que les adhérences dont vous êtes le chantier source."
+    );
+  }
+  const session = await requireAuth();
+  const actor = await getActorDisplay(session);
+  await prisma.adherence.update({
+    where: { id },
+    data: {
+      deletedAt: null,
+      restoredAt: new Date(),
+      restoredByName: actor.actorName,
+      restoreMotif: comment,
+    },
+  });
   revalidatePath("/");
   revalidatePath("/adherences");
   revalidatePath("/chantiers");
@@ -6207,7 +6582,10 @@ export async function getDashboardCTP(month: number, year: number) {
         jalons: { select: { phase: true, statut: true, date_cible: true } },
       },
     }),
-    prisma.raid.findMany({ include: { chantier: { select: { code: true, nom: true } } } }),
+    prisma.raid.findMany({
+      where: { deletedAt: null },
+      include: { chantier: { select: { code: true, nom: true } } },
+    }),
     prisma.adherence.findMany(),
     prisma.saisieTemps.findMany({
       where: { date_lundi: { gte: periodStart, lte: periodEnd } },
@@ -6327,7 +6705,10 @@ export async function getDashboardCTR(startDate: string, endDate: string) {
         jalons: { select: { phase: true, statut: true, date_cible: true } },
       },
     }),
-    prisma.raid.findMany({ include: { chantier: { select: { code: true, nom: true } } } }),
+    prisma.raid.findMany({
+      where: { deletedAt: null },
+      include: { chantier: { select: { code: true, nom: true } } },
+    }),
     prisma.adherence.findMany(),
     prisma.saisieTemps.findMany({
       where: { date_lundi: { gte: periodStart, lte: periodEnd } },

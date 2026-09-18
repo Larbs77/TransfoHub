@@ -27,7 +27,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { MultiSelect } from "@/components/ui/multi-select";
 import { RaidExcelExportButton } from "@/components/raid-excel-export-button";
-import { INSTANCE_LABELS } from "@/lib/comite-labels";
+import { formatComiteSeanceLabel, INSTANCE_LABELS } from "@/lib/comite-labels";
 import {
   Card,
   CardContent,
@@ -88,20 +88,19 @@ type ComiteFilterOption = {
   instance: string;
   numero: number;
   date?: Date | string | null;
+  chantier?: { id?: string; code?: string; nom?: string } | null;
 };
 
 const EMPTY_CHANTIERS: ChantierFilterOption[] = [];
 const EMPTY_COMITES: ComiteFilterOption[] = [];
 
-function comiteSelectLabel(co: { instance: string; numero: number }) {
-  return `${INSTANCE_LABELS[co.instance] ?? co.instance} #${co.numero}`;
-}
-
-function comiteSelectDate(d: Date | string | null | undefined) {
-  if (d == null || d === "") return "";
-  const date = d instanceof Date ? d : new Date(d);
-  if (Number.isNaN(date.getTime())) return "";
-  return format(date, "dd MMM yyyy", { locale: fr });
+function comiteSelectLabel(co: {
+  instance: string;
+  numero: number;
+  date?: Date | string | null;
+  chantier?: { id?: string; code?: string; nom?: string } | null;
+}) {
+  return formatComiteSeanceLabel(co, undefined, { withChantier: true });
 }
 
 function PaginationControls({
@@ -499,7 +498,6 @@ function PersonalRaidTypeTable({
             ...comiteFilterOptions.map((co) => ({
               value: co.id,
               label: comiteSelectLabel(co),
-              description: comiteSelectDate(co.date) || undefined,
             })),
           ]}
           selected={filterComite}

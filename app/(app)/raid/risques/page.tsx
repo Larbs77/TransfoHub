@@ -21,7 +21,7 @@ export default async function RaidRisquesPage({ searchParams }: Props) {
   await requirePageAccess("/raid");
   const params = await searchParams;
   const [items, statusConfigs, fieldOptions, chantiers, comites] = await Promise.all([
-    getRaidItems("Risque"),
+    getRaidItems("Risque", { includeDeleted: true }),
     getStatusConfigs(),
     getRaidFieldOptions().catch(() => []),
     getChantiersForSelect().catch(() => []),

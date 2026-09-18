@@ -27,11 +27,20 @@ export async function POST(req: NextRequest) {
     // Récupérer le contexte PMO depuis la base
     const [chantiers, raids, comites, settings, jalons, adherences, consultationQuestions, favoris] = await Promise.all([
       prisma.chantier.findMany({ include: { _count: { select: { raids: true } } } }),
-      prisma.raid.findMany({ include: { chantier: { select: { code: true, nom: true } } } }),
+      prisma.raid.findMany({
+        where: { deletedAt: null },
+        include: { chantier: { select: { code: true, nom: true } } },
+      }),
       prisma.comite.findMany({ orderBy: { date: "asc" } }),
       prisma.settings.findFirst({ where: { id: 1 } }),
       prisma.jalon.findMany({ include: { chantier: { select: { code: true, nom: true } } } }),
-      prisma.adherence.findMany({ include: { chantierSource: { select: { code: true } }, chantierDependant: { select: { code: true } } } }),
+      prisma.adherence.findMany({
+        where: { deletedAt: null },
+        include: {
+          chantierSource: { select: { code: true } },
+          dependants: { include: { chantier: { select: { code: true } } } },
+        },
+      }),
       prisma.consultationQuestion.findMany({ include: { chantier: { select: { code: true } } } }),
       prisma.favoriChantier.findMany({ select: { chantierId: true } }),
     ]);
@@ -113,7 +122,12 @@ ${jalonsEnRetard.length > 0
 ### Adhérences bloquées (${blockedAdherences.length})
 ${blockedAdherences.length > 0
   ? blockedAdherences.slice(0, 10)
-      .map((a) => `- ${a.chantierSource?.code}→${a.chantierDependant?.code || a.chantierDependantLabel || "ALL"} | ${a.type} | ${a.criticite}`)
+      .map((a) => {
+        const targets = a.dependants?.length
+          ? a.dependants.map((d) => d.chantier.code).join(",")
+          : a.chantierDependantLabel || "ALL";
+        return `- ${a.chantierSource?.code}→${targets} | ${a.type} | ${a.criticite}`;
+      })
       .join("\n")
   : "Aucune."}
 

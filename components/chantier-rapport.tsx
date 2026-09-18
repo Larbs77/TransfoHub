@@ -75,7 +75,7 @@ interface Adherence {
   description: string;
   chantierDependantLabel: string;
   chantierSource: AdherenceRef;
-  chantierDependant: AdherenceRef | null;
+  dependants?: Array<{ chantier: AdherenceRef }>;
 }
 
 interface Chantier {
@@ -96,7 +96,8 @@ interface Chantier {
   jalons: Jalon[];
   membres: Membre[];
   adherencesSource: Adherence[];
-  adherencesDependant: Adherence[];
+  adherencesDependant?: Adherence[];
+  adherenceDependantLinks?: Array<{ adherence: Adherence }>;
 }
 
 interface BurnRateTotals {
@@ -605,10 +606,17 @@ export function ChantierRapport({ chantier, burnRate, showPrintButton = true }: 
       )}
 
       {/* ── ADHÉRENCES ───────────────────────────────────────────────────────── */}
-      {(chantier.adherencesSource.length > 0 || chantier.adherencesDependant.length > 0) && (() => {
+      {((chantier.adherencesSource?.length ?? 0) > 0 ||
+        (chantier.adherenceDependantLinks?.length ??
+          chantier.adherencesDependant?.length ??
+          0) > 0) && (() => {
         const CRITICITE_ORDER: Record<string, number> = { BLOQUANTE: 0, FORTE: 1, "MODÉRÉE": 2, FAIBLE: 3 };
         const rows = [
-          ...chantier.adherencesDependant.map((a) => ({ ...a, direction: "entrante" as const })),
+          ...(
+            chantier.adherenceDependantLinks?.map((l) => l.adherence) ??
+            chantier.adherencesDependant ??
+            []
+          ).map((a) => ({ ...a, direction: "entrante" as const })),
           ...chantier.adherencesSource.map((a) => ({ ...a, direction: "sortante" as const })),
         ].sort((a, b) => (CRITICITE_ORDER[a.criticite] ?? 9) - (CRITICITE_ORDER[b.criticite] ?? 9));
 
@@ -638,8 +646,10 @@ export function ChantierRapport({ chantier, burnRate, showPrintButton = true }: 
                   const isEntrante = a.direction === "entrante";
                   const linkedChantier = isEntrante
                     ? `${a.chantierSource.code} — ${a.chantierSource.nom}`
-                    : a.chantierDependant
-                    ? `${a.chantierDependant.code} — ${a.chantierDependant.nom}`
+                    : a.dependants?.length
+                    ? a.dependants
+                        .map((d) => `${d.chantier.code} — ${d.chantier.nom}`)
+                        .join(", ")
                     : a.chantierDependantLabel || "Tous chantiers";
                   return (
                     <tr key={a.id} style={{ backgroundColor: i % 2 === 0 ? "#f5f7ff" : "#eef2ff" }}>

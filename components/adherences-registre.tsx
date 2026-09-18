@@ -35,10 +35,12 @@ import {
   ChevronLeft,
   ChevronRight,
   ArrowUpDown,
+  RotateCcw,
 } from "lucide-react";
-import { deleteAdherence } from "@/app/(app)/actions";
+import { deleteAdherence, restoreAdherence } from "@/app/(app)/actions";
 import { useCanWritePage, useUser } from "@/components/user-provider";
 import { AdherenceFormDialog } from "@/components/adherence-form-dialog";
+import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { AdherenceGraph } from "@/components/adherence-graph";
 import {
   ADHERENCE_TYPES,
@@ -47,6 +49,7 @@ import {
   ADHERENCE_STATUT_COLORS,
   ADHERENCE_CRITICITES,
   ADHERENCE_CRITICITE_COLORS,
+  chantiersFromDependants,
 } from "@/lib/adherence-labels";
 import Link from "next/link";
 
@@ -63,9 +66,8 @@ interface AdherenceItem {
   code: string;
   chantierSourceId: string;
   chantierSource: ChantierRef;
-  chantierDependantId: string | null;
-  chantierDependant: ChantierRef | null;
   chantierDependantLabel: string;
+  dependants?: Array<{ chantier: ChantierRef }>;
   type: string;
   domaine: string;
   description: string;
@@ -76,6 +78,9 @@ interface AdherenceItem {
   responsable: string;
   contrat_interface: string;
   commentaires: string;
+  deletedAt?: Date | string | null;
+  deletedByName?: string | null;
+  deleteMotif?: string | null;
 }
 
 interface ChantierOption {
@@ -87,6 +92,7 @@ interface ChantierOption {
 interface Props {
   adherences: AdherenceItem[];
   chantiers: ChantierOption[];
+  chantiersDependant?: ChantierOption[];
   nextCode: string;
 }
 
@@ -180,21 +186,41 @@ type SortDir = "asc" | "desc";
 const CRITICITE_ORDER: Record<string, number> = { BLOQUANTE: 0, MAJEURE: 1, MOYENNE: 2, MINEURE: 3 };
 const STATUT_ADH_ORDER: Record<string, number> = { "Bloqué": 0, "En cours": 1, Identifié: 2, Résolu: 3 };
 
-export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
+function isDeleted(a: AdherenceItem) {
+  return !!a.deletedAt;
+}
+
+export function AdherencesRegistre({
+  adherences,
+  chantiers,
+  chantiersDependant,
+  nextCode,
+}: Props) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<AdherenceItem | null>(null);
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("all");
   const [filterCriticite, setFilterCriticite] = useState("all");
   const [filterStatut, setFilterStatut] = useState("all");
+  const [filterDeleted, setFilterDeleted] = useState<"active" | "deleted" | "all">(
+    "active"
+  );
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [restoreId, setRestoreId] = useState<string | null>(null);
 
-  // Pagination
   const [pageSize, setPageSize] = useState<number>(10);
   const [currentPage, setCurrentPage] = useState(1);
   const canWrite = useCanWritePage("/adherences");
-  const { consultationChantierIds } = useUser();
+  const { consultationChantierIds, chantierScope, memberChantierIds, role } =
+    useUser();
 
-  // Sort
+  function canMutateSource(sourceId: string) {
+    if (!canWrite) return false;
+    if (consultationChantierIds.includes(sourceId)) return false;
+    if (chantierScope === "all" || role === "Admin") return true;
+    return memberChantierIds.includes(sourceId);
+  }
+
   const [sortField, setSortField] = useState<SortField>("code");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
@@ -218,17 +244,22 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
     );
   }
 
-  // KPIs
-  const total = adherences.length;
-  const bloquantes = adherences.filter((a) => a.criticite === "BLOQUANTE").length;
-  const enCours = adherences.filter((a) => a.statut === "En cours").length;
-  const resolues = adherences.filter((a) => a.statut === "Résolu").length;
-  const bloquees = adherences.filter((a) => a.statut === "Bloqué").length;
+  const activeAdherences = useMemo(
+    () => adherences.filter((a) => !isDeleted(a)),
+    [adherences]
+  );
 
-  // Filter + Sort
+  const total = activeAdherences.length;
+  const bloquantes = activeAdherences.filter((a) => a.criticite === "BLOQUANTE").length;
+  const enCours = activeAdherences.filter((a) => a.statut === "En cours").length;
+  const resolues = activeAdherences.filter((a) => a.statut === "Résolu").length;
+  const bloquees = activeAdherences.filter((a) => a.statut === "Bloqué").length;
+
   const filtered = useMemo(() => {
     setCurrentPage(1);
     const result = adherences.filter((a) => {
+      if (filterDeleted === "active" && isDeleted(a)) return false;
+      if (filterDeleted === "deleted" && !isDeleted(a)) return false;
       if (filterType !== "all" && a.type !== filterType) return false;
       if (filterCriticite !== "all" && a.criticite !== filterCriticite) return false;
       if (filterStatut !== "all" && a.statut !== filterStatut) return false;
@@ -239,9 +270,14 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
           a.description.toLowerCase().includes(s) ||
           a.chantierSource.code.toLowerCase().includes(s) ||
           a.chantierSource.nom.toLowerCase().includes(s) ||
-          (a.chantierDependant?.code.toLowerCase().includes(s) ?? false) ||
-          (a.chantierDependant?.nom.toLowerCase().includes(s) ?? false) ||
-          a.responsable.toLowerCase().includes(s)
+          chantiersFromDependants(a.dependants).some(
+            (d) =>
+              d.code.toLowerCase().includes(s) ||
+              d.nom.toLowerCase().includes(s)
+          ) ||
+          (a.chantierDependantLabel ?? "").toLowerCase().includes(s) ||
+          a.responsable.toLowerCase().includes(s) ||
+          (a.deleteMotif ?? "").toLowerCase().includes(s)
         );
       }
       return true;
@@ -252,7 +288,11 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
       switch (sortField) {
         case "code": return dir * a.code.localeCompare(b.code);
         case "source": return dir * a.chantierSource.code.localeCompare(b.chantierSource.code);
-        case "dependant": return dir * (a.chantierDependant?.code ?? a.chantierDependantLabel ?? "").localeCompare(b.chantierDependant?.code ?? b.chantierDependantLabel ?? "");
+        case "dependant": {
+          const da = chantiersFromDependants(a.dependants)[0]?.code ?? a.chantierDependantLabel ?? "";
+          const db = chantiersFromDependants(b.dependants)[0]?.code ?? b.chantierDependantLabel ?? "";
+          return dir * da.localeCompare(db);
+        }
         case "type": return dir * a.type.localeCompare(b.type);
         case "criticite": return dir * ((CRITICITE_ORDER[a.criticite] ?? 9) - (CRITICITE_ORDER[b.criticite] ?? 9));
         case "statut": return dir * ((STATUT_ADH_ORDER[a.statut] ?? 9) - (STATUT_ADH_ORDER[b.statut] ?? 9));
@@ -267,23 +307,28 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
     });
 
     return result;
-  }, [adherences, search, filterType, filterCriticite, filterStatut, sortField, sortDir]);
+  }, [adherences, search, filterType, filterCriticite, filterStatut, filterDeleted, sortField, sortDir]);
 
-  // Pagination
   const totalPages = pageSize === 0 ? 1 : Math.ceil(filtered.length / pageSize);
   const safePage = Math.min(currentPage, totalPages || 1);
   const paginated = pageSize === 0
     ? filtered
     : filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
 
-  async function handleDelete(id: string) {
-    if (!confirm("Supprimer cette adhérence ?")) return;
-    await deleteAdherence(id);
+  async function confirmDelete(motif?: string) {
+    if (!deleteId) return;
+    await deleteAdherence(deleteId, motif);
+    setDeleteId(null);
+  }
+
+  async function confirmRestore(motif?: string) {
+    if (!restoreId) return;
+    await restoreAdherence(restoreId, motif);
+    setRestoreId(null);
   }
 
   return (
     <div className="space-y-4">
-      {/* KPIs */}
       <div className="grid grid-cols-5 gap-3">
         <KpiCard label="Total adhérences" value={total} color="#6366f1" />
         <KpiCard label="Bloquantes" value={bloquantes} color="#dc2626" />
@@ -305,7 +350,7 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
         </TabsList>
 
         <TabsContent value="graphe">
-          <AdherenceGraph adherences={adherences} height={600} />
+          <AdherenceGraph adherences={activeAdherences} height={600} />
         </TabsContent>
 
         <TabsContent value="registre">
@@ -313,7 +358,14 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
         <CardHeader>
           <CardTitle className="text-sm">Registre des Adhérences</CardTitle>
           <CardDescription>
-            {filtered.length} adhérence(s) sur {total}
+            {filtered.length} adhérence(s)
+            {filterDeleted === "active"
+              ? " actives"
+              : filterDeleted === "deleted"
+                ? " supprimées"
+                : ""}
+            {" · "}
+            {total} active(s) au total
           </CardDescription>
           {canWrite && (
           <CardAction>
@@ -331,7 +383,6 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
           )}
         </CardHeader>
         <CardContent>
-          {/* Filters + Page size */}
           <div className="flex flex-wrap gap-3 mb-4">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
@@ -342,6 +393,21 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
+            <Select
+              value={filterDeleted}
+              onValueChange={(v) =>
+                setFilterDeleted(v as "active" | "deleted" | "all")
+              }
+            >
+              <SelectTrigger className="w-[160px]">
+                <SelectValue placeholder="Visibilité" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active">Actives</SelectItem>
+                <SelectItem value="deleted">Supprimées</SelectItem>
+                <SelectItem value="all">Toutes</SelectItem>
+              </SelectContent>
+            </Select>
             <Select value={filterType} onValueChange={setFilterType}>
               <SelectTrigger className="w-[150px]"><SelectValue placeholder="Type" /></SelectTrigger>
               <SelectContent>
@@ -391,7 +457,6 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
             </div>
           </div>
 
-          {/* Table */}
           <div className="rounded-md border overflow-x-auto">
             <Table>
               <TableHeader>
@@ -417,8 +482,26 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
                   </TableRow>
                 ) : (
                   paginated.map((a) => (
-                    <TableRow key={a.id}>
-                      <TableCell className="font-mono text-xs font-medium">{a.code}</TableCell>
+                    <TableRow
+                      key={a.id}
+                      className={isDeleted(a) ? "bg-muted/40 opacity-80" : undefined}
+                    >
+                      <TableCell className="font-mono text-xs font-medium">
+                        <span>{a.code}</span>
+                        {isDeleted(a) ? (
+                          <p
+                            className="mt-0.5 text-[10px] font-normal text-destructive"
+                            title={a.deleteMotif || undefined}
+                          >
+                            Supprimée
+                            {a.deletedAt
+                              ? ` le ${format(new Date(a.deletedAt), "dd/MM/yyyy", { locale: fr })}`
+                              : ""}
+                            {a.deletedByName ? ` par ${a.deletedByName}` : ""}
+                            {a.deleteMotif ? ` — ${a.deleteMotif}` : ""}
+                          </p>
+                        ) : null}
+                      </TableCell>
                       <TableCell>
                         <Link href={`/chantiers/${a.chantierSource.id}`} className="hover:underline">
                           <span className="text-xs font-medium">{a.chantierSource.code}</span>
@@ -431,18 +514,32 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
                         <ArrowRight className="size-3 text-muted-foreground" />
                       </TableCell>
                       <TableCell>
-                        {a.chantierDependant ? (
-                          <Link href={`/chantiers/${a.chantierDependant.id}`} className="hover:underline">
-                            <span className="text-xs font-medium">{a.chantierDependant.code}</span>
-                            <p className="text-xs text-muted-foreground truncate max-w-[180px]">
-                              {a.chantierDependant.nom}
-                            </p>
-                          </Link>
-                        ) : (
-                          <span className="text-xs text-muted-foreground italic">
-                            {a.chantierDependantLabel || "Transverse"}
-                          </span>
-                        )}
+                        {(() => {
+                          const deps = chantiersFromDependants(a.dependants);
+                          if (!deps.length) {
+                            return (
+                              <span className="text-xs text-muted-foreground italic">
+                                {a.chantierDependantLabel || "Transverse"}
+                              </span>
+                            );
+                          }
+                          return (
+                            <div className="flex flex-col gap-1">
+                              {deps.map((d) => (
+                                <Link
+                                  key={d.id}
+                                  href={`/chantiers/${d.id}`}
+                                  className="hover:underline"
+                                >
+                                  <span className="text-xs font-medium">{d.code}</span>
+                                  <p className="max-w-[180px] truncate text-xs text-muted-foreground">
+                                    {d.nom}
+                                  </p>
+                                </Link>
+                              ))}
+                            </div>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell>
                         <Badge
@@ -484,30 +581,46 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
                           : "—"}
                       </TableCell>
                       <TableCell className="text-xs">{a.responsable}</TableCell>
-                      {canWrite &&
-                        !consultationChantierIds.includes(a.chantierSourceId) && (
+                      {canWrite && (
                       <TableCell>
+                        {canMutateSource(a.chantierSourceId) ? (
                         <div className="flex gap-1">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0"
-                            onClick={() => {
-                              setEditItem(a);
-                              setDialogOpen(true);
-                            }}
-                          >
-                            <Pencil className="size-3" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                            onClick={() => handleDelete(a.id)}
-                          >
-                            <Trash2 className="size-3" />
-                          </Button>
+                          {isDeleted(a) ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0"
+                              title="Restaurer"
+                              onClick={() => setRestoreId(a.id)}
+                            >
+                              <RotateCcw className="size-3" />
+                            </Button>
+                          ) : (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0"
+                                onClick={() => {
+                                  setEditItem(a);
+                                  setDialogOpen(true);
+                                }}
+                              >
+                                <Pencil className="size-3" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                                title="Supprimer"
+                                onClick={() => setDeleteId(a.id)}
+                              >
+                                <Trash2 className="size-3" />
+                              </Button>
+                            </>
+                          )}
                         </div>
+                        ) : null}
                       </TableCell>
                       )}
                     </TableRow>
@@ -532,13 +645,34 @@ export function AdherencesRegistre({ adherences, chantiers, nextCode }: Props) {
         </TabsContent>
       </Tabs>
 
-      {/* Form Dialog */}
       <AdherenceFormDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         adherence={editItem}
         chantiers={chantiers}
+        chantiersDependant={chantiersDependant ?? chantiers}
         nextCode={nextCode}
+      />
+      <DeleteConfirmDialog
+        open={!!deleteId}
+        onOpenChange={(open) => !open && setDeleteId(null)}
+        requireMotif
+        title="Supprimer l'adhérence"
+        description="L'adhérence ne sera plus visible dans le registre actif, le graphe et les fiches chantier. Vous pourrez la retrouver via le filtre « Supprimées » et la restaurer."
+        motifLabel="Motif de la suppression"
+        onConfirm={confirmDelete}
+      />
+      <DeleteConfirmDialog
+        open={!!restoreId}
+        onOpenChange={(open) => !open && setRestoreId(null)}
+        requireMotif
+        title="Restaurer l'adhérence"
+        description="L'adhérence redeviendra active (registre, graphe, fiches chantier)."
+        motifLabel="Commentaire de restauration"
+        motifPlaceholder="Expliquez pourquoi cette adhérence est restaurée…"
+        confirmLabel="Restaurer"
+        confirmVariant="default"
+        onConfirm={confirmRestore}
       />
     </div>
   );

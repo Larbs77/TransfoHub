@@ -26,6 +26,8 @@ interface UserContextType {
   chantierScope: "all" | "assigned" | "none";
   /** Extra chantiers in consultation only (not a team member). Empty if scope all. */
   consultationChantierIds: string[];
+  /** Chantiers where the user is équipe member (write). Empty if scope all. */
+  memberChantierIds: string[];
 }
 
 const UserContext = createContext<UserContextType | null>(null);
