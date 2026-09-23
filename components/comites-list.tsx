@@ -67,6 +67,7 @@ import {
 
 interface RaidItem {
   id: string;
+  code: string;
   type: string;
   intitule: string;
   description: string;
@@ -203,6 +204,12 @@ function ComiteRaidRow({
   return (
     <div className="rounded-md border bg-card text-sm">
       <div className="flex items-center gap-3 px-3 py-2">
+        <span
+          className="shrink-0 font-mono text-[11px] font-semibold text-[#0A3C74] dark:text-foreground"
+          title={r.code || undefined}
+        >
+          {r.code?.trim() || "—"}
+        </span>
         <Badge
           className="text-[10px] shrink-0"
           style={{
@@ -271,6 +278,7 @@ function ComiteRaidRow({
             <p className="mt-0.5 whitespace-pre-wrap">{description}</p>
           </div>
           <div className="flex flex-wrap gap-x-5 gap-y-1">
+            <RaidDetailField label="Code" value={r.code?.trim() || "—"} />
             <RaidDetailField label="Catégorie" value={categorie} />
             <RaidDetailField label="Domaine" value={domaine} />
           </div>

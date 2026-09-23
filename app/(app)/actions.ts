@@ -2620,6 +2620,7 @@ export async function getComites() {
     include: {
       chantier: { select: { id: true, code: true, nom: true } },
       raids: {
+        where: { deletedAt: null },
         orderBy: { createdAt: "desc" },
         include: { chantier: { select: { id: true, code: true, nom: true } } },
       },
