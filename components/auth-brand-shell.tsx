@@ -57,7 +57,7 @@ export function AuthBrandShell({ children }: { children: React.ReactNode }) {
       />
 
       {/* Content */}
-      <div className="relative z-10 w-full max-w-md">{children}</div>
+      <div className="relative z-10 w-full min-w-0 max-w-md">{children}</div>
 
       {/* Footer brand strip */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center pb-4">

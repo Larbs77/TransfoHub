@@ -13,6 +13,7 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
+import { APP_VERSION } from "@/lib/app-version";
 import { loginAction } from "./actions";
 
 function LoginForm() {
@@ -112,8 +113,11 @@ function LoginForm() {
             {isPending ? "Connexion..." : "Se connecter"}
           </Button>
 
-          <p className="pt-1 text-center text-[11px] leading-relaxed text-[#0A3C74]/50">
-            Accès sécurisé · Programme de transformation
+          <p className="flex max-w-full flex-wrap items-baseline justify-center gap-x-1.5 pt-1 text-center text-[11px] leading-relaxed text-[#0A3C74]/50">
+            <span>Accès sécurisé · Programme de transformation</span>
+            <span className="whitespace-nowrap font-medium tracking-wide text-[#0A3C74]/75">
+              {`· v${APP_VERSION}`}
+            </span>
           </p>
         </form>
       </CardContent>
