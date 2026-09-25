@@ -38,7 +38,7 @@ model Chantier {
   adherenceDependantLinks AdherenceDependant[]
   rmds                   ChantierRmd[]
   consultationQuestions  ConsultationQuestion[]
-  favoris                FavoriChantier?
+  favoris                FavoriChantier[]
   jalons                 Jalon[]
   membres                MembreEquipe[]
   raids                  Raid[]
@@ -124,6 +124,7 @@ model RessourceEquipeFonctionnelle {
 
 model User {
   id              String     @id @default(uuid())
+  /// Exact unique + LOWER(username) unique index (login is case-insensitive).
   username        String     @unique
   password_hash   String
   /// Identity fields kept in sync with linked Ressource (source of truth for people data).
@@ -150,6 +151,7 @@ model User {
   ressource       Ressource? @relation(fields: [ressourceId], references: [id])
   notifications   Notification[]
   consultationChantiers UserChantierConsultation[]
+  favoris         FavoriChantier[]
 }
 
 /// Extra chantiers the user may consult (read-only). Membership still wins.
@@ -403,6 +405,9 @@ model Comite {
   invitation_envoyee Boolean   @default(false)
   /// Required for operational meetings (Weekly, CoSuivi…); null for gouvernance.
   chantierId         String?
+  /// App user who created the séance (null for historical rows).
+  createdByUserId    String?
+  createdByName      String    @default("")
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
   chantier           Chantier? @relation(fields: [chantierId], references: [id], onDelete: Restrict)
@@ -410,6 +415,8 @@ model Comite {
 
   @@index([chantierId])
   @@index([instance, chantierId])
+  @@index([createdByUserId])
+  @@index([statut])
 }
 
 /// Teams catalog — two kinds:
@@ -722,11 +729,18 @@ model ConsultationQuestion {
   @@index([echeance_actualisee])
 }
 
+/// Personal chantier star. One row per user and chantier.
 model FavoriChantier {
   id         String   @id @default(uuid())
-  chantierId String   @unique
+  userId     String
+  chantierId String
   createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   chantier   Chantier @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, chantierId])
+  @@index([userId])
+  @@index([chantierId])
 }
 
 /// SMTP mail server configuration (per-client / bank). Used by lib/mail for outbound mail.

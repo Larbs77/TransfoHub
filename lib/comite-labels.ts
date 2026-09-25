@@ -1,4 +1,7 @@
-import { isComiteNiveauOperationnel } from "@/lib/comite-niveau";
+import {
+  isComiteNiveauOperationnel,
+  STATUT_COMITE_SUPPRIME,
+} from "@/lib/comite-niveau";
 
 /**
  * Fallback labels/colors when DB parameters are not loaded (e.g. legacy clients).
@@ -239,11 +242,21 @@ export const STATUT_COMITE_LABELS: Record<string, string> = {
   "Planifié": "Planifié",
   "A confirmer": "A confirmer",
   "Reporté": "Reporté",
+  [STATUT_COMITE_SUPPRIME]: "Supprimé",
 };
+
+/** Statuts proposés à la saisie (le statut Supprimé passe uniquement par l'action supprimer). */
+export const STATUT_COMITE_SAISIE_LABELS: Record<string, string> =
+  Object.fromEntries(
+    Object.entries(STATUT_COMITE_LABELS).filter(
+      ([key]) => key !== STATUT_COMITE_SUPPRIME
+    )
+  );
 
 export const STATUT_COMITE_COLORS: Record<string, string> = {
   "A planifier": "#6b7280",
   "Planifié": "#2563eb",
   "A confirmer": "#ea580c",
   "Reporté": "#dc2626",
+  [STATUT_COMITE_SUPPRIME]: "#64748b",
 };

@@ -31,6 +31,7 @@ import {
   getStatutColor,
   RAID_TYPE_COLORS,
   isRaidOverdue,
+  isActionDoublon,
   raidEffectiveEcheance,
   canMoveRaidKanbanClient,
 } from "@/lib/raid-labels";
@@ -406,14 +407,18 @@ export function ActionKanban({ items: propItems, statusConfigs }: Props) {
         .filter((c) => c.type === items[0]?.type || c.type === "Action")
         .sort((a, b) => a.position - b.position);
       if (actionConfigs.length > 0) {
-        return actionConfigs.map((c) => ({ label: c.label, color: c.color }));
+        return actionConfigs
+          .filter((c) => !isActionDoublon(c.label))
+          .map((c) => ({ label: c.label, color: c.color }));
       }
     }
     const type = items[0]?.type || "Action";
-    return getStatutsForType(type).map((label) => ({
-      label: label as string,
-      color: getStatutColor(type, label as string),
-    }));
+    return getStatutsForType(type)
+      .filter((label) => !isActionDoublon(label))
+      .map((label) => ({
+        label: label as string,
+        color: getStatutColor(type, label as string),
+      }));
   }, [statusConfigs, items]);
 
   const canMoveItem = (item: ActionItem) => {

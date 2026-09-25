@@ -32,11 +32,18 @@ import {
   type RaidAuditAction,
 } from "@/lib/raid-collaboration";
 import {
+  assertCanDeleteComiteSeance,
   assertCanManageComiteSeance,
+  assertComiteSeanceActive,
   comiteListWhereForSession,
   comiteWritableWhereForSession,
+  whereComitesActifs,
 } from "@/lib/comite-access";
-import { isComiteNiveauOperationnel } from "@/lib/comite-niveau";
+import {
+  isComiteNiveauOperationnel,
+  isComiteSupprime,
+  STATUT_COMITE_SUPPRIME,
+} from "@/lib/comite-niveau";
 import {
   countUnreadNotifications,
   listUserNotifications,
@@ -45,6 +52,7 @@ import {
   notifyRaidAssigned,
   notifyRaidChanged,
 } from "@/lib/notifications";
+import { assertUsernameAvailable } from "@/lib/username";
 import {
   ensureChantierFunctionalTeam,
   resolveRaidEquipeId,
@@ -60,6 +68,9 @@ import {
 } from "@/lib/consultation-affectation";
 import {
   isRaidClosed,
+  isActionActive,
+  isActionDoublon,
+  STATUT_ACTION_DOUBLON,
   isRaidOverdue,
   actionRequiresEcheance,
   formatRisqueLienLabel,
@@ -265,8 +276,17 @@ export async function getChantiers() {
     where: chantierIds === "all" ? undefined : { id: { in: chantierIds } },
     orderBy: { code: "asc" },
     include: {
-      _count: { select: { raids: { where: { deletedAt: null } } } },
-      raids: { where: { deletedAt: null }, select: { type: true, statut: true } },
+      _count: {
+        select: {
+          raids: {
+            where: { deletedAt: null, statut: { not: STATUT_ACTION_DOUBLON } },
+          },
+        },
+      },
+      raids: {
+        where: { deletedAt: null, statut: { not: STATUT_ACTION_DOUBLON } },
+        select: { type: true, statut: true },
+      },
       rmds: { include: { rmd: true } },
       membres: {
         where: { is_directeur: true },
@@ -461,7 +481,7 @@ const comiteSelectFields = {
 
 export async function getComitesForSelect() {
   const session = await requireAuth();
-  const where = await comiteListWhereForSession(session);
+  const where = whereComitesActifs(await comiteListWhereForSession(session));
   return prisma.comite.findMany({
     where,
     orderBy: [{ instance: "asc" }, { date: "desc" }],
@@ -472,7 +492,9 @@ export async function getComitesForSelect() {
 /** Committees the current user may attach a RAID to. */
 export async function getComitesForRaidCreate(includeId?: string | null) {
   const session = await requireAuth();
-  const where = await comiteWritableWhereForSession(session);
+  const where = whereComitesActifs(
+    await comiteWritableWhereForSession(session)
+  );
   const rows = await prisma.comite.findMany({
     where,
     orderBy: [{ instance: "asc" }, { date: "desc" }],
@@ -521,11 +543,15 @@ export async function getDashboardStats() {
     prisma.chantier.findMany({
       include: { _count: { select: { raids: true } } },
     }),
-    prisma.comite.findMany(),
+    prisma.comite.findMany({
+      where: whereComitesActifs(),
+    }),
     prisma.consultationQuestion.findMany(),
   ]);
 
-  const actions = raids.filter((r) => r.type === "Action");
+  const actions = raids.filter(
+    (r) => r.type === "Action" && !isActionDoublon(r.statut)
+  );
   const risks = raids.filter((r) => r.type === "Risque");
   const decisions = raids.filter((r) => r.type === "Décision");
   const informations = raids.filter((r) => r.type === "Information");
@@ -533,7 +559,7 @@ export async function getDashboardStats() {
   const seuil = settings?.seuil_relance_jours ?? 3;
   const now = new Date();
 
-  const activeActions = actions.filter((a) => a.statut !== "Clôturé" && a.statut !== "Abandonné");
+  const activeActions = actions.filter((a) => isActionActive(a.statut));
   const totalActions = activeActions.length;
   const totalRisks = risks.filter((r) => r.statut !== "Clos").length;
   // Chantiers Actifs KPI: started (any statut except "Non démarré") / total portfolio
@@ -592,6 +618,7 @@ export async function getDashboardStats() {
   // Chart data: RAID par type
   const raidTypeCounts: Record<string, number> = {};
   for (const r of raids) {
+    if (isActionDoublon(r.statut)) continue;
     raidTypeCounts[r.type] = (raidTypeCounts[r.type] ?? 0) + 1;
   }
 
@@ -697,7 +724,7 @@ export async function getDashboardStats() {
   // Workload per responsable (active RAID items)
   const workloadMap = new Map<string, number>();
   for (const r of raids) {
-    if (r.responsable && !["Clôturé", "Abandonné", "Clos"].includes(r.statut)) {
+    if (r.responsable && !isRaidClosed(r.statut)) {
       workloadMap.set(r.responsable, (workloadMap.get(r.responsable) ?? 0) + 1);
     }
   }
@@ -860,12 +887,14 @@ export async function getDashboardPMO() {
   // Also get ALL chantiers for the timeline (user request: "display timeline of all chantiers")
   const allChantiers = await prisma.chantier.findMany();
 
-  const actions = raids.filter((r) => r.type === "Action");
+  const actions = raids.filter(
+    (r) => r.type === "Action" && !isActionDoublon(r.statut)
+  );
   const risks = raids.filter((r) => r.type === "Risque");
   const decisions = raids.filter((r) => r.type === "Décision");
 
   const now = new Date();
-  const activeActions = actions.filter((a) => a.statut !== "Clôturé" && a.statut !== "Abandonné");
+  const activeActions = actions.filter((a) => isActionActive(a.statut));
 
   // ── KPIs ──
   const totalActions = activeActions.length;
@@ -890,6 +919,7 @@ export async function getDashboardPMO() {
   // ── Chart: RAID par Type (pie) ──
   const raidTypeCounts: Record<string, number> = {};
   for (const r of raids) {
+    if (isActionDoublon(r.statut)) continue;
     raidTypeCounts[r.type] = (raidTypeCounts[r.type] ?? 0) + 1;
   }
 
@@ -1317,11 +1347,11 @@ export async function getPersonalDashboard() {
       ? Math.round((hoursThisMonth / capacityDaysMonth) * 100)
       : 0;
 
-  const myRaids = raids.filter((r) => r.isMine);
-  const myActions = myRaids.filter((r) => r.type === "Action");
-  const myActionsOpen = myActions.filter(
-    (a) => a.statut !== "Clôturé" && a.statut !== "Abandonné"
+  const myRaids = raids.filter(
+    (r) => r.isMine && !isActionDoublon(r.statut)
   );
+  const myActions = myRaids.filter((r) => r.type === "Action");
+  const myActionsOpen = myActions.filter((a) => isActionActive(a.statut));
   const myActionsOverdue = myActionsOpen.filter((a) =>
     isRaidOverdue(a.statut, a.date_echeance_actualisee, a.date_echeance, now)
   );
@@ -1345,6 +1375,7 @@ export async function getPersonalDashboard() {
 
   const raidTypeCounts: Record<string, number> = {};
   for (const r of raids) {
+    if (isActionDoublon(r.statut)) continue;
     raidTypeCounts[r.type] = (raidTypeCounts[r.type] ?? 0) + 1;
   }
   const actionStatusCounts: Record<string, number> = {};
@@ -1708,7 +1739,7 @@ export async function updateChantier(
 
 export async function deleteChantier(id: string) {
   await requirePageWrite("/chantiers");
-  await requireRole("Admin", "Programme_Office");
+  await requireRole("Admin");
   const counts = await prisma.chantier.findUnique({
     where: { id },
     include: { _count: { select: { raids: true } } },
@@ -1726,22 +1757,30 @@ export async function deleteChantier(id: string) {
 // ── Favoris ─────────────────────────────────────────
 
 export async function getFavoris(): Promise<string[]> {
-  await requireAuth();
-  const rows = await prisma.favoriChantier.findMany({ select: { chantierId: true } });
+  const session = await requireAuth();
+  const rows = await prisma.favoriChantier.findMany({
+    where: { userId: session.userId },
+    select: { chantierId: true },
+  });
   return rows.map((r) => r.chantierId);
 }
 
 export async function toggleFavori(chantierId: string): Promise<boolean> {
-  await requireAuth();
-  const existing = await prisma.favoriChantier.findUnique({ where: { chantierId } });
+  const session = await requireChantierAccess(chantierId, { write: false });
+  const where = {
+    userId_chantierId: { userId: session.userId, chantierId },
+  };
+  const existing = await prisma.favoriChantier.findUnique({ where });
   if (existing) {
-    await prisma.favoriChantier.delete({ where: { chantierId } });
+    await prisma.favoriChantier.delete({ where });
     revalidatePath("/");
     revalidatePath("/chantiers");
     revalidatePath("/favoris");
     return false;
   }
-  await prisma.favoriChantier.create({ data: { chantierId } });
+  await prisma.favoriChantier.create({
+    data: { userId: session.userId, chantierId },
+  });
   revalidatePath("/");
   revalidatePath("/chantiers");
   revalidatePath("/favoris");
@@ -1760,8 +1799,17 @@ export async function getChantiersFavoris() {
     where: { id: { in: allowedFavIds } },
     orderBy: { code: "asc" },
     include: {
-      _count: { select: { raids: { where: { deletedAt: null } } } },
-      raids: { where: { deletedAt: null }, select: { type: true, statut: true } },
+      _count: {
+        select: {
+          raids: {
+            where: { deletedAt: null, statut: { not: STATUT_ACTION_DOUBLON } },
+          },
+        },
+      },
+      raids: {
+        where: { deletedAt: null, statut: { not: STATUT_ACTION_DOUBLON } },
+        select: { type: true, statut: true },
+      },
       rmds: { include: { rmd: true } },
       membres: {
         where: { is_directeur: true },
@@ -1808,9 +1856,10 @@ export async function createRaid(data: {
   if (data.comiteId) {
     const comite = await prisma.comite.findUnique({
       where: { id: data.comiteId },
-      select: { chantierId: true, instance: true },
+      select: { chantierId: true, instance: true, statut: true },
     });
     if (!comite) throw new Error("Comité introuvable.");
+    assertComiteSeanceActive(comite);
     if (comite.chantierId) chantierId = comite.chantierId;
     const param = await prisma.comiteParametre.findUnique({
       where: { name: comite.instance },
@@ -2017,9 +2066,18 @@ export async function updateRaid(
   if (data.comiteId) {
     const linkedComite = await prisma.comite.findUnique({
       where: { id: data.comiteId },
-      select: { chantierId: true },
+      select: { chantierId: true, statut: true },
     });
-    if (linkedComite?.chantierId) chantierId = linkedComite.chantierId;
+    if (!linkedComite) throw new Error("Comité introuvable.");
+    if (
+      isComiteSupprime(linkedComite.statut) &&
+      data.comiteId !== existing.comiteId
+    ) {
+      throw new Error(
+        "Impossible de rattacher un RAID à une séance de comité supprimée."
+      );
+    }
+    if (linkedComite.chantierId) chantierId = linkedComite.chantierId;
   }
 
   const actor = await getActorDisplay(session);
@@ -2619,8 +2677,9 @@ export async function getComites() {
     orderBy: [{ instance: "asc" }, { date: "desc" }],
     include: {
       chantier: { select: { id: true, code: true, nom: true } },
+      _count: { select: { raids: true } },
       raids: {
-        where: { deletedAt: null },
+        where: { deletedAt: null, statut: { not: STATUT_ACTION_DOUBLON } },
         orderBy: { createdAt: "desc" },
         include: { chantier: { select: { id: true, code: true, nom: true } } },
       },
@@ -2694,6 +2753,12 @@ export async function createComite(data: {
     niveau: param.niveau,
     chantierId,
   });
+  if (isComiteSupprime(data.statut)) {
+    throw new Error(
+      "Le statut « Supprimé » s'applique uniquement via l'action supprimer."
+    );
+  }
+  const actor = await getActorDisplay(session);
   await prisma.comite.create({
     data: {
       instance: param.name,
@@ -2705,6 +2770,8 @@ export async function createComite(data: {
       ordre_du_jour: data.ordre_du_jour,
       invitation_envoyee: data.invitation_envoyee,
       chantierId,
+      createdByUserId: actor.actorUserId,
+      createdByName: actor.actorName,
     },
   });
   revalidatePath("/comites");
@@ -2728,9 +2795,15 @@ export async function updateComite(
   const session = await requirePageWrite("/comites");
   const current = await prisma.comite.findUnique({
     where: { id },
-    select: { instance: true, chantierId: true },
+    select: { instance: true, chantierId: true, statut: true },
   });
   if (!current) throw new Error("Comité introuvable.");
+  assertComiteSeanceActive(current);
+  if (isComiteSupprime(data.statut)) {
+    throw new Error(
+      "Le statut « Supprimé » s'applique uniquement via l'action supprimer."
+    );
+  }
   const param = await assertValidComiteInstance(data.instance, {
     requireActive: current.instance !== data.instance.trim(),
   });
@@ -2766,18 +2839,31 @@ export async function deleteComite(id: string) {
   const session = await requirePageWrite("/comites");
   const current = await prisma.comite.findUnique({
     where: { id },
-    select: { instance: true, chantierId: true },
+    select: {
+      instance: true,
+      chantierId: true,
+      statut: true,
+      createdByUserId: true,
+      _count: { select: { raids: true } },
+    },
   });
   if (!current) throw new Error("Comité introuvable.");
-  const param = await prisma.comiteParametre.findUnique({
-    where: { name: current.instance },
+  if (isComiteSupprime(current.statut)) {
+    throw new Error("Cette séance de comité est déjà supprimée.");
+  }
+  if (current._count.raids > 0) {
+    throw new Error(
+      "Impossible de supprimer : au moins un RAID est encore rattaché à cette séance."
+    );
+  }
+  assertCanDeleteComiteSeance(session, current);
+  await prisma.comite.update({
+    where: { id },
+    data: { statut: STATUT_COMITE_SUPPRIME },
   });
-  await assertCanManageComiteSeance(session, {
-    niveau: param?.niveau ?? "gouvernance",
-    chantierId: current.chantierId,
-  });
-  await prisma.comite.delete({ where: { id } });
   revalidatePath("/comites");
+  revalidatePath("/calendrier");
+  if (current.chantierId) revalidatePath(`/chantiers/${current.chantierId}`);
 }
 
 // ── Settings ─────────────────────────────────────────
@@ -3213,8 +3299,7 @@ export async function createRessource(data: {
     if (data.createAccount) {
       const username = data.createAccount.username.trim();
       if (!username) throw new Error("Le nom d'utilisateur est obligatoire.");
-      const existing = await tx.user.findUnique({ where: { username } });
-      if (existing) throw new Error("Ce nom d'utilisateur existe déjà.");
+      await assertUsernameAvailable(username, { db: tx });
 
       const appRole = await tx.appRole.findUnique({
         where: { code: data.createAccount.role },
@@ -3324,8 +3409,7 @@ export async function createAccountForRessource(
 
   const username = data.username.trim();
   if (!username) throw new Error("Le nom d'utilisateur est obligatoire.");
-  const existing = await prisma.user.findUnique({ where: { username } });
-  if (existing) throw new Error("Ce nom d'utilisateur existe déjà.");
+  await assertUsernameAvailable(username);
 
   const appRole = await prisma.appRole.findUnique({ where: { code: data.role } });
   if (!appRole || !appRole.is_active) {

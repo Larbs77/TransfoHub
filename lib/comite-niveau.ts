@@ -8,6 +8,23 @@ export const COMITE_NIVEAU_LABELS: Record<string, string> = {
 
 export const COMITE_OWNER_EQUIPE_CHANTIER = "Équipe chantier";
 
+/** Logical delete of a séance (never a SQL DELETE). */
+export const STATUT_COMITE_SUPPRIME = "Supprimé";
+
+export function isComiteSupprime(statut: string | null | undefined): boolean {
+  return (statut ?? "").trim() === STATUT_COMITE_SUPPRIME;
+}
+
+/** Client-side: Admin or the séance creator may request a logical delete. */
+export function canDeleteComiteSeance(
+  comite: { statut: string; createdByUserId?: string | null },
+  ctx: { role: string; userId: string }
+): boolean {
+  if (isComiteSupprime(comite.statut)) return false;
+  if (ctx.role === "Admin") return true;
+  return !!comite.createdByUserId && comite.createdByUserId === ctx.userId;
+}
+
 export function isComiteNiveauOperationnel(
   niveau: string | null | undefined
 ): boolean {
@@ -20,7 +37,7 @@ export function isComiteNiveauGouvernance(
   return !isComiteNiveauOperationnel(niveau);
 }
 
-/** Client-side: who may edit/delete a séance. */
+/** Client-side: who may edit a séance or attach RAID. */
 export function canActOnComiteSeance(
   comite: { instance: string; chantierId?: string | null },
   ctx: {

@@ -5,7 +5,10 @@ import { format } from "date-fns";
 import { requireAuth, requirePageWrite, requireRaidCreateAccess } from "@/lib/auth";
 import { canDeleteRaid } from "@/lib/raid-collaboration";
 import { prisma } from "@/lib/prisma";
-import { assertCanManageComiteSeance } from "@/lib/comite-access";
+import {
+  assertCanManageComiteSeance,
+  assertComiteSeanceActive,
+} from "@/lib/comite-access";
 
 import {
   getLabelsForKind,
@@ -41,9 +44,11 @@ async function loadComiteForImport(comiteId: string) {
       numero: true,
       date: true,
       chantierId: true,
+      statut: true,
     },
   });
   if (!comite) throw new Error("Comité introuvable.");
+  assertComiteSeanceActive(comite);
   const param = await prisma.comiteParametre.findUnique({
     where: { name: comite.instance },
     select: { niveau: true, short_label: true },

@@ -25,7 +25,7 @@ export default async function FavorisPage() {
             <Star className="size-12 mb-4" />
             <p className="text-lg font-medium">Aucun favori</p>
             <p className="text-sm">
-              Cliquez sur l&apos;étoile d&apos;un chantier pour l&apos;ajouter aux favoris.
+              Cliquez sur l&apos;étoile d&apos;un chantier pour l&apos;ajouter à vos favoris.
             </p>
           </div>
         ) : (

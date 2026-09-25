@@ -10,7 +10,7 @@ const globalForPrisma = globalThis as unknown as {
  * Bump whenever the Prisma schema gains fields/models so HMR drops a stale
  * singleton (otherwise findUnique/update rejects unknown fields).
  */
-const PRISMA_MODEL_STAMP = "raid-soft-delete-v1";
+const PRISMA_MODEL_STAMP = "comite-soft-delete-v1";
 
 function clientLooksCurrent(client: PrismaClient): boolean {
   try {
@@ -69,6 +69,10 @@ function clientLooksCurrent(client: PrismaClient): boolean {
         ? fields.some((f) => f.name === "chantierId")
         : "chantierId" in fields;
       if (!hasChantierId) return false;
+      const hasCreatedBy = Array.isArray(fields)
+        ? fields.some((f) => f.name === "createdByUserId")
+        : "createdByUserId" in fields;
+      if (!hasCreatedBy) return false;
     }
     const comiteParamModel = c._runtimeDataModel?.models?.ComiteParametre;
     if (comiteParamModel?.fields) {
@@ -116,6 +120,15 @@ function clientLooksCurrent(client: PrismaClient): boolean {
         ? fields.some((f) => f.name === "deletedAt")
         : "deletedAt" in fields;
       if (!hasDeletedAt) return false;
+    }
+
+    const favoriModel = c._runtimeDataModel?.models?.FavoriChantier;
+    if (favoriModel?.fields) {
+      const fields = favoriModel.fields;
+      const hasUserId = Array.isArray(fields)
+        ? fields.some((f) => f.name === "userId")
+        : "userId" in fields;
+      if (!hasUserId) return false;
     }
 
     return true;

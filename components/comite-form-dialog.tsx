@@ -32,7 +32,7 @@ import { Loader2 } from "lucide-react";
 import { useUser } from "@/components/user-provider";
 import {
   INSTANCE_LABELS,
-  STATUT_COMITE_LABELS,
+  STATUT_COMITE_SAISIE_LABELS,
   type ComiteParametreOption,
 } from "@/lib/comite-labels";
 
@@ -306,7 +306,7 @@ export function ComiteFormDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(STATUT_COMITE_LABELS).map(([key, label]) => (
+                  {Object.entries(STATUT_COMITE_SAISIE_LABELS).map(([key, label]) => (
                     <SelectItem key={key} value={key}>
                       {label}
                     </SelectItem>

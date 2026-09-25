@@ -7,6 +7,7 @@ import {
   validatePasswordComplexity,
 } from "@/lib/auth";
 import { identityFromRessource } from "@/lib/ressource-user";
+import { assertUsernameAvailable } from "@/lib/username";
 import { revalidatePath } from "next/cache";
 
 async function requireUsersAdmin() {
@@ -158,11 +159,7 @@ export async function createUser(data: {
 
   const username = data.username.trim();
   if (!username) throw new Error("Le nom d'utilisateur est obligatoire.");
-
-  const existing = await prisma.user.findUnique({
-    where: { username },
-  });
-  if (existing) throw new Error("Ce nom d'utilisateur existe déjà.");
+  await assertUsernameAvailable(username);
 
   const appRole = await prisma.appRole.findUnique({
     where: { code: data.role },

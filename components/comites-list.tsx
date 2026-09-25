@@ -56,8 +56,10 @@ import {
   COMITE_NIVEAU_GOUVERNANCE,
   COMITE_NIVEAU_LABELS,
   COMITE_NIVEAU_OPERATIONNEL,
-  isComiteNiveauOperationnel,
   canActOnComiteSeance,
+  canDeleteComiteSeance,
+  isComiteNiveauOperationnel,
+  isComiteSupprime,
 } from "@/lib/comite-niveau";
 import {
   RAID_TYPE_COLORS,
@@ -105,8 +107,11 @@ interface ComiteRow {
   createdAt: Date;
   updatedAt: Date;
   chantierId?: string | null;
+  createdByUserId?: string | null;
+  createdByName?: string | null;
   chantier?: { id: string; code: string; nom: string } | null;
   raids: RaidItem[];
+  _count?: { raids: number };
 }
 
 interface Props {
@@ -433,6 +438,10 @@ function ComiteRaidSection({
   );
 }
 
+function raidLinkCount(c: ComiteRow): number {
+  return c._count?.raids ?? c.raids.length;
+}
+
 function InstanceTable({
   comites,
   onEdit,
@@ -441,6 +450,7 @@ function InstanceTable({
   onDeleteRaid,
   onAddRaid,
   canActOn,
+  canDeleteSeance,
   canManageRaidSeance,
   canWriteRaid,
   ressourceId,
@@ -452,6 +462,7 @@ function InstanceTable({
   onDeleteRaid: (id: string) => void;
   onAddRaid?: (comiteId: string) => void;
   canActOn: (c: ComiteRow) => boolean;
+  canDeleteSeance: (c: ComiteRow) => boolean;
   canManageRaidSeance: (c: ComiteRow) => boolean;
   canWriteRaid: boolean;
   ressourceId: string | null;
@@ -516,10 +527,12 @@ function InstanceTable({
         <TableBody>
           {sorted.map((c) => {
             const isExpanded = expandedId === c.id;
+            const deleted = isComiteSupprime(c.statut);
+            const links = raidLinkCount(c);
             return (
               <TableRow
                 key={c.id}
-                className={isExpanded ? "border-b-0" : ""}
+                className={`${isExpanded ? "border-b-0" : ""} ${deleted ? "bg-muted/40 opacity-80" : ""}`}
               >
                 <TableCell className="pr-0">
                   <Button
@@ -567,15 +580,25 @@ function InstanceTable({
                 </TableCell>
                 <TableCell>
                   <div className="flex gap-1">
-                    {canActOn(c) && (
-                      <>
+                    {canActOn(c) && !deleted && (
                     <Button variant="ghost" size="icon-xs" onClick={() => onEdit(c)}>
                       <Pencil className="size-3.5" />
                     </Button>
-                    <Button variant="ghost" size="icon-xs" onClick={() => onDelete(c.id)}>
+                    )}
+                    {canDeleteSeance(c) && (
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      disabled={links > 0}
+                      title={
+                        links > 0
+                          ? "Impossible : au moins un RAID est rattaché à cette séance."
+                          : "Supprimer la séance"
+                      }
+                      onClick={() => onDelete(c.id)}
+                    >
                       <Trash2 className="size-3.5 text-destructive" />
                     </Button>
-                      </>
                     )}
                   </div>
                 </TableCell>
@@ -594,8 +617,10 @@ function InstanceTable({
             comite={c}
             onEditRaid={onEditRaid}
             onDeleteRaid={onDeleteRaid}
-            onAddRaid={onAddRaid}
-            canActOn={canManageRaidSeance(c)}
+            onAddRaid={
+              isComiteSupprime(c.statut) ? undefined : onAddRaid
+            }
+            canActOn={canManageRaidSeance(c) && !isComiteSupprime(c.statut)}
             canWriteRaid={canWriteRaid}
             ressourceId={ressourceId}
           />
@@ -609,7 +634,8 @@ export function ComitesList({ comites, instances = [] }: Props) {
   const canCreateRaid = useCanCreateRaid();
   const canWriteComites = useCanWritePage("/comites");
   const canWriteRaid = useCanWritePage("/raid");
-  const { chantierScope, ressourceId, consultationChantierIds } = useUser();
+  const { chantierScope, ressourceId, consultationChantierIds, role, userId } =
+    useUser();
   const canManageRaidSeance = (c: ComiteRow) =>
     canActOnComiteSeance(c, {
       chantierScope,
@@ -617,7 +643,9 @@ export function ComitesList({ comites, instances = [] }: Props) {
       consultationChantierIds,
     });
   const canActOn = (c: ComiteRow) =>
-    canWriteComites && canManageRaidSeance(c);
+    canWriteComites && canManageRaidSeance(c) && !isComiteSupprime(c.statut);
+  const canDeleteSeance = (c: ComiteRow) =>
+    canWriteComites && canDeleteComiteSeance(c, { role, userId });
   const [viewFilter, setViewFilter] = useState<ViewFilter>("week");
   const [niveauFilter, setNiveauFilter] = useState<string>("__all__");
   const [editComite, setEditComite] = useState<ComiteRow | null>(null);
@@ -680,7 +708,7 @@ export function ComitesList({ comites, instances = [] }: Props) {
 
   // Calendar events from filtered comités
   const calendarEvents: CalendarEvent[] = useMemo(() => {
-    return filtered.map((c) => ({
+    return filtered.filter((c) => !isComiteSupprime(c.statut)).map((c) => ({
       id: c.id,
       date: new Date(c.date),
       label: `${displayLabelForInstance(c.instance, instances)} #${c.numero}`,
@@ -816,6 +844,7 @@ export function ComitesList({ comites, instances = [] }: Props) {
                     onDeleteRaid={(id) => { setDeleteError(null); setDeleteRaidId(id); }}
                     onAddRaid={canCreateRaid ? setAddRaidComiteId : undefined}
                     canActOn={canActOn}
+                    canDeleteSeance={canDeleteSeance}
                     canManageRaidSeance={canManageRaidSeance}
                     canWriteRaid={canWriteRaid}
                     ressourceId={ressourceId}
@@ -853,7 +882,8 @@ export function ComitesList({ comites, instances = [] }: Props) {
             throw err;
           }
         }}
-        title="Supprimer le comité"
+        title="Supprimer la séance"
+        description="La séance passera au statut « Supprimé » et restera visible dans la liste. Impossible s'il reste un RAID rattaché. Réservé à l'administrateur ou au créateur."
       />
 
       {/* RAID form for adding from a comité */}

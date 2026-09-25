@@ -17,6 +17,32 @@ export function isRaidClosed(statut: string): boolean {
   return RAID_CLOSED_STATUTS.has(statut);
 }
 
+export const STATUT_ACTION_DOUBLON = "Doublon";
+
+export function isActionDoublon(statut: string | null | undefined): boolean {
+  return (statut ?? "").trim() === STATUT_ACTION_DOUBLON;
+}
+
+/** Action still in flight (filtre « Actives » / KPI actives). */
+export function isActionActive(statut: string): boolean {
+  return statut !== "Clôturé" && statut !== "Abandonné" && statut !== "Doublon";
+}
+
+export type RaidVisibilityFilter = "active" | "doublon" | "deleted" | "all";
+
+/** Liste RAID : Actives (défaut) / Doublons / Supprimées / Toutes. */
+export function matchesRaidVisibility(
+  raid: { deletedAt?: Date | string | null; statut: string },
+  visibility: RaidVisibilityFilter
+): boolean {
+  const deleted = !!raid.deletedAt;
+  const doublon = isActionDoublon(raid.statut);
+  if (visibility === "all") return true;
+  if (visibility === "deleted") return deleted;
+  if (visibility === "doublon") return !deleted && doublon;
+  return !deleted && !doublon;
+}
+
 const RISQUE_LIEN_INTITULE_MAX = 265;
 
 /** Code + intitulé tronqué (265 car.) pour la liste « risque lié ». */

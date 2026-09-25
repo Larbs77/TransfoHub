@@ -1,7 +1,7 @@
 /** Query string for RAID list filters — back-navigation and shareable URLs. */
 
 export type RaidListView = "table" | "kanban" | "calendrier" | "calendrier-type";
-export type RaidListDeleted = "active" | "deleted" | "all";
+export type RaidListDeleted = "active" | "doublon" | "deleted" | "all";
 export type RaidListScope = "mine" | "all";
 
 export type RaidListQuery = {
@@ -74,7 +74,11 @@ export function parseRaidListQuery(sp: URLSearchParams): RaidListQuery {
   const dir = sp.get("dir") === "desc" ? "desc" : "asc";
   const deletedRaw = sp.get("deleted");
   const deleted: RaidListDeleted =
-    deletedRaw === "deleted" || deletedRaw === "all" ? deletedRaw : "active";
+    deletedRaw === "deleted" ||
+    deletedRaw === "all" ||
+    deletedRaw === "doublon"
+      ? deletedRaw
+      : "active";
   const viewRaw = sp.get("view");
   const view: RaidListView =
     viewRaw === "kanban" ||

@@ -41,6 +41,7 @@ import {
   ConsultationChantierBadge,
 } from "@/components/chantier-detail-actions";
 import { ChantierKpiTab } from "@/components/chantier-kpi-tab";
+import { isActionDoublon } from "@/lib/raid-labels";
 import { ChantierCapaciteTab } from "@/components/chantier-capacite-tab";
 import { ChantierJalonsTab } from "@/components/chantier-jalons-tab";
 import { ChantierAdherencesTab } from "@/components/chantier-adherences-tab";
@@ -215,7 +216,9 @@ export default async function ChantierDetailPage({ params }: Props) {
         {/* Tabs: KPI / Equipe / RAID */}
         <ChantierDetailTabs
           membresCount={chantier.membres.length}
-          raidCount={chantier.raids.length}
+          raidCount={
+            chantier.raids.filter((r) => !isActionDoublon(r.statut)).length
+          }
           kpiTab={
             <Card>
               <CardHeader>
@@ -269,7 +272,8 @@ export default async function ChantierDetailPage({ params }: Props) {
               <CardHeader>
                 <CardTitle>RAID</CardTitle>
                 <CardDescription>
-                  {chantier.raids.length} élément(s) lié(s) à ce chantier
+                  {chantier.raids.filter((r) => !isActionDoublon(r.statut)).length}{" "}
+                  élément(s) lié(s) à ce chantier
                 </CardDescription>
                 <CardAction>
                   <AddRaidButton defaultChantierId={chantier.id} />

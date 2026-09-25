@@ -28,6 +28,8 @@ import {
   orderedInstanceNames,
   type ComiteParametreOption,
 } from "@/lib/comite-labels";
+import { isComiteSupprime } from "@/lib/comite-niveau";
+import { isActionDoublon } from "@/lib/raid-labels";
 
 interface RaidItem {
   id: string;
@@ -125,6 +127,7 @@ export function CalendarPageClient({
     // RAID events
     if (effectiveSource === "__all__" || effectiveSource === "raid") {
       for (const r of raidItems) {
+        if (isActionDoublon(r.statut)) continue;
         const eventDate = r.date_echeance ?? r.date_revision ?? r.date_identification;
         if (!eventDate) continue;
 
@@ -159,6 +162,7 @@ export function CalendarPageClient({
     // Comité events
     if (effectiveSource === "__all__" || effectiveSource === "comites") {
       for (const c of comites) {
+        if (isComiteSupprime(c.statut)) continue;
         // Apply filters
         if (instanceFilter !== "__all__" && c.instance !== instanceFilter) continue;
         const label = `${displayLabelForInstance(c.instance, instances)} #${c.numero}`;

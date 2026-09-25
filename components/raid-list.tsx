@@ -58,6 +58,9 @@ import {
   isRaidOverdue,
   isRaidInitialEcheancePast,
   isRaidClosed,
+  isActionActive,
+  matchesRaidVisibility,
+  type RaidVisibilityFilter,
   risqueAActionsLieesOuvertes,
   raidEffectiveEcheance,
   type StatusConfigItem,
@@ -286,6 +289,7 @@ function RaidTable({
   onFilteredChange,
   urlQuery,
   onQueryPatch,
+  showDoublonVisibility = false,
 }: {
   items: RaidRow[];
   showType: boolean;
@@ -307,6 +311,7 @@ function RaidTable({
   onFilteredChange?: (rows: RaidRow[]) => void;
   urlQuery?: RaidListQuery;
   onQueryPatch?: (partial: Partial<RaidListQuery>) => void;
+  showDoublonVisibility?: boolean;
 }) {
   const router = useRouter();
   const canWriteRaid = useCanWritePage("/raid");
@@ -371,9 +376,9 @@ function RaidTable({
   const [filterComite, setFilterComite] = useState<string[]>(
     () => urlQuery?.comite ?? []
   );
-  const [filterDeleted, setFilterDeleted] = useState<
-    "active" | "deleted" | "all"
-  >(() => urlQuery?.deleted ?? "active");
+  const [filterDeleted, setFilterDeleted] = useState<RaidVisibilityFilter>(
+    () => urlQuery?.deleted ?? "active"
+  );
 
   const [pageSize, setPageSize] = useState<number>(() =>
     urlQuery?.size !== undefined ? urlQuery.size : 10
@@ -509,12 +514,9 @@ function RaidTable({
   }, [comites, items]);
 
   const filtered = useMemo(() => {
-    let result = items;
-    if (filterDeleted === "active") {
-      result = result.filter((r) => !r.deletedAt);
-    } else if (filterDeleted === "deleted") {
-      result = result.filter((r) => !!r.deletedAt);
-    }
+    let result = items.filter((r) =>
+      matchesRaidVisibility(r, filterDeleted)
+    );
     if (search) {
       const q = search.toLowerCase();
       result = result.filter((r) => {
@@ -569,7 +571,7 @@ function RaidTable({
     if (filterStatut.length > 0) {
       result = result.filter((r) =>
         filterStatut.some((s) => {
-          if (s === "__active__") return r.statut !== "Clôturé" && r.statut !== "Abandonné";
+          if (s === "__active__") return isActionActive(r.statut);
           if (s === "__open__") return r.statut !== "Clos";
           return r.statut === s;
         })
@@ -728,7 +730,7 @@ function RaidTable({
           <Select
             value={filterDeleted}
             onValueChange={(v) =>
-              setFilterDeleted(v as "active" | "deleted" | "all")
+              setFilterDeleted(v as RaidVisibilityFilter)
             }
           >
             <SelectTrigger className="w-[150px]">
@@ -736,6 +738,9 @@ function RaidTable({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="active">Actives</SelectItem>
+              {(showDoublonVisibility || isActionView) && (
+                <SelectItem value="doublon">Doublons</SelectItem>
+              )}
               <SelectItem value="deleted">Supprimées</SelectItem>
               <SelectItem value="all">Toutes</SelectItem>
             </SelectContent>
@@ -1320,7 +1325,9 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
   const mineCount = useMemo(
     () =>
       items.filter(
-        (r) => !r.deletedAt && isRaidAssignedToMe(r, ressourceId, displayName)
+        (r) =>
+          matchesRaidVisibility(r, "active") &&
+          isRaidAssignedToMe(r, ressourceId, displayName)
       ).length,
     [items, ressourceId, displayName]
   );
@@ -1331,7 +1338,7 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
   }, [items, raidScope, ressourceId, displayName]);
 
   const activeScopedItems = useMemo(
-    () => scopedItems.filter((r) => !r.deletedAt),
+    () => scopedItems.filter((r) => matchesRaidVisibility(r, "active")),
     [scopedItems]
   );
 
@@ -1399,7 +1406,7 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
         patchQuery({ scope: s });
       }}
       mineCount={mineCount}
-      allCount={items.filter((r) => !r.deletedAt).length}
+      allCount={items.filter((r) => matchesRaidVisibility(r, "active")).length}
     />
   );
 
@@ -1443,7 +1450,9 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
             </TabsTrigger>
           </TabsList>
           <RaidExcelExportButton
-            allIds={scopedItems.map((r) => r.id)}
+            allIds={activeScopedItems
+              .filter((r) => r.type === filterType)
+              .map((r) => r.id)}
             getSelectedIds={() =>
               filteredIdsRef.current[filterType] ?? typeItems.map((r) => r.id)
             }
@@ -1470,6 +1479,7 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
               comites={comites}
               urlQuery={urlSync ? urlQuery : undefined}
               onQueryPatch={urlSync ? patchQuery : undefined}
+              showDoublonVisibility={filterType === "Action"}
               onFilteredChange={(rows) => {
                 filteredIdsRef.current[filterType] = rows.map((r) => r.id);
               }}
@@ -1623,7 +1633,9 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
                   </TabsTrigger>
                 </TabsList>
                 <RaidExcelExportButton
-                  allIds={scopedItems.map((r) => r.id)}
+                  allIds={activeScopedItems
+                    .filter((r) => r.type === t)
+                    .map((r) => r.id)}
                   getSelectedIds={() =>
                     filteredIdsRef.current[t] ?? tItems.map((r) => r.id)
                   }
@@ -1646,6 +1658,7 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
                     onQueryPatch={
                       urlSync && typeTab === t ? patchQuery : undefined
                     }
+                    showDoublonVisibility={t === "Action"}
                     onFilteredChange={(rows) => {
                       filteredIdsRef.current[t] = rows.map((r) => r.id);
                     }}

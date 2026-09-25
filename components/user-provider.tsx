@@ -90,6 +90,12 @@ export function useCanCreateChantier() {
   return canWrite && (role === "Admin" || chantierScope === "all");
 }
 
+/** Physical delete of a chantier: Administrateur only. */
+export function useCanDeleteChantier() {
+  const { role } = useUser();
+  return role === "Admin";
+}
+
 /** RAID lecture : agir seulement si on est le responsable. */
 export function useIsConsultationChantier(
   chantierId: string | null | undefined

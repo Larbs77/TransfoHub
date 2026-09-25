@@ -4,7 +4,45 @@ import {
   type SessionData,
 } from "@/lib/auth";
 import { getRoleByCode } from "@/lib/roles";
-import { isComiteNiveauOperationnel } from "@/lib/comite-niveau";
+import {
+  isComiteNiveauOperationnel,
+  isComiteSupprime,
+  STATUT_COMITE_SUPPRIME,
+} from "@/lib/comite-niveau";
+
+export const COMITE_ACTIF_WHERE = {
+  statut: { not: STATUT_COMITE_SUPPRIME },
+} as const;
+
+export function whereComitesActifs<T extends object>(
+  extra?: T
+): typeof COMITE_ACTIF_WHERE | { AND: [T, typeof COMITE_ACTIF_WHERE] } {
+  if (!extra) return COMITE_ACTIF_WHERE;
+  return { AND: [extra, COMITE_ACTIF_WHERE] };
+}
+
+export function assertComiteSeanceActive(comite: {
+  statut?: string | null;
+} | null): void {
+  if (!comite) throw new Error("Comité introuvable.");
+  if (isComiteSupprime(comite.statut)) {
+    throw new Error("Cette séance de comité est supprimée.");
+  }
+}
+
+/** Admin, or the user who created the séance. */
+export function assertCanDeleteComiteSeance(
+  session: SessionData,
+  comite: { createdByUserId?: string | null }
+): void {
+  if (session.role === "Admin") return;
+  if (comite.createdByUserId && comite.createdByUserId === session.userId) {
+    return;
+  }
+  throw new Error(
+    "Seul un administrateur ou le créateur de cette séance peut la supprimer."
+  );
+}
 
 /** Admin / Bureau Programme / rôle « tous les chantiers ». */
 export async function canManageGouvernanceComites(

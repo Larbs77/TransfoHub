@@ -23,6 +23,7 @@ import {
   kpiHoverCardShellClass,
 } from "@/components/kpi-hover-card";
 import {
+  useCanDeleteChantier,
   useCanWritePage,
   useIsConsultationChantier,
 } from "@/components/user-provider";
@@ -79,6 +80,7 @@ export function ChantierCard({
   const [favori, setFavori] = useState(isFavori);
   const consultationOnly = useIsConsultationChantier(chantier.id);
   const canWrite = useCanWritePage("/chantiers") && !consultationOnly;
+  const canDelete = useCanDeleteChantier();
 
   const directeurName =
     chantier.membres
@@ -177,7 +179,6 @@ export function ChantierCard({
           <div className="flex items-center justify-between pt-1">
             <div className="flex gap-1">
               {canWrite && (
-                <>
               <Button
                 variant="ghost"
                 size="icon-xs"
@@ -185,6 +186,8 @@ export function ChantierCard({
               >
                 <Pencil className="size-3.5" />
               </Button>
+              )}
+              {canDelete && (
               <Button
                 variant="ghost"
                 size="icon-xs"
@@ -195,7 +198,6 @@ export function ChantierCard({
               >
                 <Trash2 className="size-3.5 text-destructive" />
               </Button>
-                </>
               )}
             </div>
             <Link href={`/chantiers/${chantier.id}`}>

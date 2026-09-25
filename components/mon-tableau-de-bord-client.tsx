@@ -62,6 +62,10 @@ import {
   RAID_TYPE_COLORS,
   getStatutColor,
   isRaidOverdue,
+  isActionActive,
+  isActionDoublon,
+  matchesRaidVisibility,
+  type RaidVisibilityFilter,
   isRaidInitialEcheancePast,
   raidEffectiveEcheance,
   getLabelsForKind,
@@ -211,6 +215,8 @@ function PersonalRaidTypeTable({
   const [filterCritical, setFilterCritical] = useState(false);
   const [filterChantier, setFilterChantier] = useState<string[]>([]);
   const [filterComite, setFilterComite] = useState<string[]>([]);
+  const [filterVisibility, setFilterVisibility] =
+    useState<RaidVisibilityFilter>("active");
   const [pageSize, setPageSize] = useState<number>(10);
   const [currentPage, setCurrentPage] = useState(1);
   const [now] = useState(() => new Date());
@@ -289,7 +295,9 @@ function PersonalRaidTypeTable({
   }, [comites, items]);
 
   const filtered = useMemo(() => {
-    let result = items;
+    let result = items.filter((r) =>
+      matchesRaidVisibility(r, filterVisibility)
+    );
     if (search) {
       const q = search.toLowerCase();
       result = result.filter((r) => {
@@ -331,7 +339,7 @@ function PersonalRaidTypeTable({
     if (filterStatut.length > 0) {
       result = result.filter((r) =>
         filterStatut.some((s) => {
-          if (s === "__active__") return r.statut !== "Clôturé" && r.statut !== "Abandonné";
+          if (s === "__active__") return isActionActive(r.statut);
           if (s === "__open__") return r.statut !== "Clos";
           return r.statut === s;
         })
@@ -383,6 +391,7 @@ function PersonalRaidTypeTable({
     filterComite,
     filterOverdue,
     filterCritical,
+    filterVisibility,
     now,
     accessibleChantierIds,
   ]);
@@ -413,6 +422,7 @@ function PersonalRaidTypeTable({
     filterComite,
     filterOverdue,
     filterCritical,
+    filterVisibility,
     items.length,
   ]);
 
@@ -437,7 +447,8 @@ function PersonalRaidTypeTable({
     filterChantier.length > 0 ||
     filterComite.length > 0 ||
     filterOverdue ||
-    filterCritical;
+    filterCritical ||
+    filterVisibility !== "active";
 
   return (
     <div>
@@ -466,6 +477,23 @@ function PersonalRaidTypeTable({
               truncate
             />
           )}
+          <Select
+            value={filterVisibility}
+            onValueChange={(v) =>
+              setFilterVisibility(v as RaidVisibilityFilter)
+            }
+          >
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Visibilité" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Actives</SelectItem>
+              {isActionView && (
+                <SelectItem value="doublon">Doublons</SelectItem>
+              )}
+              <SelectItem value="all">Toutes</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div className="flex flex-wrap items-center gap-2">
         <MultiSelect
@@ -804,7 +832,8 @@ export function MonTableauDeBordClient({
   }, [data.chantiers, chantierFilter]);
 
   const monRaidCount = useMemo(
-    () => data.raids.filter((r) => r.isMine).length,
+    () =>
+      data.raids.filter((r) => r.isMine && !isActionDoublon(r.statut)).length,
     [data.raids]
   );
 
@@ -819,6 +848,11 @@ export function MonTableauDeBordClient({
     return list;
   }, [data.raids, chantierFilter, raidScope]);
 
+  const operationalRaids = useMemo(
+    () => filteredRaids.filter((r) => !isActionDoublon(r.statut)),
+    [filteredRaids]
+  );
+
   const raidsByType = useMemo(() => {
     const map = new Map<string, typeof filteredRaids>();
     for (const t of RAID_TYPE_ORDER) map.set(t, []);
@@ -830,8 +864,19 @@ export function MonTableauDeBordClient({
     return map;
   }, [filteredRaids]);
 
+  const operationalByType = useMemo(() => {
+    const map = new Map<string, typeof operationalRaids>();
+    for (const t of RAID_TYPE_ORDER) map.set(t, []);
+    for (const r of operationalRaids) {
+      const list = map.get(r.type) ?? [];
+      list.push(r);
+      map.set(r.type, list);
+    }
+    return map;
+  }, [operationalRaids]);
+
   const raidCalendarEvents: CalendarEvent[] = useMemo(() => {
-    return filteredRaids
+    return operationalRaids
       .filter(
         (r) =>
           r.date_echeance_actualisee ||
@@ -869,10 +914,10 @@ export function MonTableauDeBordClient({
           },
         };
       });
-  }, [filteredRaids]);
+  }, [operationalRaids]);
 
   const firstRaidType =
-    RAID_TYPE_ORDER.find((t) => (raidsByType.get(t)?.length ?? 0) > 0) ??
+    RAID_TYPE_ORDER.find((t) => (operationalByType.get(t)?.length ?? 0) > 0) ??
     "Action";
 
   const filteredTemps = useMemo(() => {
@@ -892,12 +937,10 @@ export function MonTableauDeBordClient({
   const scopedKpis = useMemo(() => {
     if (chantierFilter === "__all__") return data.kpis;
     const c = data.chantiers.find((x) => x.id === chantierFilter);
-    const raids = filteredRaids;
+    const raids = operationalRaids;
     const mine = raids.filter((r) => r.isMine);
     const actions = mine.filter((r) => r.type === "Action");
-    const open = actions.filter(
-      (a) => a.statut !== "Clôturé" && a.statut !== "Abandonné"
-    );
+    const open = actions.filter((a) => isActionActive(a.statut));
     const now = new Date();
     const overdue = open.filter((a) =>
       isRaidOverdue(
@@ -927,7 +970,7 @@ export function MonTableauDeBordClient({
       ).length,
       hoursThisMonth: filteredTemps.reduce((s, t) => s + t.jours, 0),
     };
-  }, [chantierFilter, data, filteredRaids, filteredTemps]);
+  }, [chantierFilter, data, operationalRaids, filteredTemps]);
 
   if (!data.hasRessource) {
     return (
@@ -1223,7 +1266,7 @@ export function MonTableauDeBordClient({
             <div className="flex items-center gap-2">
               <BookOpen className="size-5 text-[#00BDBB]" />
               <h2 className="text-lg font-semibold">
-                RAID ({filteredRaids.length})
+                RAID ({operationalRaids.length})
               </h2>
             </div>
             <button
@@ -1263,7 +1306,7 @@ export function MonTableauDeBordClient({
                     : "bg-[#00BDBB] text-white"
                 }`}
               >
-                {data.raids.length}
+                {data.raids.filter((r) => !isActionDoublon(r.statut)).length}
               </span>
             </button>
           </div>
@@ -1284,7 +1327,7 @@ export function MonTableauDeBordClient({
                 >
                   <TabsList className="h-auto flex-wrap gap-1 p-1">
                     {RAID_TYPE_ORDER.map((t) => {
-                      const count = raidsByType.get(t)?.length ?? 0;
+                      const count = operationalByType.get(t)?.length ?? 0;
                       return (
                         <TabsTrigger
                           key={t}
@@ -1344,7 +1387,7 @@ export function MonTableauDeBordClient({
                             </TabsTrigger>
                           </TabsList>
                           <RaidExcelExportButton
-                            allIds={filteredRaids.map((r) => r.id)}
+                            allIds={operationalRaids.map((r) => r.id)}
                             getSelectedIds={() =>
                               filteredIdsRef.current[t] ?? items.map((r) => r.id)
                             }

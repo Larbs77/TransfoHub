@@ -5,6 +5,7 @@ import { ComitesList } from "@/components/comites-list";
 import { AddComiteButton } from "@/components/add-comite-button";
 import { CalendarDays, CalendarClock, History, MailX } from "lucide-react";
 import { startOfWeek, endOfWeek, isWithinInterval, isBefore, isAfter } from "date-fns";
+import { isComiteSupprime } from "@/lib/comite-niveau";
 
 export default async function ComitesPage() {
   await requirePageAccess("/comites");
@@ -16,16 +17,17 @@ export default async function ComitesPage() {
   const now = new Date();
   const weekStart = startOfWeek(now, { weekStartsOn: 1 });
   const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
+  const actifs = allComites.filter((c) => !isComiteSupprime(c.statut));
 
-  const thisWeekCount = allComites.filter((c) =>
+  const thisWeekCount = actifs.filter((c) =>
     isWithinInterval(new Date(c.date), { start: weekStart, end: weekEnd })
   ).length;
 
-  const upcomingCount = allComites.filter((c) =>
+  const upcomingCount = actifs.filter((c) =>
     isAfter(new Date(c.date), weekEnd)
   ).length;
 
-  const invitPendingCount = allComites.filter(
+  const invitPendingCount = actifs.filter(
     (c) => !c.invitation_envoyee && !isBefore(new Date(c.date), weekStart)
   ).length;
 

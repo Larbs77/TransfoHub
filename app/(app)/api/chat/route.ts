@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import Groq from "groq-sdk";
 import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/auth";
 import { evaluateRaidRisque, isRisqueAttention } from "@/lib/raid-labels";
+import { STATUT_COMITE_SUPPRIME } from "@/lib/comite-niveau";
 
 function getGroqClient() {
   const apiKey = process.env.GROQ_API_KEY;
@@ -24,14 +26,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const session = await getSession();
+    const favoriUserId =
+      session.userId && !session.isMaintenance ? session.userId : null;
+
     // Récupérer le contexte PMO depuis la base
     const [chantiers, raids, comites, settings, jalons, adherences, consultationQuestions, favoris] = await Promise.all([
       prisma.chantier.findMany({ include: { _count: { select: { raids: true } } } }),
       prisma.raid.findMany({
-        where: { deletedAt: null },
+        where: { deletedAt: null, statut: { not: "Doublon" } },
         include: { chantier: { select: { code: true, nom: true } } },
       }),
-      prisma.comite.findMany({ orderBy: { date: "asc" } }),
+      prisma.comite.findMany({
+        where: { statut: { not: STATUT_COMITE_SUPPRIME } },
+        orderBy: { date: "asc" },
+      }),
       prisma.settings.findFirst({ where: { id: 1 } }),
       prisma.jalon.findMany({ include: { chantier: { select: { code: true, nom: true } } } }),
       prisma.adherence.findMany({
@@ -42,7 +51,12 @@ export async function POST(req: NextRequest) {
         },
       }),
       prisma.consultationQuestion.findMany({ include: { chantier: { select: { code: true } } } }),
-      prisma.favoriChantier.findMany({ select: { chantierId: true } }),
+      favoriUserId
+        ? prisma.favoriChantier.findMany({
+            where: { userId: favoriUserId },
+            select: { chantierId: true },
+          })
+        : Promise.resolve([]),
     ]);
 
     const now = new Date();

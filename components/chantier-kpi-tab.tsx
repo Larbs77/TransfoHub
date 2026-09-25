@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { KpiHoverCard, type KpiHoverVariant } from "@/components/kpi-hover-card";
-import { isRisqueAttention, evaluateRaidRisque, criticiteRank } from "@/lib/raid-labels";
+import { isRisqueAttention, evaluateRaidRisque, criticiteRank, isActionActive, isActionDoublon } from "@/lib/raid-labels";
 
 interface RaidItem {
   type: string;
@@ -107,7 +107,9 @@ function KpiCard({
 export function ChantierKpiTab({ data }: { data: KpiData }) {
   const [now] = useState(() => new Date());
 
-  const actions = data.raids.filter((r) => r.type === "Action");
+  const actions = data.raids.filter(
+    (r) => r.type === "Action" && !isActionDoublon(r.statut)
+  );
   const risks = data.raids.filter((r) => r.type === "Risque");
   const decisions = data.raids.filter((r) => r.type === "Décision");
 
@@ -123,7 +125,7 @@ export function ChantierKpiTab({ data }: { data: KpiData }) {
   const daysRemaining = Math.max(Math.ceil((dateFin.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)), 0);
 
   // --- Actions ---
-  const activeActions = actions.filter((a) => a.statut !== "Clôturé" && a.statut !== "Abandonné");
+  const activeActions = actions.filter((a) => isActionActive(a.statut));
   const closedActions = actions.filter((a) => a.statut === "Clôturé");
   const actionCompletionRate = actions.length > 0
     ? Math.round((closedActions.length / actions.length) * 100)

@@ -13,13 +13,19 @@ import {
   MAINTENANCE_USER_ID,
   MAINTENANCE_ROLE,
 } from "@/lib/maintenance-auth";
+import {
+  findUserByUsernameInsensitive,
+  normalizeUsernameInput,
+} from "@/lib/username";
 import { redirect } from "next/navigation";
 
 export async function loginAction(
   _prevState: { error: string } | null,
   formData: FormData
 ) {
-  const username = (formData.get("username") as string)?.trim();
+  const username = normalizeUsernameInput(
+    (formData.get("username") as string) ?? ""
+  );
   const password = formData.get("password") as string;
   const rawRedirect = formData.get("redirect") as string;
 
@@ -45,7 +51,7 @@ export async function loginAction(
     redirect("/maintenance/db");
   }
 
-  const user = await prisma.user.findUnique({ where: { username } });
+  const user = await findUserByUsernameInsensitive(username);
 
   if (!user || !user.is_active) {
     return { error: "Identifiants invalides." };

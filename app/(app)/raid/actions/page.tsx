@@ -1,5 +1,6 @@
 import { requirePageAccess } from "@/lib/auth";
 import { getRaidItems, getStatusConfigs, getRaidFieldOptions, getChantiersForSelect, getComitesForSelect } from "@/app/(app)/actions";
+import { isActionActive, isActionDoublon } from "@/lib/raid-labels";
 import { Card, CardContent } from "@/components/ui/card";
 import { RaidList } from "@/components/raid-list";
 import { AddRaidButton } from "@/components/add-raid-button";
@@ -18,7 +19,10 @@ export default async function RaidActionsPage({ searchParams }: Props) {
     getChantiersForSelect().catch(() => []),
     getComitesForSelect().catch(() => []),
   ]);
-  const activeCount = items.filter((a) => a.statut !== "Clôturé" && a.statut !== "Abandonné").length;
+  const operational = items.filter(
+    (a) => !a.deletedAt && !isActionDoublon(a.statut)
+  );
+  const activeCount = operational.filter((a) => isActionActive(a.statut)).length;
 
   const initialStatut = params.statut || undefined;
   const initialOverdue = params.overdue === "true" || undefined;
@@ -31,7 +35,7 @@ export default async function RaidActionsPage({ searchParams }: Props) {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Actions</h1>
             <p className="text-sm text-muted-foreground">
-              {items.length} action(s) — {activeCount} active(s)
+              {operational.length} action(s) — {activeCount} active(s)
             </p>
           </div>
           <AddRaidButton defaultType="Action" />
