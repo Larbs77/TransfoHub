@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Calendar, Search, Clock, ShieldAlert, Columns3, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, RotateCcw } from "lucide-react";
+import { Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Calendar, Search, ShieldAlert, Columns3, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +30,10 @@ import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import { CalendarView, type CalendarEvent } from "./calendar-view";
 import { ActionKanban } from "./action-kanban";
 import { RaidExcelExportButton } from "./raid-excel-export-button";
+import {
+  RaidEcheanceFilterButtons,
+  type RaidEcheanceFilter,
+} from "./raid-echeance-filters";
 import { deleteRaid, restoreRaid, fetchRaidFormEditContext } from "@/app/(app)/actions";
 
 import { useCanWritePage, useUser } from "@/components/user-provider";
@@ -56,6 +60,8 @@ import {
   canEditRaidFormClient,
   isRaidAssignee,
   isRaidOverdue,
+  isRaidDueThisWeek,
+  isRaidDueNextWeek,
   isRaidInitialEcheancePast,
   isRaidClosed,
   isActionActive,
@@ -367,6 +373,9 @@ function RaidTable({
   const [filterOverdue, setFilterOverdue] = useState(
     () => urlQuery?.overdue ?? initialOverdue ?? false
   );
+  const [filterEcheance, setFilterEcheance] = useState<RaidEcheanceFilter>(
+    () => urlQuery?.echeance ?? ""
+  );
   const [filterCritical, setFilterCritical] = useState(
     () => urlQuery?.critical ?? initialCritical ?? false
   );
@@ -400,6 +409,7 @@ function RaidTable({
       chantier: filterChantier,
       comite: filterComite,
       overdue: filterOverdue,
+      echeance: filterEcheance,
       critical: filterCritical,
       deleted: filterDeleted,
       page: currentPage,
@@ -419,6 +429,7 @@ function RaidTable({
     filterChantier,
     filterComite,
     filterOverdue,
+    filterEcheance,
     filterCritical,
     filterDeleted,
     currentPage,
@@ -603,12 +614,31 @@ function RaidTable({
         )
       );
     }
+    if (filterEcheance === "week") {
+      result = result.filter((r) =>
+        isRaidDueThisWeek(
+          r.statut,
+          r.date_echeance_actualisee,
+          r.date_echeance,
+          now
+        )
+      );
+    } else if (filterEcheance === "next") {
+      result = result.filter((r) =>
+        isRaidDueNextWeek(
+          r.statut,
+          r.date_echeance_actualisee,
+          r.date_echeance,
+          now
+        )
+      );
+    }
     // Critical filter (risks with score >= 12)
     if (filterCritical) {
       result = result.filter((r) => isRisqueAttention(r));
     }
     return result;
-  }, [items, search, filterDeleted, filterCategorie, filterDomaine, filterProb, filterImpact, filterRisque, filterMaitrise, filterStatut, filterChantier, filterComite, filterOverdue, filterCritical, now, accessibleChantierIds]);
+  }, [items, search, filterDeleted, filterCategorie, filterDomaine, filterProb, filterImpact, filterRisque, filterMaitrise, filterStatut, filterChantier, filterComite, filterOverdue, filterEcheance, filterCritical, now, accessibleChantierIds]);
 
   const sorted = useMemo(() => {
     if (!sortField) return filtered;
@@ -671,7 +701,7 @@ function RaidTable({
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, filterCategorie, filterDomaine, filterProb, filterImpact, filterRisque, filterMaitrise, filterStatut, filterChantier, filterComite, filterOverdue, filterCritical, filterDeleted]);
+  }, [search, filterCategorie, filterDomaine, filterProb, filterImpact, filterRisque, filterMaitrise, filterStatut, filterChantier, filterComite, filterOverdue, filterEcheance, filterCritical, filterDeleted]);
 
   const statutList = statusConfigs?.length
     ? getStatutsFromConfig(itemType, statusConfigs)
@@ -696,6 +726,7 @@ function RaidTable({
     filterChantier.length > 0 ||
     filterComite.length > 0 ||
     filterOverdue ||
+    filterEcheance !== "" ||
     filterCritical ||
     filterDeleted !== "active";
 
@@ -787,15 +818,12 @@ function RaidTable({
           truncate
         />
         {isActionView && (
-          <Button
-            variant={filterOverdue ? "default" : "outline"}
-            size="sm"
-            onClick={() => setFilterOverdue((v) => !v)}
-            className="h-9 text-xs gap-1"
-          >
-            <Clock className="size-3.5" />
-            Échues
-          </Button>
+          <RaidEcheanceFilterButtons
+            overdue={filterOverdue}
+            echeance={filterEcheance}
+            onOverdueChange={setFilterOverdue}
+            onEcheanceChange={setFilterEcheance}
+          />
         )}
         {isRisqueView && (
           <>
@@ -870,6 +898,7 @@ function RaidTable({
               setFilterChantier([]);
               setFilterComite([]);
               setFilterOverdue(false);
+              setFilterEcheance("");
               setFilterCritical(false);
               setFilterDeleted("active");
             }}

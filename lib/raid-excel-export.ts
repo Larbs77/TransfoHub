@@ -9,13 +9,14 @@ import {
 } from "@/lib/raid-labels";
 import { INSTANCE_LABELS } from "@/lib/comite-labels";
 
-/** RAID row shape needed for Excel (comments excluded). */
+/** RAID row shape needed for Excel. The fiche field `commentaires` is exported; the conversation thread is not. */
 export type RaidExcelSource = {
   id: string;
   code?: string | null;
   type: string;
   intitule: string;
   description?: string | null;
+  commentaires?: string | null;
   categorie?: string | null;
   domaine?: string | null;
   statut?: string | null;
@@ -63,9 +64,10 @@ const HEADERS = [
   "Date fin réelle",
   "Créé le",
   "Mis à jour le",
+  "Commentaires",
 ] as const;
 
-const WIDTHS = [12, 14, 42, 40, 22, 22, 16, 14, 32, 24, 22, 14, 18, 16, 18, 18, 16, 28, 28, 16, 14, 16, 16, 16, 16, 16];
+const WIDTHS = [12, 14, 42, 40, 22, 22, 16, 14, 32, 24, 22, 14, 18, 16, 18, 18, 16, 28, 28, 16, 14, 16, 16, 16, 16, 16, 40];
 
 function asDate(value: Date | string | null | undefined): Date | null {
   if (value == null || value === "") return null;
@@ -121,6 +123,7 @@ function toRow(r: RaidExcelSource): (string | number)[] {
     fmtDate(r.date_fin_reelle),
     fmtDate(r.createdAt),
     fmtDate(r.updatedAt),
+    r.commentaires ?? "",
   ];
 }
 

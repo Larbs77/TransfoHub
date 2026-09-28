@@ -16,6 +16,8 @@ export type RaidListQuery = {
   chantier: string[];
   comite: string[];
   overdue: boolean;
+  /** "" | semaine en cours | semaine prochaine. Exclusif avec `overdue`. */
+  echeance: "" | "week" | "next";
   critical: boolean;
   deleted: RaidListDeleted;
   page: number;
@@ -87,6 +89,9 @@ export function parseRaidListQuery(sp: URLSearchParams): RaidListQuery {
       ? viewRaw
       : "table";
   const scope: RaidListScope = sp.get("scope") === "all" ? "all" : "mine";
+  const echeanceRaw = sp.get("echeance");
+  const echeance: RaidListQuery["echeance"] =
+    echeanceRaw === "week" || echeanceRaw === "next" ? echeanceRaw : "";
 
   return {
     q: sp.get("q") ?? "",
@@ -99,7 +104,8 @@ export function parseRaidListQuery(sp: URLSearchParams): RaidListQuery {
     statut: decodeStatut(csv(sp, "statut")),
     chantier: csv(sp, "chantier"),
     comite: csv(sp, "comite"),
-    overdue: sp.get("overdue") === "true",
+    overdue: echeance ? false : sp.get("overdue") === "true",
+    echeance,
     critical: sp.get("critical") === "true",
     deleted,
     page,
@@ -124,7 +130,11 @@ export function serializeRaidListQuery(q: Partial<RaidListQuery>): string {
   setCsv(p, "statut", encodeStatut(q.statut ?? []));
   setCsv(p, "chantier", q.chantier ?? []);
   setCsv(p, "comite", q.comite ?? []);
-  if (q.overdue) p.set("overdue", "true");
+  if (q.echeance === "week" || q.echeance === "next") {
+    p.set("echeance", q.echeance);
+  } else if (q.overdue) {
+    p.set("overdue", "true");
+  }
   if (q.critical) p.set("critical", "true");
   if (q.deleted && q.deleted !== "active") p.set("deleted", q.deleted);
   if (q.page && q.page > 1) p.set("page", String(q.page));

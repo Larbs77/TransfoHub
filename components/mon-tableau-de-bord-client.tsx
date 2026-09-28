@@ -27,6 +27,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { MultiSelect } from "@/components/ui/multi-select";
 import { RaidExcelExportButton } from "@/components/raid-excel-export-button";
+import {
+  RaidEcheanceFilterButtons,
+  type RaidEcheanceFilter,
+} from "@/components/raid-echeance-filters";
 import { formatComiteSeanceLabel, INSTANCE_LABELS } from "@/lib/comite-labels";
 import {
   Card,
@@ -62,6 +66,8 @@ import {
   RAID_TYPE_COLORS,
   getStatutColor,
   isRaidOverdue,
+  isRaidDueThisWeek,
+  isRaidDueNextWeek,
   isActionActive,
   isActionDoublon,
   matchesRaidVisibility,
@@ -212,6 +218,7 @@ function PersonalRaidTypeTable({
   const [filterImpact, setFilterImpact] = useState<string[]>([]);
   const [filterStatut, setFilterStatut] = useState<string[]>([]);
   const [filterOverdue, setFilterOverdue] = useState(false);
+  const [filterEcheance, setFilterEcheance] = useState<RaidEcheanceFilter>("");
   const [filterCritical, setFilterCritical] = useState(false);
   const [filterChantier, setFilterChantier] = useState<string[]>([]);
   const [filterComite, setFilterComite] = useState<string[]>([]);
@@ -370,6 +377,25 @@ function PersonalRaidTypeTable({
         )
       );
     }
+    if (filterEcheance === "week") {
+      result = result.filter((r) =>
+        isRaidDueThisWeek(
+          r.statut,
+          r.date_echeance_actualisee,
+          r.date_echeance,
+          now
+        )
+      );
+    } else if (filterEcheance === "next") {
+      result = result.filter((r) =>
+        isRaidDueNextWeek(
+          r.statut,
+          r.date_echeance_actualisee,
+          r.date_echeance,
+          now
+        )
+      );
+    }
     if (filterCritical) {
       result = result.filter(
         (r) =>
@@ -390,6 +416,7 @@ function PersonalRaidTypeTable({
     filterChantier,
     filterComite,
     filterOverdue,
+    filterEcheance,
     filterCritical,
     filterVisibility,
     now,
@@ -421,6 +448,7 @@ function PersonalRaidTypeTable({
     filterChantier,
     filterComite,
     filterOverdue,
+    filterEcheance,
     filterCritical,
     filterVisibility,
     items.length,
@@ -447,6 +475,7 @@ function PersonalRaidTypeTable({
     filterChantier.length > 0 ||
     filterComite.length > 0 ||
     filterOverdue ||
+    filterEcheance !== "" ||
     filterCritical ||
     filterVisibility !== "active";
 
@@ -536,15 +565,12 @@ function PersonalRaidTypeTable({
           truncate
         />
         {isActionView && (
-          <Button
-            variant={filterOverdue ? "default" : "outline"}
-            size="sm"
-            onClick={() => setFilterOverdue((v) => !v)}
-            className="h-9 text-xs gap-1"
-          >
-            <Clock className="size-3.5" />
-            Échues
-          </Button>
+          <RaidEcheanceFilterButtons
+            overdue={filterOverdue}
+            echeance={filterEcheance}
+            onOverdueChange={setFilterOverdue}
+            onEcheanceChange={setFilterEcheance}
+          />
         )}
         {isRisqueView && (
           <>
@@ -595,6 +621,7 @@ function PersonalRaidTypeTable({
               setFilterChantier([]);
               setFilterComite([]);
               setFilterOverdue(false);
+              setFilterEcheance("");
               setFilterCritical(false);
             }}
           >

@@ -6,6 +6,8 @@ import {
   ShieldCheck,
   FolderKanban,
   Clock,
+  CalendarClock,
+  CalendarRange,
   Gavel,
   TrendingUp,
   LayoutDashboard,
@@ -36,6 +38,8 @@ interface PMODashboardStats {
   totalChantiers: number;
   criticalRisks: number;
   overdueActions: number;
+  actionsDueThisWeek: number;
+  actionsDueNextWeek: number;
   actionCloseRate: number;
   pendingDecisions: number;
   statusCounts: Record<string, number>;
@@ -79,62 +83,81 @@ export function DashboardPMO({
         <h1 className="text-2xl font-bold tracking-tight">Mon Tableau de Bord</h1>
       </div>
 
-      {/* KPI Cards */}
-      <section className="grid grid-cols-2 gap-4 overflow-visible py-2 sm:grid-cols-3 lg:grid-cols-7">
-        <KpiHoverCard
-          icon={FolderKanban}
-          label="Mes Chantiers"
-          value={String(stats.totalChantiers)}
-          subtitle="Actifs"
-          href="/chantiers"
-        />
-        <KpiHoverCard
-          icon={ClipboardList}
-          label="Actions Actives"
-          value={String(stats.totalActions)}
-          subtitle="Non clôturées"
-          href="/raid/actions?scope=all"
-        />
-        <KpiHoverCard
-          icon={Clock}
-          label="Actions Échues"
-          value={String(stats.overdueActions)}
-          subtitle="Date dépassée"
-          variant={stats.overdueActions > 0 ? "destructive" : "default"}
-          href="/raid/actions?overdue=true&scope=all"
-        />
-        <KpiHoverCard
-          icon={ShieldCheck}
-          label="Risques Ouverts"
-          value={String(stats.totalRisks)}
-          subtitle="Non clos"
-          href="/raid/risques?scope=all"
-        />
-        <KpiHoverCard
-          icon={ShieldAlert}
-          label="Risques Critiques"
-          value={String(stats.criticalRisks)}
-          subtitle="Majeure ou Critique"
-          variant={stats.criticalRisks > 0 ? "destructive" : "default"}
-          href="/raid/risques?critical=true&scope=all"
-        />
-        <KpiHoverCard
-          icon={Gavel}
-          label="Décisions en attente"
-          value={String(stats.pendingDecisions)}
-          subtitle="Non validées"
-          variant={stats.pendingDecisions > 0 ? "warning" : "default"}
-          href="/raid/decisions?statut=En+attente&scope=all"
-        />
-        <KpiHoverCard
-          icon={TrendingUp}
-          label="Taux Clôture"
-          value={`${stats.actionCloseRate}%`}
-          subtitle="Actions clôturées"
-          variant={stats.actionCloseRate >= 50 ? "success" : "default"}
-          href="/raid/actions?scope=all"
-        />
-      </section>
+      <div className="space-y-2">
+        <section className="grid grid-cols-2 gap-4 overflow-visible py-2 md:grid-cols-3 xl:grid-cols-5">
+          <KpiHoverCard
+            icon={FolderKanban}
+            label="Mes Chantiers"
+            value={String(stats.totalChantiers)}
+            subtitle="Actifs"
+            href="/chantiers"
+          />
+          <KpiHoverCard
+            icon={ClipboardList}
+            label="Actions Actives"
+            value={String(stats.totalActions)}
+            subtitle="Non clôturées"
+            href="/raid/actions?scope=all"
+          />
+          <KpiHoverCard
+            icon={Clock}
+            label="Actions Échues"
+            value={String(stats.overdueActions)}
+            subtitle="Date dépassée"
+            variant={stats.overdueActions > 0 ? "destructive" : "default"}
+            href="/raid/actions?overdue=true&scope=all"
+          />
+          <KpiHoverCard
+            icon={CalendarClock}
+            label="Actions cette semaine"
+            value={String(stats.actionsDueThisWeek)}
+            subtitle="À échoir"
+            variant={stats.actionsDueThisWeek > 0 ? "warning" : "default"}
+            href="/raid/actions?echeance=week&scope=all"
+          />
+          <KpiHoverCard
+            icon={CalendarRange}
+            label="Actions semaine prochaine"
+            value={String(stats.actionsDueNextWeek)}
+            subtitle="Semaine suivante"
+            variant={stats.actionsDueNextWeek > 0 ? "sky" : "default"}
+            href="/raid/actions?echeance=next&scope=all"
+          />
+        </section>
+        <section className="grid grid-cols-2 gap-4 overflow-visible py-2 md:grid-cols-3 xl:grid-cols-4">
+          <KpiHoverCard
+            icon={TrendingUp}
+            label="Taux Clôture"
+            value={`${stats.actionCloseRate}%`}
+            subtitle="Actions clôturées"
+            variant={stats.actionCloseRate >= 50 ? "success" : "default"}
+            href="/raid/actions?scope=all"
+          />
+          <KpiHoverCard
+            icon={ShieldCheck}
+            label="Risques Ouverts"
+            value={String(stats.totalRisks)}
+            subtitle="Non clos"
+            href="/raid/risques?scope=all"
+          />
+          <KpiHoverCard
+            icon={ShieldAlert}
+            label="Risques Critiques"
+            value={String(stats.criticalRisks)}
+            subtitle="Majeure ou Critique"
+            variant={stats.criticalRisks > 0 ? "destructive" : "default"}
+            href="/raid/risques?critical=true&scope=all"
+          />
+          <KpiHoverCard
+            icon={Gavel}
+            label="Décisions en attente"
+            value={String(stats.pendingDecisions)}
+            subtitle="Non validées"
+            variant={stats.pendingDecisions > 0 ? "warning" : "default"}
+            href="/raid/decisions?statut=En+attente&scope=all"
+          />
+        </section>
+      </div>
 
       {/* Row 1: Statuts Actions + RAID par Type */}
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">

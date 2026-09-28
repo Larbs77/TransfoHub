@@ -92,6 +92,81 @@ function endOfDay(d: Date): Date {
   );
 }
 
+function localDayStartMs(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/** Lundi 00:00 local de la semaine civile qui contient `now`, décalée de `weekOffset`. */
+function mondayOfWeek(now: Date, weekOffset: number): Date {
+  const day = now.getDay();
+  const daysFromMonday = day === 0 ? 6 : day - 1;
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  monday.setDate(monday.getDate() - daysFromMonday + weekOffset * 7);
+  return monday;
+}
+
+/**
+ * Échéance effective dans une semaine civile (lundi → dimanche), statut non terminal.
+ * `excludeOverdue` retire les jours déjà passés : ils restent sur le filtre Échues.
+ */
+function isRaidDueInCalendarWeek(
+  statut: string,
+  dateEcheanceActualisee: Date | string | null | undefined,
+  dateEcheanceInitiale: Date | string | null | undefined,
+  weekOffset: number,
+  now: Date,
+  excludeOverdue: boolean
+): boolean {
+  if (isRaidClosed(statut)) return false;
+  const d = raidEffectiveEcheance(dateEcheanceActualisee, dateEcheanceInitiale);
+  if (!d) return false;
+  if (
+    excludeOverdue &&
+    isRaidOverdue(statut, dateEcheanceActualisee, dateEcheanceInitiale, now)
+  ) {
+    return false;
+  }
+  const day = localDayStartMs(d);
+  const monday = mondayOfWeek(now, weekOffset);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return day >= monday.getTime() && day <= sunday.getTime();
+}
+
+/** À échoir cette semaine : lundi → dimanche en cours, hors échéances déjà dépassées. */
+export function isRaidDueThisWeek(
+  statut: string,
+  dateEcheanceActualisee: Date | string | null | undefined,
+  dateEcheanceInitiale?: Date | string | null,
+  now: Date = new Date()
+): boolean {
+  return isRaidDueInCalendarWeek(
+    statut,
+    dateEcheanceActualisee,
+    dateEcheanceInitiale,
+    0,
+    now,
+    true
+  );
+}
+
+/** À échoir la semaine prochaine : lundi → dimanche suivants. */
+export function isRaidDueNextWeek(
+  statut: string,
+  dateEcheanceActualisee: Date | string | null | undefined,
+  dateEcheanceInitiale?: Date | string | null,
+  now: Date = new Date()
+): boolean {
+  return isRaidDueInCalendarWeek(
+    statut,
+    dateEcheanceActualisee,
+    dateEcheanceInitiale,
+    1,
+    now,
+    false
+  );
+}
+
 /**
  * En retard : échéance effective dépassée (fin de journée), statut non terminal.
  */

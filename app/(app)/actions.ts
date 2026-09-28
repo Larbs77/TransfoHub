@@ -72,6 +72,8 @@ import {
   isActionDoublon,
   STATUT_ACTION_DOUBLON,
   isRaidOverdue,
+  isRaidDueThisWeek,
+  isRaidDueNextWeek,
   actionRequiresEcheance,
   formatRisqueLienLabel,
   evaluateRaidRisque,
@@ -579,6 +581,22 @@ export async function getDashboardStats() {
       now
     )
   );
+  const actionsDueThisWeek = activeActions.filter((a) =>
+    isRaidDueThisWeek(
+      a.statut,
+      a.date_echeance_actualisee,
+      a.date_echeance,
+      now
+    )
+  ).length;
+  const actionsDueNextWeek = activeActions.filter((a) =>
+    isRaidDueNextWeek(
+      a.statut,
+      a.date_echeance_actualisee,
+      a.date_echeance,
+      now
+    )
+  ).length;
 
   // New KPIs
   const pendingDecisions = decisions.filter((d) => d.statut === "En attente").length;
@@ -837,6 +855,8 @@ export async function getDashboardStats() {
     criticalRisksList,
     overdueActions: overdueActionsList.length,
     overdueActionsList,
+    actionsDueThisWeek,
+    actionsDueNextWeek,
     pendingDecisions,
     upcomingComites,
     totalBudget,
@@ -903,6 +923,12 @@ export async function getDashboardPMO() {
   const overdueActionsList = activeActions.filter((a) =>
     isRaidOverdue(a.statut, a.date_echeance_actualisee, a.date_echeance, now)
   );
+  const actionsDueThisWeek = activeActions.filter((a) =>
+    isRaidDueThisWeek(a.statut, a.date_echeance_actualisee, a.date_echeance, now)
+  ).length;
+  const actionsDueNextWeek = activeActions.filter((a) =>
+    isRaidDueNextWeek(a.statut, a.date_echeance_actualisee, a.date_echeance, now)
+  ).length;
   const criticalRisksList = risks.filter(
     (r) => r.statut !== "Clos" && isRisqueAttention(r)
   );
@@ -1054,6 +1080,8 @@ export async function getDashboardPMO() {
     totalChantiers,
     criticalRisks: criticalRisksList.length,
     overdueActions: overdueActionsList.length,
+    actionsDueThisWeek,
+    actionsDueNextWeek,
     actionCloseRate,
     pendingDecisions,
     statusCounts,
