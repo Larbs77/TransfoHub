@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { raidDetailHref } from "@/lib/raid-list-query";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import {
@@ -210,7 +210,6 @@ function PersonalRaidTypeTable({
   comites?: ComiteFilterOption[];
   onFilteredChange?: (rows: PersonalRaidRow[]) => void;
 }) {
-  const router = useRouter();
   const [search, setSearch] = useState("");
   const [filterCategorie, setFilterCategorie] = useState<string[]>([]);
   const [filterDomaine, setFilterDomaine] = useState<string[]>([]);
@@ -673,21 +672,37 @@ function PersonalRaidTypeTable({
             </tr>
           </thead>
           <tbody>
-            {paginated.map((r) => (
+            {paginated.map((r) => {
+              const openHref = raidDetailHref(r.id, "/mon-tableau-de-bord");
+              return (
               <tr
                 key={r.id}
                 className="border-t hover:bg-muted/30 cursor-pointer"
-                onClick={() => router.push(`/raid/${r.id}`)}
+                onClick={(e) => {
+                  const el = e.target as HTMLElement;
+                  if (el.closest("a, button")) return;
+                  window.open(openHref, "_blank", "noopener,noreferrer");
+                }}
               >
                 <td className="px-3 py-2 max-w-[280px]">
                   {r.code ? (
-                    <span className="mb-0.5 block font-mono text-[11px] font-semibold text-[#0A3C74] dark:text-foreground">
+                    <a
+                      href={openHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mb-0.5 block font-mono text-[11px] font-semibold text-[#0A3C74] hover:underline dark:text-foreground"
+                    >
                       {r.code}
-                    </span>
+                    </a>
                   ) : null}
-                  <span className="line-clamp-2 font-medium text-primary hover:underline">
+                  <a
+                    href={openHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="line-clamp-2 font-medium text-primary hover:underline"
+                  >
                     {r.intitule}
-                  </span>
+                  </a>
                   {r.domaine ? (
                     <span className="mt-0.5 block text-[11px] text-muted-foreground">
                       {r.domaine}
@@ -746,6 +761,10 @@ function PersonalRaidTypeTable({
                     <Badge className="bg-[#00BDBB]/15 text-[10px] text-[#0A3C74] hover:bg-[#00BDBB]/15">
                       M&apos;est assigné
                     </Badge>
+                  ) : r.sharedWithMe ? (
+                    <Badge className="bg-[#0A3C74]/10 text-[10px] text-[#0A3C74] hover:bg-[#0A3C74]/10">
+                      Partagé
+                    </Badge>
                   ) : (
                     <span className="text-[11px] text-muted-foreground">
                       Chantier
@@ -753,7 +772,8 @@ function PersonalRaidTypeTable({
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -845,8 +865,8 @@ export function MonTableauDeBordClient({
   const filteredIdsRef = useRef<Record<string, string[]>>({});
   const [chantierFilter, setChantierFilter] = useState<string>("__all__");
   const [teamFilter, setTeamFilter] = useState<string>("__all__");
-  /** Mon RAID = assigned to me; all = équipes & chantiers scope. */
-  const [raidScope, setRaidScope] = useState<"mine" | "all">("mine");
+  /** Mon RAID = assigned to me; all = équipes & chantiers; shared = incoming. */
+  const [raidScope, setRaidScope] = useState<"mine" | "all" | "shared">("mine");
 
   const filteredChantiers = useMemo(() => {
     let list = data.chantiers;
@@ -864,10 +884,19 @@ export function MonTableauDeBordClient({
     [data.raids]
   );
 
+  const sharedRaidCount = useMemo(
+    () =>
+      data.raids.filter((r) => r.sharedWithMe && !isActionDoublon(r.statut))
+        .length,
+    [data.raids]
+  );
+
   const filteredRaids = useMemo(() => {
     let list = data.raids;
     if (raidScope === "mine") {
       list = list.filter((r) => r.isMine);
+    } else if (raidScope === "shared") {
+      list = list.filter((r) => r.sharedWithMe);
     }
     if (chantierFilter !== "__all__") {
       list = list.filter((r) => r.chantierId === chantierFilter);
@@ -1336,6 +1365,26 @@ export function MonTableauDeBordClient({
                 {data.raids.filter((r) => !isActionDoublon(r.statut)).length}
               </span>
             </button>
+            <button
+              type="button"
+              onClick={() => setRaidScope("shared")}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-all ${
+                raidScope === "shared"
+                  ? "border-[#0A3C74] bg-[#0A3C74] text-white shadow-sm"
+                  : "border-[#0A3C74]/30 bg-background text-[#0A3C74] hover:bg-[#0A3C74]/5 dark:text-[#5ad4d2]"
+              }`}
+            >
+              RAID partagés avec moi
+              <span
+                className={`ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-semibold ${
+                  raidScope === "shared"
+                    ? "bg-white/20 text-white"
+                    : "bg-[#0A3C74]/10 text-[#0A3C74] dark:text-[#5ad4d2]"
+                }`}
+              >
+                {sharedRaidCount}
+              </span>
+            </button>
           </div>
 
           {filteredRaids.length === 0 ? (
@@ -1450,6 +1499,7 @@ export function MonTableauDeBordClient({
                                 </p>
                               ) : (
                                 <ActionKanban
+                                  detailFrom="/mon-tableau-de-bord"
                                   items={items.map((r) => ({
                                     id: r.id,
                                     type: r.type,

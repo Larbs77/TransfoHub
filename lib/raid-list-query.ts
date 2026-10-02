@@ -2,7 +2,7 @@
 
 export type RaidListView = "table" | "kanban" | "calendrier" | "calendrier-type";
 export type RaidListDeleted = "active" | "doublon" | "deleted" | "all";
-export type RaidListScope = "mine" | "all";
+export type RaidListScope = "mine" | "all" | "shared";
 
 export type RaidListQuery = {
   q: string;
@@ -88,7 +88,9 @@ export function parseRaidListQuery(sp: URLSearchParams): RaidListQuery {
     viewRaw === "calendrier-type"
       ? viewRaw
       : "table";
-  const scope: RaidListScope = sp.get("scope") === "all" ? "all" : "mine";
+  const scopeRaw = sp.get("scope");
+  const scope: RaidListScope =
+    scopeRaw === "all" || scopeRaw === "shared" ? scopeRaw : "mine";
   const echeanceRaw = sp.get("echeance");
   const echeance: RaidListQuery["echeance"] =
     echeanceRaw === "week" || echeanceRaw === "next" ? echeanceRaw : "";
@@ -142,7 +144,7 @@ export function serializeRaidListQuery(q: Partial<RaidListQuery>): string {
   else if (q.size && q.size !== 10) p.set("size", String(q.size));
   if (q.sort) p.set("sort", q.sort);
   if (q.sort && q.dir === "desc") p.set("dir", "desc");
-  if (q.scope === "all") p.set("scope", "all");
+  if (q.scope === "all" || q.scope === "shared") p.set("scope", q.scope);
   if (q.view && q.view !== "table") p.set("view", q.view);
   if (q.ttype) p.set("ttype", q.ttype);
   return p.toString();
@@ -166,6 +168,43 @@ export function raidListPathForType(type: string): string {
   if (type === "Information") return "/raid/informations";
   if (type === "Décision") return "/raid/decisions";
   return "/raid";
+}
+
+const RAID_RETURN_PATHS = new Set([
+  "/raid",
+  "/raid/actions",
+  "/raid/risques",
+  "/raid/informations",
+  "/raid/decisions",
+  "/mon-tableau-de-bord",
+]);
+
+/** Keep `from` on an internal register or chantier URL. */
+export function sanitizeRaidReturnTo(
+  raw: string | null | undefined
+): string | null {
+  if (!raw) return null;
+  const value = raw.trim();
+  if (!value) return null;
+  if (
+    !value.startsWith("/") ||
+    value.startsWith("//") ||
+    value.includes("\\") ||
+    value.includes("://")
+  ) {
+    return null;
+  }
+  const path = value.split("?")[0]?.split("#")[0] ?? "";
+  if (RAID_RETURN_PATHS.has(path)) return value;
+  if (/^\/chantiers\/[^/]+$/.test(path)) return value;
+  return null;
+}
+
+export function raidDetailHref(id: string, from?: string | null): string {
+  const base = `/raid/${id}`;
+  const safe = sanitizeRaidReturnTo(from ?? null);
+  if (!safe) return base;
+  return `${base}?from=${encodeURIComponent(safe)}`;
 }
 
 export function readRaidListReturnUrl(fallbackType?: string): string {

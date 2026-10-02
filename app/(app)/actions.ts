@@ -32,6 +32,11 @@ import {
   type RaidAuditAction,
 } from "@/lib/raid-collaboration";
 import {
+  getMyFunctionalEquipeIds,
+  raidIsSharedWithMe,
+  sharedRaidVisibilityOr,
+} from "@/lib/raid-share";
+import {
   assertCanDeleteComiteSeance,
   assertCanManageComiteSeance,
   assertComiteSeanceActive,
@@ -58,6 +63,7 @@ import {
   resolveRaidEquipeId,
   syncChantierFunctionalMembership,
 } from "@/lib/equipe-chantier";
+import { assertAssignedScopeKeepsGovernanceChantier } from "@/lib/raid-assign";
 import { EQUIPE_TYPES } from "@/lib/equipe-types";
 import { identityFromRessource } from "@/lib/ressource-user";
 import { allocateNextRaidCode } from "@/lib/raid-code-server";
@@ -180,6 +186,8 @@ export async function getRaidItems(
       if (specialCats.length > 0) {
         or.push({ categorie: { in: specialCats } });
       }
+      const sharedOr = await sharedRaidVisibilityOr(session.ressourceId);
+      if (sharedOr) or.push(sharedOr);
     }
     if (or.length === 0) {
       // No chantier, no resource → empty
@@ -189,12 +197,13 @@ export async function getRaidItems(
     }
   }
 
-  return prisma.raid.findMany({
+  const rows = await prisma.raid.findMany({
     where,
     orderBy: { createdAt: "desc" },
     include: {
       chantier: true,
       comite: true,
+      partages: { select: { equipeId: true } },
       risqueLie: { select: { id: true, code: true, intitule: true } },
       actionsLiees: {
         where: { deletedAt: null },
@@ -209,6 +218,39 @@ export async function getRaidItems(
       },
     },
   });
+
+  const myEquipeIds = await getMyFunctionalEquipeIds(session.ressourceId);
+  const ownerIds = await ownerEquipeIdsForChantiers(
+    rows.map((r) => r.chantierId)
+  );
+
+  return rows.map((r) => {
+    const { partages, ...rest } = r;
+    return {
+      ...rest,
+      sharedWithMe: raidIsSharedWithMe(
+        partages.map((p) => p.equipeId),
+        r.chantierId ? (ownerIds.get(r.chantierId) ?? null) : null,
+        myEquipeIds
+      ),
+    };
+  });
+}
+
+async function ownerEquipeIdsForChantiers(
+  chantierIds: Array<string | null>
+): Promise<Map<string, string>> {
+  const ids = [...new Set(chantierIds.filter((id): id is string => !!id))];
+  if (ids.length === 0) return new Map();
+  const teams = await prisma.equipe.findMany({
+    where: { chantierId: { in: ids } },
+    select: { id: true, chantierId: true },
+  });
+  const map = new Map<string, string>();
+  for (const t of teams) {
+    if (t.chantierId) map.set(t.chantierId, t.id);
+  }
+  return map;
 }
 
 const risqueLienSelect = {
@@ -1129,6 +1171,8 @@ export type PersonalRaidRow = {
   createdAt: Date;
   updatedAt: Date;
   isMine: boolean;
+  /** Incoming share with one of my functional teams (not the owner team). */
+  sharedWithMe: boolean;
 };
 
 /**
@@ -1272,10 +1316,10 @@ export async function getPersonalDashboard() {
     charge_pourcentage: m.charge_pourcentage,
   }));
 
-  // RAID: assigned to me, on my chantiers, OR same institutional team
-  // (when assignee is outside chantier → equipeId = hierarchy team)
-  // OR special category grants on institutional team
+  // RAID: assigned to me, on my chantiers, same institutional team,
+  // special category grants, or shared with one of my functional teams.
   const specialCats = await getSpecialRaidCategoriesForSession(session);
+  const myDashEquipeIds = await getMyFunctionalEquipeIds(session.ressourceId);
   const raidsRaw = await prisma.raid.findMany({
     where: {
       deletedAt: null,
@@ -1290,14 +1334,22 @@ export async function getPersonalDashboard() {
         ...(specialCats.length > 0
           ? [{ categorie: { in: specialCats } }]
           : []),
+        ...(myDashEquipeIds.length > 0
+          ? [{ partages: { some: { equipeId: { in: myDashEquipeIds } } } }]
+          : []),
       ],
     },
     orderBy: { updatedAt: "desc" },
     include: {
       chantier: { select: { id: true, code: true, nom: true } },
       comite: true,
+      partages: { select: { equipeId: true } },
     },
   });
+
+  const dashOwnerIds = await ownerEquipeIdsForChantiers(
+    raidsRaw.map((r) => r.chantierId)
+  );
 
   const raids = raidsRaw.map((r) => ({
     id: r.id,
@@ -1340,6 +1392,11 @@ export async function getPersonalDashboard() {
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     isMine: r.responsableRessourceId === session.ressourceId,
+    sharedWithMe: raidIsSharedWithMe(
+      r.partages.map((p) => p.equipeId),
+      r.chantierId ? (dashOwnerIds.get(r.chantierId) ?? null) : null,
+      myDashEquipeIds
+    ),
   }));
 
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -2105,8 +2162,19 @@ export async function updateRaid(
         "Impossible de rattacher un RAID à une séance de comité supprimée."
       );
     }
-    if (linkedComite.chantierId) chantierId = linkedComite.chantierId;
+    // A newly chosen séance still imposes its chantier. An unchanged séance
+    // keeps the chantier already stored (assignment may have moved it).
+    if (linkedComite.chantierId && data.comiteId !== existing.comiteId) {
+      chantierId = linkedComite.chantierId;
+    }
   }
+
+  await assertAssignedScopeKeepsGovernanceChantier({
+    session,
+    existingComiteId: existing.comiteId,
+    currentChantierId: existing.chantierId,
+    nextChantierId: chantierId,
+  });
 
   const actor = await getActorDisplay(session);
   const teamAssign = await resolveRaidEquipeId({

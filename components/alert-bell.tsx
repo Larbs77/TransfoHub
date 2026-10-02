@@ -204,6 +204,8 @@ export function AlertBell() {
                             })}
                             {n.type === "raid_assigned" ? " · Assignation" : ""}
                             {n.type === "raid_changed" ? " · Modification" : ""}
+                            {n.type === "raid_shared" ? " · Partage" : ""}
+                            {n.type === "raid_mention" ? " · Mention" : ""}
                           </p>
                         </div>
                       </div>

@@ -283,6 +283,7 @@ export default async function ChantierDetailPage({ params }: Props) {
                 <RaidList
                   items={chantier.raids}
                   initialRaidScope="all"
+                  showSharedScope={false}
                   statusConfigs={statusConfigs}
                   fieldOptions={fieldOptions}
                   chantiers={[

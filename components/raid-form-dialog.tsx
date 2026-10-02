@@ -58,6 +58,7 @@ import {
   type RaidFieldOptionItem,
 } from "@/lib/raid-labels";
 import type { ComiteParametreOption } from "@/lib/comite-labels";
+import { isComiteNiveauGouvernance } from "@/lib/comite-niveau";
 import { ComiteDrilldownSelect } from "@/components/comite-drilldown-select";
 import { RisqueLienSelect } from "@/components/risque-lien-select";
 
@@ -122,7 +123,7 @@ export function RaidFormDialog({
   fieldOptions: fieldOptionsProp,
 }: Props) {
   const isEdit = !!raid;
-  const { raidCreateScope } = useUser();
+  const { raidCreateScope, chantierScope } = useUser();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chantiers, setChantiers] = useState<{ id: string; code: string; nom: string }[]>([]);
@@ -197,8 +198,21 @@ export function RaidFormDialog({
       })
     : { niveauRisque: null, criticite: null };
   const selectedComite = comites.find((c) => c.id === comiteId);
+  const selectedComiteParam = comiteParams.find(
+    (p) => p.name === selectedComite?.instance
+  );
+  const governanceFreeze =
+    isEdit &&
+    chantierScope === "assigned" &&
+    !!selectedComite &&
+    !!selectedComiteParam &&
+    isComiteNiveauGouvernance(selectedComiteParam.niveau);
+  const comiteForcesChantier = !!(selectedComite?.chantierId);
   const chantierLocked =
-    lockChantier || !!(selectedComite?.chantierId);
+    lockChantier || comiteForcesChantier || governanceFreeze;
+  const originalComiteId = raid?.comiteId ?? "__none__";
+  const comiteUnchanged =
+    (comiteId || "__none__") === (originalComiteId || "__none__");
   const chantierRequiredOnCreate =
     (!isEdit && raidCreateScope === "chantier") || chantierLocked;
 
@@ -250,10 +264,10 @@ export function RaidFormDialog({
   }, [open, isEdit, fieldOptionsProp, raid?.comiteId]);
 
   useEffect(() => {
-    if (selectedComite?.chantierId) {
-      setChantierId(selectedComite.chantierId);
-    }
-  }, [selectedComite?.chantierId]);
+    if (!selectedComite?.chantierId) return;
+    if (isEdit && comiteUnchanged) return;
+    setChantierId(selectedComite.chantierId);
+  }, [selectedComite?.chantierId, isEdit, comiteUnchanged]);
 
   function handleResponsableRessourceChange(newId: string) {
     setResponsableRessourceId(newId);
@@ -603,7 +617,17 @@ export function RaidFormDialog({
                       ))}
                     </SelectContent>
                   </Select>
-                  {chantierLocked ? (
+                  {governanceFreeze ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      Comité de gouvernance : un rôle « Chantiers assignés »
+                      ne peut pas changer le chantier.
+                    </p>
+                  ) : chantierLocked && comiteUnchanged && isEdit ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      La séance reste liée. Le chantier de l&apos;entrée est
+                      conservé tant que la séance ne change pas.
+                    </p>
+                  ) : chantierLocked ? (
                     <p className="text-[11px] text-muted-foreground">
                       Chantier hérité du comité opérationnel.
                     </p>

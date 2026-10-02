@@ -13,16 +13,33 @@ import { isRaidAssignee } from "@/lib/raid-labels";
 import {
   canAssignRaid,
   canCollaborateOnRaid,
+  canEditRaidForm,
   canMoveRaidOnKanban,
+  formatChantierAuditLabel,
   getActorDisplay,
   getKanbanMoveContext,
   requireRaidViewAccess,
   writeRaidAudit,
 } from "@/lib/raid-collaboration";
+import { applyMentionTokens } from "@/lib/raid-mentions";
+import {
+  isRaidSharedWithSession,
+  listRaidMentionCandidates,
+  listRaidShareTargets,
+} from "@/lib/raid-share";
+import { EQUIPE_TYPES } from "@/lib/equipe-types";
 import { resolveRaidEquipeId } from "@/lib/equipe-chantier";
+import {
+  governanceComiteInfo,
+  isChantierAssignedScope,
+  loadRaidAssignmentContext,
+  resolveAssignChantierTarget,
+} from "@/lib/raid-assign";
 import {
   notifyRaidAssigned,
   notifyRaidChanged,
+  notifyRaidMentions,
+  notifyRaidShared,
 } from "@/lib/notifications";
 
 function revalidateRaid(id: string, chantierId?: string | null) {
@@ -48,6 +65,7 @@ async function loadRaidForCollab(id: string) {
       responsableRessourceId: true,
       equipeId: true,
       chantierId: true,
+      comiteId: true,
       categorie: true,
       date_echeance: true,
       deletedAt: true,
@@ -157,8 +175,33 @@ export async function getRaidDetail(id: string) {
         },
         orderBy: { code: "asc" },
       },
+      partages: {
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          equipeId: true,
+          sharedByName: true,
+          createdAt: true,
+          equipe: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              chantier: { select: { id: true, code: true, nom: true } },
+            },
+          },
+        },
+      },
       raidComments: {
         orderBy: { createdAt: "asc" },
+        include: {
+          mentions: {
+            select: {
+              ressourceId: true,
+              ressource: { select: { id: true, nom_complet: true } },
+            },
+          },
+        },
       },
       auditLogs: {
         orderBy: { createdAt: "asc" },
@@ -174,9 +217,18 @@ export async function getRaidDetail(id: string) {
     session.ressourceId,
     raid.responsableRessourceId
   );
-  const canCollaborate =
-    (raidPageWrite || assigned) && (await canCollaborateOnRaid(session, raid));
+  const collaborate = await canCollaborateOnRaid(session, raid);
+  const canCollaborate = (raidPageWrite || assigned) && collaborate;
   const canAssign = raidPageWrite && (await canAssignRaid(session, raid));
+  const sharedWithMe = await isRaidSharedWithSession(session, raid);
+  const canComment = !raid.deletedAt && (canCollaborate || sharedWithMe);
+  const canEdit =
+    !raid.deletedAt &&
+    (raidPageWrite || assigned) &&
+    (await canEditRaidForm(session, raid));
+  const canShare =
+    !raid.deletedAt && !!raid.chantierId && (await canAssignRaid(session, raid));
+  const accessViaShareOnly = sharedWithMe && !collaborate && !canAssign;
 
   // Allow view if page/role grants access OR user can manage (assignee / institutional peers / chantier)
   let canView = canCollaborate || canAssign;
@@ -193,11 +245,21 @@ export async function getRaidDetail(id: string) {
   }
 
   const actor = await getActorDisplay(session);
+  const [mentionCandidates, shareTargets] = await Promise.all([
+    listRaidMentionCandidates(raid),
+    canShare ? listRaidShareTargets(raid) : Promise.resolve([]),
+  ]);
 
   return {
     raid,
     canCollaborate,
     canAssign,
+    canEdit,
+    canComment,
+    canShare,
+    accessViaShareOnly,
+    mentionCandidates,
+    shareTargets,
     currentUser: {
       userId: session.userId,
       ressourceId: session.ressourceId,
@@ -206,32 +268,67 @@ export async function getRaidDetail(id: string) {
   };
 }
 
-export async function addRaidComment(raidId: string, body: string) {
+async function assertCanComment(
+  session: SessionData,
+  raid: {
+    id: string;
+    responsableRessourceId: string | null;
+    chantierId: string | null;
+    equipeId: string | null;
+    categorie: string;
+  }
+) {
+  const collab = await canCollaborateOnRaid(session, raid);
+  const shared = await isRaidSharedWithSession(session, raid);
+  if (collab) {
+    try {
+      await requireRaidWriteOrAssignee(raid);
+      return;
+    } catch (err) {
+      if (!shared) throw err;
+    }
+  }
+  if (shared) {
+    await requireRaidViewAccess(session);
+    return;
+  }
+  throw new Error("Vous n'avez pas accès pour commenter cette entrée RAID.");
+}
+
+export async function addRaidComment(
+  raidId: string,
+  body: string,
+  mentionIds: string[] = []
+) {
   const session = await requireAuth();
   const text = body.trim();
   if (!text) throw new Error("Le commentaire ne peut pas être vide.");
 
   const raid = await loadRaidForCollab(raidId);
   if (!raid) throw new Error("Entrée RAID introuvable.");
-  await requireRaidWriteOrAssignee(raid);
+  await assertCanComment(session, raid);
 
-  const allowed = await canCollaborateOnRaid(session, raid);
-  // Comments: allow if collaborator OR has view access on chantier/assigned scope
-  // User asked: comment does NOT require auto-assign; still need collab access
-  if (!allowed) {
-    throw new Error("Vous n'avez pas accès pour commenter cette entrée RAID.");
-  }
+  const candidates = await listRaidMentionCandidates(raid);
+  const requested = new Set(mentionIds);
+  const picked = candidates.filter((c) => requested.has(c.id));
+  const stored = applyMentionTokens(text, picked);
 
   // No auto-assign for comments
   const actor = await getActorDisplay(session);
   const comment = await prisma.raidComment.create({
     data: {
       raidId,
-      body: text,
+      body: stored.body,
       is_system: false,
       authorUserId: actor.actorUserId,
       authorName: actor.actorName,
       authorRessourceId: actor.actorRessourceId,
+      mentions:
+        stored.ids.length > 0
+          ? {
+              create: stored.ids.map((ressourceId) => ({ ressourceId })),
+            }
+          : undefined,
     },
   });
 
@@ -256,8 +353,133 @@ export async function addRaidComment(raidId: string, body: string) {
     actorName: actor.actorName,
   });
 
+  if (stored.ids.length > 0) {
+    await notifyRaidMentions({
+      raidId,
+      code: raid.code,
+      intitule: raid.intitule,
+      ressourceIds: stored.ids,
+      actorUserId: actor.actorUserId,
+      actorName: actor.actorName,
+    });
+  }
+
   revalidateRaid(raidId, raid.chantierId);
   return comment;
+}
+
+export async function shareRaidWithEquipes(raidId: string, equipeIds: string[]) {
+  const session = await requireAuth();
+  const unique = [...new Set(equipeIds.map((id) => id.trim()).filter(Boolean))];
+  if (unique.length === 0) throw new Error("Sélectionnez au moins une équipe.");
+
+  const raid = await loadRaidForCollab(raidId);
+  if (!raid) throw new Error("Entrée RAID introuvable.");
+  if (!raid.chantierId) {
+    throw new Error(
+      "Le partage concerne les équipes chantier : rattachez d'abord un chantier."
+    );
+  }
+  if (!(await canAssignRaid(session, raid))) {
+    throw new Error(
+      "Partage réservé à l'Admin, au Bureau Programme, ou au Directeur / Suppléant / PMO du chantier."
+    );
+  }
+
+  const targets = await listRaidShareTargets(raid);
+  const allowed = new Map(targets.map((t) => [t.id, t]));
+  const chosen = unique.filter((id) => allowed.has(id));
+  if (chosen.length === 0) {
+    throw new Error("Aucune équipe valide à partager.");
+  }
+
+  const actor = await getActorDisplay(session);
+  for (const equipeId of chosen) {
+    const target = allowed.get(equipeId)!;
+    await prisma.raidPartage.create({
+      data: {
+        raidId,
+        equipeId,
+        sharedByUserId: actor.actorUserId,
+        sharedByName: actor.actorName,
+      },
+    });
+    await writeRaidAudit({
+      raidId,
+      action: "shared",
+      field: "partage",
+      newValue: target.name,
+      summary: `Partagé avec l'équipe « ${target.name} »`,
+      actorUserId: actor.actorUserId,
+      actorName: actor.actorName,
+      actorRessourceId: actor.actorRessourceId,
+    });
+    const equipe = await prisma.equipe.findUnique({
+      where: { id: equipeId },
+      select: { chantierId: true, name: true },
+    });
+    if (equipe?.chantierId) {
+      await notifyRaidShared({
+        raidId,
+        code: raid.code,
+        intitule: raid.intitule,
+        targetChantierId: equipe.chantierId,
+        equipeName: equipe.name,
+        actorUserId: actor.actorUserId,
+        actorName: actor.actorName,
+      });
+    }
+  }
+
+  revalidateRaid(raidId, raid.chantierId);
+}
+
+export async function unshareRaidEquipe(raidId: string, equipeId: string) {
+  const session = await requireAuth();
+  const raid = await loadRaidForCollab(raidId);
+  if (!raid) throw new Error("Entrée RAID introuvable.");
+  if (!(await canAssignRaid(session, raid))) {
+    throw new Error(
+      "Retrait du partage réservé à l'Admin, au Bureau Programme, ou au Directeur / Suppléant / PMO du chantier."
+    );
+  }
+
+  const partage = await prisma.raidPartage.findUnique({
+    where: { raidId_equipeId: { raidId, equipeId } },
+    include: {
+      equipe: { select: { name: true, type: true, chantierId: true } },
+    },
+  });
+  if (!partage) throw new Error("Ce partage n'existe pas.");
+  if (partage.equipe.type !== EQUIPE_TYPES.fonctionnelle) {
+    throw new Error("Seules les équipes fonctionnelles sont partagées.");
+  }
+
+  await prisma.raidPartage.delete({ where: { id: partage.id } });
+  const actor = await getActorDisplay(session);
+  await writeRaidAudit({
+    raidId,
+    action: "unshared",
+    field: "partage",
+    oldValue: partage.equipe.name,
+    summary: `Partage retiré : équipe « ${partage.equipe.name} »`,
+    actorUserId: actor.actorUserId,
+    actorName: actor.actorName,
+    actorRessourceId: actor.actorRessourceId,
+  });
+  if (partage.equipe.chantierId) {
+    await notifyRaidShared({
+      raidId,
+      code: raid.code,
+      intitule: raid.intitule,
+      targetChantierId: partage.equipe.chantierId,
+      equipeName: partage.equipe.name,
+      removed: true,
+      actorUserId: actor.actorUserId,
+      actorName: actor.actorName,
+    });
+  }
+  revalidateRaid(raidId, raid.chantierId);
 }
 
 async function applyRaidStatusChange(
@@ -432,9 +654,27 @@ export async function fetchKanbanMoveContext() {
   return getKanbanMoveContext(session);
 }
 
+export async function getRaidAssignmentContext(raidId: string) {
+  const session = await requirePageWrite("/raid");
+  const raid = await loadRaidForCollab(raidId);
+  if (!raid) throw new Error("Entrée RAID introuvable.");
+  const allowed = await canAssignRaid(session, raid);
+  if (!allowed) {
+    throw new Error(
+      "Réaffectation non autorisée : réservée à l'Admin, au Bureau Programme, ou au Directeur / Suppléant / PMO du chantier lié."
+    );
+  }
+  return loadRaidAssignmentContext({
+    session,
+    chantierId: raid.chantierId,
+    comiteId: raid.comiteId,
+  });
+}
+
 export async function assignRaidToRessource(
   raidId: string,
-  ressourceId: string | null
+  ressourceId: string | null,
+  requestedChantierId?: string | null
 ) {
   const session = await requirePageWrite("/raid");
   const raid = await loadRaidForCollab(raidId);
@@ -489,22 +729,46 @@ export async function assignRaidToRessource(
     select: {
       id: true,
       nom_complet: true,
+      membres: { select: { chantierId: true } },
     },
   });
   if (!target) throw new Error("Ressource introuvable.");
 
-  // Team linked to RAID: same resolveRaidEquipeId rule (unchanged)
+  const [restricted, gov] = await Promise.all([
+    isChantierAssignedScope(session),
+    governanceComiteInfo(raid.comiteId),
+  ]);
+  const targetChantier = resolveAssignChantierTarget({
+    restricted,
+    governance: gov.governance,
+    governanceLabel: gov.label,
+    currentChantierId: raid.chantierId,
+    requestedChantierId,
+    memberChantierIds: target.membres.map((m) => m.chantierId),
+  });
+
   const team = await resolveRaidEquipeId({
     responsableRessourceId: target.id,
-    chantierId: raid.chantierId,
+    chantierId: targetChantier.chantierId,
   });
-  await prisma.raid.update({
-    where: { id: raidId },
-    data: {
-      responsableRessourceId: target.id,
-      responsable: target.nom_complet,
-      equipeId: team.equipeId,
-    },
+
+  let droppedShare = false;
+  await prisma.$transaction(async (tx) => {
+    await tx.raid.update({
+      where: { id: raidId },
+      data: {
+        responsableRessourceId: target.id,
+        responsable: target.nom_complet,
+        chantierId: targetChantier.chantierId,
+        equipeId: team.equipeId,
+      },
+    });
+    if (targetChantier.moved && team.equipeId) {
+      const removed = await tx.raidPartage.deleteMany({
+        where: { raidId, equipeId: team.equipeId },
+      });
+      droppedShare = removed.count > 0;
+    }
   });
 
   const teamLabel = team.equipeName
@@ -522,6 +786,50 @@ export async function assignRaidToRessource(
     actorRessourceId: actor.actorRessourceId,
   });
 
+  if (targetChantier.moved && targetChantier.chantierId) {
+    const [fromChantier, toChantier] = await Promise.all([
+      raid.chantierId
+        ? prisma.chantier.findUnique({
+            where: { id: raid.chantierId },
+            select: { code: true, nom: true },
+          })
+        : Promise.resolve(null),
+      prisma.chantier.findUnique({
+        where: { id: targetChantier.chantierId },
+        select: { code: true, nom: true },
+      }),
+    ]);
+    await writeRaidAudit({
+      raidId,
+      action: "field_updated",
+      field: "chantierId",
+      oldValue: formatChantierAuditLabel(fromChantier),
+      newValue: formatChantierAuditLabel(toChantier),
+      summary: `Chantier modifié : ${formatChantierAuditLabel(fromChantier)} → ${formatChantierAuditLabel(toChantier)} par ${actor.actorName}`,
+      actorUserId: actor.actorUserId,
+      actorName: actor.actorName,
+      actorRessourceId: actor.actorRessourceId,
+    });
+  }
+
+  if (droppedShare) {
+    await writeRaidAudit({
+      raidId,
+      action: "unshared",
+      field: "partage",
+      oldValue: team.equipeName ?? "",
+      newValue: "",
+      summary: `Partage retiré : l'équipe « ${team.equipeName ?? "chantier"} » devient l'équipe du RAID`,
+      actorUserId: actor.actorUserId,
+      actorName: actor.actorName,
+      actorRessourceId: actor.actorRessourceId,
+    });
+  }
+
+  const chantierMoveSummary = targetChantier.moved
+    ? `Chantier modifié et assigné à ${target.nom_complet}`
+    : `Assigné à ${target.nom_complet}`;
+
   await notifyRaidAssigned({
     raidId,
     code: raid.code,
@@ -535,12 +843,30 @@ export async function assignRaidToRessource(
     code: raid.code,
     intitule: raid.intitule,
     chantierId: raid.chantierId,
-    summary: `Assigné à ${target.nom_complet}`,
+    summary: chantierMoveSummary,
     actorUserId: actor.actorUserId,
     actorName: actor.actorName,
   });
+  if (
+    targetChantier.moved &&
+    targetChantier.chantierId &&
+    targetChantier.chantierId !== raid.chantierId
+  ) {
+    await notifyRaidChanged({
+      raidId,
+      code: raid.code,
+      intitule: raid.intitule,
+      chantierId: targetChantier.chantierId,
+      summary: `RAID rattaché à ce chantier et assigné à ${target.nom_complet}`,
+      actorUserId: actor.actorUserId,
+      actorName: actor.actorName,
+    });
+  }
 
   revalidateRaid(raidId, raid.chantierId);
+  if (targetChantier.moved && targetChantier.chantierId) {
+    revalidateRaid(raidId, targetChantier.chantierId);
+  }
 }
 
 export async function autoAssignRaidToMe(raidId: string) {

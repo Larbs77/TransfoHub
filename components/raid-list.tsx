@@ -78,7 +78,9 @@ import {
   serializeRaidListQuery,
   isRaidRegisterPath,
   RAID_LIST_RETURN_KEY,
+  raidDetailHref,
   type RaidListQuery,
+  type RaidListScope,
   type RaidListView,
 } from "@/lib/raid-list-query";
 
@@ -88,8 +90,8 @@ type RaidFormEditCtx = {
   ressourceId: string | null;
 };
 
-/** Mon RAID = assigned to me; all = équipes & chantiers (full list scope). */
-type RaidScope = "mine" | "all";
+/** Mon RAID = assigned to me; all = équipes & chantiers; shared = incoming shares. */
+type RaidScope = RaidListScope;
 
 interface RaidRow {
   id: string;
@@ -123,6 +125,8 @@ interface RaidRow {
   deletedAt?: Date | string | null;
   deletedByName?: string | null;
   deleteMotif?: string | null;
+  /** Incoming share with one of the current user's functional teams. */
+  sharedWithMe?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -161,6 +165,8 @@ interface Props {
   initialCritical?: boolean;
   /** Default "mine". Pass "all" for KPI / portfolio views (Équipes & Chantiers). */
   initialRaidScope?: RaidScope;
+  /** Hide « RAID partagés avec moi » (fiche chantier : registre du chantier). */
+  showSharedScope?: boolean;
   statusConfigs?: StatusConfigItem[];
   fieldOptions?: RaidFieldOptionItem[];
   /** Chantiers already scoped to the user's access (all vs assigned). */
@@ -296,6 +302,7 @@ function RaidTable({
   urlQuery,
   onQueryPatch,
   showDoublonVisibility = false,
+  detailFrom,
 }: {
   items: RaidRow[];
   showType: boolean;
@@ -318,8 +325,9 @@ function RaidTable({
   urlQuery?: RaidListQuery;
   onQueryPatch?: (partial: Partial<RaidListQuery>) => void;
   showDoublonVisibility?: boolean;
+  /** Register URL stored on the detail link so Retour restores filters. */
+  detailFrom?: string;
 }) {
-  const router = useRouter();
   const canWriteRaid = useCanWritePage("/raid");
   const { ressourceId } = useUser();
   const [sortField, setSortField] = useState<SortField | null>(
@@ -990,15 +998,28 @@ function RaidTable({
                 r.type === "Risque" &&
                 isRaidClosed(r.statut) &&
                 risqueAActionsLieesOuvertes(r.actionsLiees);
+              const openHref = raidDetailHref(r.id, detailFrom);
 
               return (
                 <TableRow
                   key={r.id}
                   className={`cursor-pointer hover:bg-muted/50 transition-colors ${r.deletedAt ? "bg-muted/40 opacity-80" : ""}`}
-                  onClick={() => router.push(`/raid/${r.id}`)}
+                  onClick={(e) => {
+                    const el = e.target as HTMLElement;
+                    if (el.closest("a, button")) return;
+                    window.open(openHref, "_blank", "noopener,noreferrer");
+                  }}
                 >
                   <TableCell className="max-w-0 p-1.5 text-[11px] font-mono font-semibold text-[#0A3C74] dark:text-foreground" title={r.code || undefined}>
-                    <span className="truncate">{r.code || "—"}</span>
+                    <a
+                      href={openHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="truncate hover:underline"
+                      title="Ouvrir dans un nouvel onglet"
+                    >
+                      {r.code || "—"}
+                    </a>
                     {r.deletedAt ? (
                       <p
                         className="mt-0.5 truncate text-[10px] font-normal text-destructive"
@@ -1021,9 +1042,15 @@ function RaidTable({
                     </TableCell>
                   )}
                   <TableCell className="max-w-0 p-1.5 text-sm">
-                    <div className="truncate font-medium text-primary hover:underline" title={r.intitule}>
+                    <a
+                      href={openHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block truncate font-medium text-primary hover:underline"
+                      title={r.intitule}
+                    >
                       {r.intitule}
-                    </div>
+                    </a>
                     {r.domaine && (
                       <div className="truncate text-[10px] text-muted-foreground" title={r.domaine}>{r.domaine}</div>
                     )}
@@ -1132,14 +1159,15 @@ function RaidTable({
                   )}
                   <TableCell className="p-1.5" onClick={(e) => e.stopPropagation()}>
                     <div className="flex justify-end gap-0.5">
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        title="Ouvrir"
-                        onClick={() => router.push(`/raid/${r.id}`)}
+                      <a
+                        href={openHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Ouvrir dans un nouvel onglet"
+                        className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                       >
                         <ExternalLink className="size-3.5" />
-                      </Button>
+                      </a>
                       {!r.deletedAt &&
                         formEditCtx &&
                         canEditRaidFormClient(r, formEditCtx) &&
@@ -1218,11 +1246,15 @@ function RaidScopeToggles({
   onChange,
   mineCount,
   allCount,
+  sharedCount,
+  showShared = true,
 }: {
   scope: RaidScope;
   onChange: (s: RaidScope) => void;
   mineCount: number;
   allCount: number;
+  sharedCount: number;
+  showShared?: boolean;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-start gap-2 sm:gap-3">
@@ -1266,11 +1298,33 @@ function RaidScopeToggles({
           {allCount}
         </span>
       </button>
+      {showShared && (
+        <button
+          type="button"
+          onClick={() => onChange("shared")}
+          className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-all ${
+            scope === "shared"
+              ? "border-[#0A3C74] bg-[#0A3C74] text-white shadow-sm"
+              : "border-[#0A3C74]/30 bg-background text-[#0A3C74] hover:bg-[#0A3C74]/5 dark:text-[#5ad4d2]"
+          }`}
+        >
+          RAID partagés avec moi
+          <span
+            className={`ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-semibold ${
+              scope === "shared"
+                ? "bg-white/20 text-white"
+                : "bg-[#0A3C74]/10 text-[#0A3C74] dark:text-[#5ad4d2]"
+            }`}
+          >
+            {sharedCount}
+          </span>
+        </button>
+      )}
     </div>
   );
 }
 
-export function RaidList({ items, filterType, initialProbabilite, initialImpact, initialRisque, initialMaitrise, initialStatut, initialOverdue, initialCritical, initialRaidScope = "mine", statusConfigs, fieldOptions, chantiers = [], comites = [] }: Props) {
+export function RaidList({ items, filterType, initialProbabilite, initialImpact, initialRisque, initialMaitrise, initialStatut, initialOverdue, initialCritical, initialRaidScope = "mine", showSharedScope = true, statusConfigs, fieldOptions, chantiers = [], comites = [] }: Props) {
   const { ressourceId, displayName } = useUser();
   const canWriteRaid = useCanWritePage("/raid");
   const router = useRouter();
@@ -1312,9 +1366,16 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
 
   const filteredIdsRef = useRef<Record<string, string[]>>({});
   const [raidScope, setRaidScope] = useState<RaidScope>(() => {
-    if (urlSync && searchParams.get("scope") === "all") return "all";
-    if (urlSync && searchParams.get("scope") === "mine") return "mine";
-    return initialRaidScope === "all" ? "all" : "mine";
+    if (!showSharedScope && initialRaidScope === "shared") return "all";
+    if (urlSync) {
+      const raw = searchParams.get("scope");
+      if (raw === "all" || raw === "mine") return raw;
+      if (raw === "shared" && showSharedScope) return "shared";
+    }
+    if (initialRaidScope === "all" || initialRaidScope === "shared") {
+      return showSharedScope ? initialRaidScope : "all";
+    }
+    return "mine";
   });
   const [localView, setLocalView] = useState<RaidListView>(
     () => (urlSync ? urlQuery.view : "table")
@@ -1361,7 +1422,16 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
     [items, ressourceId, displayName]
   );
 
+  const sharedCount = useMemo(
+    () =>
+      items.filter(
+        (r) => matchesRaidVisibility(r, "active") && r.sharedWithMe
+      ).length,
+    [items]
+  );
+
   const scopedItems = useMemo(() => {
+    if (raidScope === "shared") return items.filter((r) => r.sharedWithMe);
     if (raidScope === "all") return items;
     return items.filter((r) => isRaidAssignedToMe(r, ressourceId, displayName));
   }, [items, raidScope, ressourceId, displayName]);
@@ -1427,15 +1497,21 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
 
   const typeOrder = ["Action", "Risque", "Information", "Décision"] as const;
 
+  const detailFrom = searchParams.toString()
+    ? `${pathname}?${searchParams.toString()}`
+    : pathname;
+
   const scopeBar = (
     <RaidScopeToggles
       scope={raidScope}
+      showShared={showSharedScope}
       onChange={(s) => {
         setRaidScope(s);
         patchQuery({ scope: s });
       }}
       mineCount={mineCount}
       allCount={items.filter((r) => matchesRaidVisibility(r, "active")).length}
+      sharedCount={sharedCount}
     />
   );
 
@@ -1509,6 +1585,7 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
               urlQuery={urlSync ? urlQuery : undefined}
               onQueryPatch={urlSync ? patchQuery : undefined}
               showDoublonVisibility={filterType === "Action"}
+              detailFrom={detailFrom}
               onFilteredChange={(rows) => {
                 filteredIdsRef.current[filterType] = rows.map((r) => r.id);
               }}
@@ -1516,7 +1593,11 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
           </TabsContent>
           {filterType === "Action" && (
             <TabsContent value="kanban">
-              <ActionKanban items={typeItems} statusConfigs={statusConfigs} />
+              <ActionKanban
+                items={typeItems}
+                statusConfigs={statusConfigs}
+                detailFrom={detailFrom}
+              />
             </TabsContent>
           )}
           <TabsContent value="calendrier">
@@ -1688,6 +1769,7 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
                       urlSync && typeTab === t ? patchQuery : undefined
                     }
                     showDoublonVisibility={t === "Action"}
+                    detailFrom={detailFrom}
                     onFilteredChange={(rows) => {
                       filteredIdsRef.current[t] = rows.map((r) => r.id);
                     }}
@@ -1696,7 +1778,11 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
                 </TabsContent>
                 {t === "Action" && (
                   <TabsContent value="kanban">
-                    <ActionKanban items={tItems} statusConfigs={statusConfigs} />
+                    <ActionKanban
+                      items={tItems}
+                      statusConfigs={statusConfigs}
+                      detailFrom={detailFrom}
+                    />
                   </TabsContent>
                 )}
                 <TabsContent value="calendrier-type">

@@ -1,7 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { isKanbanLeadershipRole } from "@/lib/raid-labels";
 
-export type NotificationType = "raid_assigned" | "raid_changed";
+export type NotificationType =
+  | "raid_assigned"
+  | "raid_changed"
+  | "raid_shared"
+  | "raid_mention";
 
 export type AppNotification = {
   id: string;
@@ -154,6 +158,65 @@ export async function notifyRaidChanged(params: {
     type: "raid_changed",
     title: `RAID modifié : ${label}`,
     message: `${params.summary}${by}`.trim(),
+    href: raidHref(params.raidId),
+    entityType: "raid",
+    entityId: params.raidId,
+    excludeUserId: params.actorUserId,
+  });
+}
+
+/** Notify Directeur / Suppléant / PMO of a team that just received (or lost) a share. */
+export async function notifyRaidShared(params: {
+  raidId: string;
+  code?: string | null;
+  intitule?: string | null;
+  targetChantierId: string;
+  equipeName: string;
+  removed?: boolean;
+  actorUserId?: string | null;
+  actorName?: string;
+}): Promise<void> {
+  const userIds = await getChantierLeadershipUserIds(params.targetChantierId);
+  const label = raidLabel(params.code, params.intitule);
+  const by = params.actorName?.trim()
+    ? ` par ${params.actorName.trim()}`
+    : "";
+  const removed = !!params.removed;
+  await createNotifications({
+    userIds,
+    type: "raid_shared",
+    title: removed
+      ? `Partage retiré : ${label}`
+      : `RAID partagé : ${label}`,
+    message: removed
+      ? `Le partage de ${label} avec « ${params.equipeName} » a été retiré${by}.`
+      : `${label} a été partagé avec « ${params.equipeName} »${by}.`,
+    href: raidHref(params.raidId),
+    entityType: "raid",
+    entityId: params.raidId,
+    excludeUserId: params.actorUserId,
+  });
+}
+
+/** Notify app users linked to mentioned ressources. */
+export async function notifyRaidMentions(params: {
+  raidId: string;
+  code?: string | null;
+  intitule?: string | null;
+  ressourceIds: string[];
+  actorUserId?: string | null;
+  actorName?: string;
+}): Promise<void> {
+  const userIds = await userIdsForRessourceIds(params.ressourceIds);
+  const label = raidLabel(params.code, params.intitule);
+  const by = params.actorName?.trim()
+    ? ` par ${params.actorName.trim()}`
+    : "";
+  await createNotifications({
+    userIds,
+    type: "raid_mention",
+    title: `Mention RAID : ${label}`,
+    message: `Vous avez été mentionné(e) sur ${label}${by}.`,
     href: raidHref(params.raidId),
     entityType: "raid",
     entityId: params.raidId,

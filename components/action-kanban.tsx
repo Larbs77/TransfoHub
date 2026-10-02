@@ -25,6 +25,7 @@ import {
   Loader2,
 } from "lucide-react";
 import Link from "next/link";
+import { raidDetailHref } from "@/lib/raid-list-query";
 import {
   type StatusConfigItem,
   getStatutsForType,
@@ -91,6 +92,8 @@ type MoveCtx = {
 interface Props {
   items: ActionItem[];
   statusConfigs?: StatusConfigItem[];
+  /** Register URL attached to the open link (Retour on the detail page). */
+  detailFrom?: string;
 }
 
 // ── OpenProject-style Kanban Card ──────────────────────
@@ -100,11 +103,13 @@ function KanbanCard({
   isDragging,
   now,
   locked,
+  detailFrom,
 }: {
   item: ActionItem;
   isDragging?: boolean;
   now: Date;
   locked?: boolean;
+  detailFrom?: string;
 }) {
   const effectiveEcheance = raidEffectiveEcheance(
     item.date_echeance_actualisee,
@@ -174,9 +179,11 @@ function KanbanCard({
             <AlertTriangle className="size-3 text-destructive ml-auto shrink-0" />
           )}
           <Link
-            href={`/raid/${item.id}`}
+            href={raidDetailHref(item.id, detailFrom)}
+            target="_blank"
+            rel="noopener noreferrer"
             className="ml-auto hidden group-hover:flex items-center justify-center size-5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-            title="Ouvrir l'entrée RAID"
+            title="Ouvrir dans un nouvel onglet"
             onClick={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
           >
@@ -248,10 +255,12 @@ function DraggableCard({
   item,
   now,
   canMove,
+  detailFrom,
 }: {
   item: ActionItem;
   now: Date;
   canMove: boolean;
+  detailFrom?: string;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
@@ -270,7 +279,7 @@ function DraggableCard({
   if (!canMove) {
     return (
       <div className="cursor-default">
-        <KanbanCard item={item} now={now} locked />
+        <KanbanCard item={item} now={now} locked detailFrom={detailFrom} />
       </div>
     );
   }
@@ -283,7 +292,12 @@ function DraggableCard({
       {...attributes}
       className="cursor-grab active:cursor-grabbing"
     >
-      <KanbanCard item={item} isDragging={isDragging} now={now} />
+      <KanbanCard
+        item={item}
+        isDragging={isDragging}
+        now={now}
+        detailFrom={detailFrom}
+      />
     </div>
   );
 }
@@ -296,12 +310,14 @@ function KanbanColumn({
   items,
   now,
   canMoveItem,
+  detailFrom,
 }: {
   status: string;
   color: string;
   items: ActionItem[];
   now: Date;
   canMoveItem: (item: ActionItem) => boolean;
+  detailFrom?: string;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
@@ -334,6 +350,7 @@ function KanbanColumn({
             item={item}
             now={now}
             canMove={canMoveItem(item)}
+            detailFrom={detailFrom}
           />
         ))}
         {items.length === 0 && (
@@ -357,7 +374,11 @@ function KanbanColumn({
 
 // ── Main Kanban Board ──────────────────────────────────
 
-export function ActionKanban({ items: propItems, statusConfigs }: Props) {
+export function ActionKanban({
+  items: propItems,
+  statusConfigs,
+  detailFrom,
+}: Props) {
   const [items, setItems] = useState(propItems);
   const [moveCtx, setMoveCtx] = useState<MoveCtx | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -566,6 +587,7 @@ export function ActionKanban({ items: propItems, statusConfigs }: Props) {
               items={grouped.get(s.label) ?? []}
               now={now}
               canMoveItem={canMoveItem}
+              detailFrom={detailFrom}
             />
           ))}
         </div>

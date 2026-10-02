@@ -104,6 +104,7 @@ model Ressource {
   equipeHierarchie    Equipe?          @relation("RessourceEquipeHierarchie", fields: [equipeHierarchieId], references: [id], onDelete: SetNull)
   equipesFonctionnelles RessourceEquipeFonctionnelle[]
   saisiesTemps        SaisieTemps[]
+  raidCommentMentions RaidCommentMention[]
   user                User?
 
   @@index([equipeHierarchieId])
@@ -341,6 +342,8 @@ model Raid {
   actionsLiees           Raid[]     @relation("RaidActionRisque")
   raidComments           RaidComment[]
   auditLogs              RaidAuditLog[]
+  /// Incoming shares with other chantier functional teams (not the owner team).
+  partages               RaidPartage[]
 
   @@index([code])
   @@index([responsableRessourceId])
@@ -369,8 +372,38 @@ model RaidComment {
   authorRessourceId  String?
   createdAt          DateTime @default(now())
   raid               Raid     @relation(fields: [raidId], references: [id], onDelete: Cascade)
+  mentions           RaidCommentMention[]
 
   @@index([raidId, createdAt])
+}
+
+/// @mention of a ressource inside a RAID discussion message.
+model RaidCommentMention {
+  id          String      @id @default(uuid())
+  commentId   String
+  ressourceId String
+  comment     RaidComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  ressource   Ressource   @relation(fields: [ressourceId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, ressourceId])
+  @@index([ressourceId])
+}
+
+/// Share a RAID with another chantier functional team (discussion + visibility).
+/// Does not change the owner chantier, the assignee, or the linked team.
+model RaidPartage {
+  id             String   @id @default(uuid())
+  raidId         String
+  equipeId       String
+  sharedByUserId String?
+  sharedByName   String   @default("")
+  createdAt      DateTime @default(now())
+  raid           Raid     @relation(fields: [raidId], references: [id], onDelete: Cascade)
+  equipe         Equipe   @relation(fields: [equipeId], references: [id], onDelete: Cascade)
+
+  @@unique([raidId, equipeId])
+  @@index([raidId])
+  @@index([equipeId])
 }
 
 /// Immutable audit trail for RAID collaboration (status, assignment, fields, comments).
@@ -439,6 +472,8 @@ model Equipe {
   ressourcesHierarchie Ressource[] @relation("RessourceEquipeHierarchie")
   ressourcesFonctionnelles RessourceEquipeFonctionnelle[]
   raids       Raid[]
+  /// RAIDs shared with this functional team (incoming).
+  raidPartages RaidPartage[]
   /// Special RAID category access (institutionnelle only). Default empty.
   raidCategorieAccess EquipeRaidCategorieAccess[]
 

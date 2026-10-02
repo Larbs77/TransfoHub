@@ -10,7 +10,7 @@ const globalForPrisma = globalThis as unknown as {
  * Bump whenever the Prisma schema gains fields/models so HMR drops a stale
  * singleton (otherwise findUnique/update rejects unknown fields).
  */
-const PRISMA_MODEL_STAMP = "comite-soft-delete-v1";
+const PRISMA_MODEL_STAMP = "raid-partage-mentions-v1";
 
 function clientLooksCurrent(client: PrismaClient): boolean {
   try {
@@ -22,6 +22,8 @@ function clientLooksCurrent(client: PrismaClient): boolean {
       equipe?: { findMany?: unknown };
       ressourceEquipeFonctionnelle?: { findMany?: unknown };
       raidComment?: { findMany?: unknown };
+      raidCommentMention?: { findMany?: unknown };
+      raidPartage?: { findMany?: unknown };
       raidAuditLog?: { findMany?: unknown };
       raidFieldOption?: { findMany?: unknown };
       equipeRaidCategorieAccess?: { findMany?: unknown };
@@ -49,6 +51,8 @@ function clientLooksCurrent(client: PrismaClient): boolean {
     if (typeof c.equipe?.findMany !== "function") return false;
     if (typeof c.ressourceEquipeFonctionnelle?.findMany !== "function") return false;
     if (typeof c.raidComment?.findMany !== "function") return false;
+    if (typeof c.raidCommentMention?.findMany !== "function") return false;
+    if (typeof c.raidPartage?.findMany !== "function") return false;
     if (typeof c.raidAuditLog?.findMany !== "function") return false;
     if (typeof c.raidFieldOption?.findMany !== "function") return false;
     if (typeof c.equipeRaidCategorieAccess?.findMany !== "function") return false;

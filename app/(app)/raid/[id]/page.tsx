@@ -1,15 +1,23 @@
 import { notFound } from "next/navigation";
 import { getRaidDetail } from "./actions";
-import { getRessourcesForSelect } from "@/app/(app)/actions";
+import {
+  getRaidFieldOptions,
+  getRessourcesForSelect,
+  getStatusConfigs,
+} from "@/app/(app)/actions";
 import { RaidDetailClient } from "@/components/raid-detail-client";
 import { AccessDenied } from "@/components/access-denied";
+import { sanitizeRaidReturnTo } from "@/lib/raid-list-query";
 
 interface Props {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ from?: string }>;
 }
 
-export default async function RaidDetailPage({ params }: Props) {
+export default async function RaidDetailPage({ params, searchParams }: Props) {
   const { id } = await params;
+  const sp = await searchParams;
+  const returnTo = sanitizeRaidReturnTo(sp.from ?? null);
 
   let payload;
   try {
@@ -30,13 +38,18 @@ export default async function RaidDetailPage({ params }: Props) {
     nom_complet: string;
     organisation: string;
   }[] = [];
+  let statusConfigs: Awaited<ReturnType<typeof getStatusConfigs>> = [];
+  let fieldOptions: Awaited<ReturnType<typeof getRaidFieldOptions>> = [];
   try {
-    ressources = await getRessourcesForSelect();
+    [ressources, statusConfigs, fieldOptions] = await Promise.all([
+      getRessourcesForSelect(),
+      getStatusConfigs(),
+      getRaidFieldOptions(),
+    ]);
   } catch {
     ressources = [];
   }
 
-  // Serialize dates for the client component
   const raid = JSON.parse(JSON.stringify(payload.raid));
 
   return (
@@ -44,8 +57,18 @@ export default async function RaidDetailPage({ params }: Props) {
       raid={raid}
       canCollaborate={payload.canCollaborate}
       canAssign={payload.canAssign}
+      canEdit={payload.canEdit}
+      canComment={payload.canComment}
+      canShare={payload.canShare}
+      accessViaShareOnly={payload.accessViaShareOnly}
+      mentionCandidates={payload.mentionCandidates}
+      shareTargets={payload.shareTargets}
       currentUser={payload.currentUser}
       ressources={ressources}
+      statusConfigs={statusConfigs}
+      fieldOptions={fieldOptions}
+      returnTo={returnTo}
+      nowMs={Date.now()}
     />
   );
 }

@@ -715,6 +715,7 @@ export const RAID_AUDIT_FIELD_LABELS: Record<string, string> = {
   comment: "Commentaire",
   niveau_maitrise: "Niveau de maîtrise",
   risqueLieId: "Risque lié",
+  partage: "Partage",
 };
 
 // ── Criticité résiduelle (risque × maîtrise) — couleurs du cadre programme ─
