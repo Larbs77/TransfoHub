@@ -1,6 +1,6 @@
 {
   "name": "pmo-transformation-bancaire",
-  "version": "0.4.0",
+  "version": "1.00",
   "private": true,
   "scripts": {
     "dev": "next dev",
