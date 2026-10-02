@@ -2776,7 +2776,7 @@ export async function getComites() {
       _count: { select: { raids: true } },
       raids: {
         where: { deletedAt: null, statut: { not: STATUT_ACTION_DOUBLON } },
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: "asc" },
         include: { chantier: { select: { id: true, code: true, nom: true } } },
       },
     },
