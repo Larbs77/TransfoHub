@@ -10,7 +10,7 @@ const globalForPrisma = globalThis as unknown as {
  * Bump whenever the Prisma schema gains fields/models so HMR drops a stale
  * singleton (otherwise findUnique/update rejects unknown fields).
  */
-const PRISMA_MODEL_STAMP = "adherence-livrables-v1";
+const PRISMA_MODEL_STAMP = "mail-app-notifications-v1";
 
 function clientLooksCurrent(client: PrismaClient): boolean {
   try {
@@ -128,6 +128,19 @@ function clientLooksCurrent(client: PrismaClient): boolean {
         ? fields.some((f) => f.name === "livrables")
         : "livrables" in fields;
       if (!hasLivrables) return false;
+    }
+
+    const mailModel = c._runtimeDataModel?.models?.MailServerConfig;
+    if (mailModel?.fields) {
+      const fields = mailModel.fields;
+      const hasAppUrl = Array.isArray(fields)
+        ? fields.some((f) => f.name === "app_url")
+        : "app_url" in fields;
+      if (!hasAppUrl) return false;
+      const hasAppMail = Array.isArray(fields)
+        ? fields.some((f) => f.name === "app_mail_enabled")
+        : "app_mail_enabled" in fields;
+      if (!hasAppMail) return false;
     }
 
     const favoriModel = c._runtimeDataModel?.models?.FavoriChantier;

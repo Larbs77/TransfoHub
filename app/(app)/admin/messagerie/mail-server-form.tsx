@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import {
   Mail,
   Server,
@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   XCircle,
   Info,
+  Globe,
+  Bell,
 } from "lucide-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -64,6 +66,9 @@ type FormState = {
   notes: string;
   is_active: boolean;
   is_default: boolean;
+  app_url: string;
+  programme_office_email: string;
+  app_mail_enabled: boolean;
 };
 
 function fromConfig(config: MailConfigPublic | null): FormState {
@@ -88,6 +93,9 @@ function fromConfig(config: MailConfigPublic | null): FormState {
     notes: config?.notes ?? "",
     is_active: config?.is_active ?? true,
     is_default: config?.is_default ?? true,
+    app_url: config?.app_url ?? "",
+    programme_office_email: config?.programme_office_email ?? "",
+    app_mail_enabled: config?.app_mail_enabled ?? false,
   };
 }
 
@@ -134,6 +142,17 @@ export function MailServerForm({
     message: initialConfig?.last_test_message ?? "",
   });
   const [isPending, startTransition] = useTransition();
+  const [testAtLabel, setTestAtLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!lastTest.at) {
+      setTestAtLabel(null);
+      return;
+    }
+    setTestAtLabel(
+      format(new Date(lastTest.at), "dd MMM yyyy HH:mm", { locale: fr })
+    );
+  }, [lastTest.at]);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -389,6 +408,73 @@ export function MailServerForm({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
+            <Bell className="size-4 text-primary" />
+            Envois applicatifs
+          </CardTitle>
+          <CardDescription>
+            Mails de notification RAID (assignation, modification, partage,
+            mention). Le test SMTP ci-dessous reste indépendant de cet
+            interrupteur.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <label className="flex items-start gap-3 rounded-lg border border-[#0A3C74]/15 bg-[#0A3C74]/[0.03] p-3 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 rounded border"
+              checked={form.app_mail_enabled}
+              onChange={(e) => set("app_mail_enabled", e.target.checked)}
+            />
+            <span>
+              <span className="font-medium">
+                Activer les envois de mails applicatifs
+              </span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                Décochez pour configurer ou tester sans notifier les équipes.
+                Décoché par défaut.
+              </span>
+            </span>
+          </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="URL de l'application"
+              hint="Ex. https://transfohub.banque.ma — sert à construire le lien vers la fiche RAID."
+            >
+              <div className="relative">
+                <Globe className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#00BDBB]" />
+                <Input
+                  type="url"
+                  value={form.app_url}
+                  onChange={(e) => set("app_url", e.target.value)}
+                  placeholder="https://transfohub.banque.ma"
+                  className="pl-9"
+                />
+              </div>
+            </Field>
+            <Field
+              label="E-mail du Program Office"
+              hint="Filet si le destinataire n'a pas d'adresse sur sa fiche."
+            >
+              <div className="relative">
+                <Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#00BDBB]" />
+                <Input
+                  type="email"
+                  value={form.programme_office_email}
+                  onChange={(e) =>
+                    set("programme_office_email", e.target.value)
+                  }
+                  placeholder="program.office@banque.ma"
+                  className="pl-9"
+                />
+              </div>
+            </Field>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
             <Shield className="size-4 text-primary" />
             Options avancées
           </CardTitle>
@@ -604,9 +690,7 @@ export function MailServerForm({
           {lastTest.at && (
             <div className="rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
               <span className="font-medium text-foreground">Dernier test : </span>
-              {format(new Date(lastTest.at), "dd MMM yyyy HH:mm", {
-                locale: fr,
-              })}
+              {testAtLabel ?? "…"}
               {" · "}
               {lastTest.ok ? (
                 <span className="text-emerald-600">succès</span>

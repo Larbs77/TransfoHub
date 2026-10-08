@@ -45,6 +45,9 @@ export type MailConfigPublic = {
   notes: string;
   is_active: boolean;
   is_default: boolean;
+  app_url: string;
+  programme_office_email: string;
+  app_mail_enabled: boolean;
   last_test_at: Date | null;
   last_test_ok: boolean | null;
   last_test_message: string;
@@ -78,6 +81,9 @@ export function toPublicConfig(row: {
   notes: string;
   is_active: boolean;
   is_default: boolean;
+  app_url?: string;
+  programme_office_email?: string;
+  app_mail_enabled?: boolean;
   last_test_at: Date | null;
   last_test_ok: boolean | null;
   last_test_message: string;
@@ -105,6 +111,9 @@ export function toPublicConfig(row: {
     notes: row.notes,
     is_active: row.is_active,
     is_default: row.is_default,
+    app_url: row.app_url ?? "",
+    programme_office_email: row.programme_office_email ?? "",
+    app_mail_enabled: Boolean(row.app_mail_enabled),
     last_test_at: row.last_test_at,
     last_test_ok: row.last_test_ok,
     last_test_message: row.last_test_message,

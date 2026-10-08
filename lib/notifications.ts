@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { isKanbanLeadershipRole } from "@/lib/raid-labels";
+import { scheduleRaidEventMails } from "@/lib/raid-notification-mail";
 
 export type NotificationType =
   | "raid_assigned"
@@ -58,6 +59,57 @@ export async function getChantierLeadershipUserIds(
     )
     .map((m) => m.ressourceId as string);
   return userIdsForRessourceIds(ressourceIds);
+}
+
+/** PMO first, then Directeur, then suppléant — at most one user with an account. */
+function leadershipMailRank(role: string, is_directeur?: boolean): number {
+  const r = (role || "").trim().toLowerCase();
+  if (/^pmo(\s|$|[-_])/.test(r) || r === "pmo") return 0;
+  if (/suppl/.test(r)) return 2;
+  if (is_directeur || /directeur\s+de\s+chantier/.test(r)) return 1;
+  return 3;
+}
+
+export async function getPrimaryChantierLeadershipUserId(
+  chantierId: string | null | undefined
+): Promise<string | null> {
+  if (!chantierId) return null;
+  const membres = await prisma.membreEquipe.findMany({
+    where: { chantierId },
+    select: { ressourceId: true, role: true, is_directeur: true },
+  });
+  const ranked = membres
+    .filter(
+      (m) =>
+        !!m.ressourceId && isKanbanLeadershipRole(m.role, m.is_directeur)
+    )
+    .sort(
+      (a, b) =>
+        leadershipMailRank(a.role, a.is_directeur) -
+        leadershipMailRank(b.role, b.is_directeur)
+    );
+  for (const m of ranked) {
+    const ids = await userIdsForRessourceIds([m.ressourceId as string]);
+    if (ids[0]) return ids[0];
+  }
+  return null;
+}
+
+async function mailUserIdsForRaidChange(
+  raidId: string,
+  chantierId?: string | null
+): Promise<string[]> {
+  const raid = await prisma.raid.findUnique({
+    where: { id: raidId },
+    select: { responsableRessourceId: true, chantierId: true },
+  });
+  if (raid?.responsableRessourceId) {
+    return userIdsForRessourceIds([raid.responsableRessourceId]);
+  }
+  const primary = await getPrimaryChantierLeadershipUserId(
+    chantierId || raid?.chantierId
+  );
+  return primary ? [primary] : [];
 }
 
 export async function createNotifications(params: {
@@ -122,15 +174,25 @@ export async function notifyRaidAssigned(params: {
   const by = params.actorName?.trim()
     ? ` par ${params.actorName.trim()}`
     : "";
+  const title = `Assignation RAID : ${label}`;
+  const message = `Vous avez été assigné(e) à ${label}${by}.`;
   await createNotifications({
     userIds,
     type: "raid_assigned",
-    title: `Assignation RAID : ${label}`,
-    message: `Vous avez été assigné(e) à ${label}${by}.`,
+    title,
+    message,
     href: raidHref(params.raidId),
     entityType: "raid",
     entityId: params.raidId,
     excludeUserId: params.actorUserId,
+  });
+  scheduleRaidEventMails({
+    userIds,
+    excludeUserId: params.actorUserId,
+    eventType: "raid_assigned",
+    raidId: params.raidId,
+    subject: title,
+    body: message,
   });
 }
 
@@ -146,6 +208,8 @@ export async function notifyRaidChanged(params: {
   summary: string;
   actorUserId?: string | null;
   actorName?: string;
+  /** In-app stays on leadership; set false to skip the e-mail (avoid duplicates). */
+  sendMail?: boolean;
 }): Promise<void> {
   if (!params.chantierId) return;
   const userIds = await getChantierLeadershipUserIds(params.chantierId);
@@ -153,15 +217,30 @@ export async function notifyRaidChanged(params: {
   const by = params.actorName?.trim()
     ? ` (${params.actorName.trim()})`
     : "";
+  const title = `RAID modifié : ${label}`;
+  const message = `${params.summary}${by}`.trim();
   await createNotifications({
     userIds,
     type: "raid_changed",
-    title: `RAID modifié : ${label}`,
-    message: `${params.summary}${by}`.trim(),
+    title,
+    message,
     href: raidHref(params.raidId),
     entityType: "raid",
     entityId: params.raidId,
     excludeUserId: params.actorUserId,
+  });
+  if (params.sendMail === false) return;
+  const mailUserIds = await mailUserIdsForRaidChange(
+    params.raidId,
+    params.chantierId
+  );
+  scheduleRaidEventMails({
+    userIds: mailUserIds,
+    excludeUserId: params.actorUserId,
+    eventType: "raid_changed",
+    raidId: params.raidId,
+    subject: title,
+    body: message,
   });
 }
 
@@ -182,19 +261,32 @@ export async function notifyRaidShared(params: {
     ? ` par ${params.actorName.trim()}`
     : "";
   const removed = !!params.removed;
+  const title = removed
+    ? `Partage retiré : ${label}`
+    : `RAID partagé : ${label}`;
+  const message = removed
+    ? `Le partage de ${label} avec « ${params.equipeName} » a été retiré${by}.`
+    : `${label} a été partagé avec « ${params.equipeName} »${by}.`;
   await createNotifications({
     userIds,
     type: "raid_shared",
-    title: removed
-      ? `Partage retiré : ${label}`
-      : `RAID partagé : ${label}`,
-    message: removed
-      ? `Le partage de ${label} avec « ${params.equipeName} » a été retiré${by}.`
-      : `${label} a été partagé avec « ${params.equipeName} »${by}.`,
+    title,
+    message,
     href: raidHref(params.raidId),
     entityType: "raid",
     entityId: params.raidId,
     excludeUserId: params.actorUserId,
+  });
+  const mailUserId = await getPrimaryChantierLeadershipUserId(
+    params.targetChantierId
+  );
+  scheduleRaidEventMails({
+    userIds: mailUserId ? [mailUserId] : [],
+    excludeUserId: params.actorUserId,
+    eventType: "raid_shared",
+    raidId: params.raidId,
+    subject: title,
+    body: message,
   });
 }
 
@@ -212,15 +304,25 @@ export async function notifyRaidMentions(params: {
   const by = params.actorName?.trim()
     ? ` par ${params.actorName.trim()}`
     : "";
+  const title = `Mention RAID : ${label}`;
+  const message = `Vous avez été mentionné(e) sur ${label}${by}.`;
   await createNotifications({
     userIds,
     type: "raid_mention",
-    title: `Mention RAID : ${label}`,
-    message: `Vous avez été mentionné(e) sur ${label}${by}.`,
+    title,
+    message,
     href: raidHref(params.raidId),
     entityType: "raid",
     entityId: params.raidId,
     excludeUserId: params.actorUserId,
+  });
+  scheduleRaidEventMails({
+    userIds,
+    excludeUserId: params.actorUserId,
+    eventType: "raid_mention",
+    raidId: params.raidId,
+    subject: title,
+    body: message,
   });
 }
 

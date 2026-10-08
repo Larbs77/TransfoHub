@@ -41,6 +41,9 @@ export type MailServerFormInput = {
   notes: string;
   is_active: boolean;
   is_default: boolean;
+  app_url: string;
+  programme_office_email: string;
+  app_mail_enabled: boolean;
 };
 
 function validateInput(data: MailServerFormInput): string | null {
@@ -62,6 +65,22 @@ function validateInput(data: MailServerFormInput): string | null {
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.reply_to.trim())
   ) {
     return "Adresse Reply-To invalide.";
+  }
+  if (data.app_url?.trim()) {
+    try {
+      const url = new URL(data.app_url.trim());
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        return "L'URL de l'application doit commencer par http:// ou https://.";
+      }
+    } catch {
+      return "URL de l'application invalide.";
+    }
+  }
+  if (
+    data.programme_office_email?.trim() &&
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.programme_office_email.trim())
+  ) {
+    return "Adresse e-mail du Program Office invalide.";
   }
   if (data.connection_timeout_ms < 1000 || data.connection_timeout_ms > 120000) {
     return "Délai de connexion hors plage (1000–120000 ms).";
@@ -133,6 +152,9 @@ export async function saveMailServerConfig(
     notes: data.notes.trim(),
     is_active: data.is_active,
     is_default: data.is_default,
+    app_url: data.app_url.trim().replace(/\/+$/, ""),
+    programme_office_email: data.programme_office_email.trim(),
+    app_mail_enabled: !!data.app_mail_enabled,
   };
 
   const saved = existing

@@ -351,6 +351,7 @@ export async function addRaidComment(
     summary: `Nouveau commentaire de ${actor.actorName}`,
     actorUserId: actor.actorUserId,
     actorName: actor.actorName,
+    sendMail: stored.ids.length === 0,
   });
 
   if (stored.ids.length > 0) {
@@ -846,6 +847,7 @@ export async function assignRaidToRessource(
     summary: chantierMoveSummary,
     actorUserId: actor.actorUserId,
     actorName: actor.actorName,
+    sendMail: false,
   });
   if (
     targetChantier.moved &&
@@ -860,6 +862,7 @@ export async function assignRaidToRessource(
       summary: `RAID rattaché à ce chantier et assigné à ${target.nom_complet}`,
       actorUserId: actor.actorUserId,
       actorName: actor.actorName,
+      sendMail: false,
     });
   }
 
@@ -936,7 +939,7 @@ export async function autoAssignRaidToMe(raidId: string) {
     actorRessourceId: actor.actorRessourceId,
   });
 
-  // Self-assign: no assignee self-notify; leadership informed
+  // Self-assign: no assignee self-notify; leadership informed in-app only
   await notifyRaidChanged({
     raidId,
     code: raid.code,
@@ -945,6 +948,7 @@ export async function autoAssignRaidToMe(raidId: string) {
     summary: `${actor.actorName} s'est auto-assigné(e)`,
     actorUserId: actor.actorUserId,
     actorName: actor.actorName,
+    sendMail: false,
   });
 
   revalidateRaid(raidId, raid.chantierId);

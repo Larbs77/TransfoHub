@@ -808,6 +808,12 @@ model MailServerConfig {
   is_active                Boolean   @default(true)
   /// Only one default used for sendMail() when no config id is passed
   is_default               Boolean   @default(true)
+  /// Public base URL of the app, used to build RAID deep links in mails.
+  app_url                  String    @default("")
+  /// Fallback inbox when a notification recipient has no email on file.
+  programme_office_email   String    @default("")
+  /// When false, RAID/app notification mails are not sent (SMTP test still works).
+  app_mail_enabled         Boolean   @default(false)
   last_test_at             DateTime?
   last_test_ok             Boolean?
   last_test_message        String    @default("")

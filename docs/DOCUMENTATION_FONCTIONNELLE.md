@@ -269,6 +269,10 @@ Filtres : chantier, équipe, bascule Mon RAID / RAID équipes & chantiers.
 
 Soumise à `raid_create_scope` (voir § 4.3).
 
+#### Notifications in-app et e-mail
+
+Assignation, modification, partage et mention : cloche in-app (leadership / concernés), et e-mail **à une seule personne** si **Envois applicatifs** est activé : responsable (assignation / modification), PMO du chantier cible (partage), personne @mentionnée. Sans responsable, le mail de modification va au PMO du chantier. Adresse : `User.email` puis `Ressource.email`. Si l’adresse manque, un mail de rattrapage part au Program Office. Un échec d’envoi n’empêche pas l’enregistrement RAID.
+
 #### Assignation d’équipe (dérivée, automatique)
 
 Lorsqu’un responsable (ressource) est positionné :
@@ -420,7 +424,7 @@ Règles catalogue types de comité :
 
 | Écran | Fonction |
 |-------|----------|
-| **Messagerie** | Configuration SMTP (mot de passe chiffré), test d’envoi |
+| **Messagerie** | Configuration SMTP (mot de passe chiffré), test d’envoi, URL de l’application, mail Program Office, interrupteur des envois applicatifs |
 | **Import / Purge** | CSV pipe `\|` pour **Ressources** et **RAID** ; modes append / replace ; purge sécurisée |
 
 ### 5.19 Maintenance DB (`/maintenance/db`)

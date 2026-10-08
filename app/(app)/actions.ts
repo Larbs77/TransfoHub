@@ -2056,6 +2056,7 @@ export async function createRaid(data: {
       : "Création de l'entrée RAID",
     actorUserId: actor.actorUserId,
     actorName: actor.actorName,
+    sendMail: !data.responsableRessourceId,
   });
   revalidatePath("/");
   revalidatePath("/raid");
@@ -2447,6 +2448,7 @@ export async function updateRaid(
       : "Modification via formulaire",
     actorUserId: actor.actorUserId,
     actorName: actor.actorName,
+    sendMail: !assigneeChanged,
   });
 
   revalidatePath("/");
