@@ -12,6 +12,7 @@ import {
   requirePageWrite,
   requireRaidWriteOrAssignee,
   getUserChantierIds,
+  getUserMemberChantierIds,
   hashPassword,
   validatePasswordComplexity,
 } from "@/lib/auth";
@@ -461,23 +462,25 @@ export async function getChantiersForSelect() {
 
 /**
  * Listes du formulaire adhérence :
- * - source : chantiers visibles (tous / assignés+consultation)
- * - dependant : tous les chantiers si périmètre « assignés », sinon identique à source
+ * - source (fournisseur) : tous les chantiers
+ * - dependant (demandeur) : chantiers membres si périmètre assigné, sinon tous
+ * - allowTransverse : Bureau Programme / Admin uniquement
  */
 export async function getChantiersForAdherenceForm() {
   const session = await requireAuth();
-  const chantierIds = await getUserChantierIds(session);
+  const memberIds = await getUserMemberChantierIds(session);
   const all = await prisma.chantier.findMany({
     orderBy: { code: "asc" },
     select: { id: true, code: true, nom: true },
   });
-  if (chantierIds === "all") {
-    return { source: all, dependant: all };
+  if (memberIds === "all") {
+    return { source: all, dependant: all, allowTransverse: true };
   }
-  const allowed = new Set(chantierIds);
+  const allowed = new Set(memberIds);
   return {
-    source: all.filter((c) => allowed.has(c.id)),
-    dependant: all,
+    source: all,
+    dependant: all.filter((c) => allowed.has(c.id)),
+    allowTransverse: false,
   };
 }
 
@@ -5742,6 +5745,79 @@ function uniqueDependantIds(
   return out;
 }
 
+async function assertChantiersExist(ids: string[]) {
+  const unique = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
+  if (unique.length === 0) return;
+  const found = await prisma.chantier.findMany({
+    where: { id: { in: unique } },
+    select: { id: true },
+  });
+  if (found.length !== unique.length) {
+    throw new Error("Un des chantiers sélectionnés est introuvable.");
+  }
+}
+
+/** PMO assigned: write only when every demandeur (dépendant) is a member chantier. */
+async function assertAdherenceWriteOnDemandeurs(dependantIds: string[]) {
+  const session = await requireAuth();
+  const memberIds = await getUserMemberChantierIds(session);
+  if (memberIds === "all") return;
+  if (dependantIds.length === 0) {
+    throw new Error(
+      "Les adhérences transverses sont réservées au Bureau Programme."
+    );
+  }
+  for (const id of dependantIds) {
+    await requireChantierAccess(id);
+  }
+}
+
+type AdherenceWriteInput = {
+  chantierSourceId: string;
+  chantierDependantIds?: string[];
+  chantierDependantLabel: string;
+  type: string;
+  criticite: string;
+  statut: string;
+};
+
+async function prepareAdherenceWrite(data: AdherenceWriteInput) {
+  if (!data.chantierSourceId?.trim()) {
+    throw new Error("Le chantier fournisseur est obligatoire.");
+  }
+  if (!data.type?.trim()) {
+    throw new Error("Le type est obligatoire.");
+  }
+  if (!data.criticite?.trim()) {
+    throw new Error("La criticité est obligatoire.");
+  }
+  if (!data.statut?.trim()) {
+    throw new Error("Le statut est obligatoire.");
+  }
+  const session = await requireAuth();
+  const memberIds = await getUserMemberChantierIds(session);
+  const allowTransverse = memberIds === "all";
+  const isTransverse = !!(data.chantierDependantLabel ?? "").trim();
+  if (isTransverse && !allowTransverse) {
+    throw new Error(
+      "Les adhérences transverses sont réservées au Bureau Programme."
+    );
+  }
+  const dependantIds = isTransverse
+    ? []
+    : uniqueDependantIds(data.chantierSourceId, data.chantierDependantIds);
+  if (!isTransverse && dependantIds.length === 0) {
+    throw new Error(
+      allowTransverse
+        ? "Sélectionnez au moins un chantier demandeur, ou cochez Transverse."
+        : "Sélectionnez au moins un chantier demandeur (votre chantier)."
+    );
+  }
+  await assertChantiersExist([data.chantierSourceId, ...dependantIds]);
+  await assertAdherenceWriteOnDemandeurs(dependantIds);
+  return { isTransverse, dependantIds };
+}
+
 export async function getAdherences() {
   const session = await requireAuth();
   const chantierIds = await getUserChantierIds(session);
@@ -5788,6 +5864,7 @@ export async function createAdherence(data: {
   type: string;
   domaine: string;
   description: string;
+  livrables?: string;
   criticite: string;
   statut: string;
   date_identification: string | null;
@@ -5797,28 +5874,7 @@ export async function createAdherence(data: {
   commentaires: string;
 }) {
   await requirePageWrite("/adherences");
-  if (!data.chantierSourceId?.trim()) {
-    throw new Error("Le chantier source est obligatoire.");
-  }
-  if (!data.type?.trim()) {
-    throw new Error("Le type est obligatoire.");
-  }
-  if (!data.criticite?.trim()) {
-    throw new Error("La criticité est obligatoire.");
-  }
-  if (!data.statut?.trim()) {
-    throw new Error("Le statut est obligatoire.");
-  }
-  await requireChantierAccess(data.chantierSourceId);
-  const isTransverse = !!(data.chantierDependantLabel ?? "").trim();
-  const dependantIds = isTransverse
-    ? []
-    : uniqueDependantIds(data.chantierSourceId, data.chantierDependantIds);
-  if (!isTransverse && dependantIds.length === 0) {
-    throw new Error(
-      "Sélectionnez au moins un chantier dépendant, ou cochez Transverse."
-    );
-  }
+  const { isTransverse, dependantIds } = await prepareAdherenceWrite(data);
   await prisma.adherence.create({
     data: {
       code: data.code,
@@ -5829,6 +5885,7 @@ export async function createAdherence(data: {
       type: data.type,
       domaine: data.domaine,
       description: data.description,
+      livrables: (data.livrables ?? "").trim(),
       criticite: data.criticite,
       statut: data.statut,
       date_identification: data.date_identification
@@ -5860,6 +5917,7 @@ export async function updateAdherence(
     type: string;
     domaine: string;
     description: string;
+    livrables?: string;
     criticite: string;
     statut: string;
     date_identification: string | null;
@@ -5872,34 +5930,25 @@ export async function updateAdherence(
   await requirePageWrite("/adherences");
   const existingRow = await prisma.adherence.findUnique({
     where: { id },
-    select: { deletedAt: true },
+    select: {
+      deletedAt: true,
+      dependants: { select: { chantierId: true } },
+    },
   });
   if (!existingRow) throw new Error("Adhérence introuvable.");
   if (existingRow.deletedAt) {
     throw new Error("Cette adhérence est supprimée : restaurez-la avant de la modifier.");
   }
-  if (!data.chantierSourceId?.trim()) {
-    throw new Error("Le chantier source est obligatoire.");
-  }
-  if (!data.type?.trim()) {
-    throw new Error("Le type est obligatoire.");
-  }
-  if (!data.criticite?.trim()) {
-    throw new Error("La criticité est obligatoire.");
-  }
-  if (!data.statut?.trim()) {
-    throw new Error("Le statut est obligatoire.");
-  }
-  await requireChantierAccess(data.chantierSourceId);
-  const isTransverse = !!(data.chantierDependantLabel ?? "").trim();
-  const dependantIds = isTransverse
-    ? []
-    : uniqueDependantIds(data.chantierSourceId, data.chantierDependantIds);
-  if (!isTransverse && dependantIds.length === 0) {
+  try {
+    await assertAdherenceWriteOnDemandeurs(
+      existingRow.dependants.map((d) => d.chantierId)
+    );
+  } catch {
     throw new Error(
-      "Sélectionnez au moins un chantier dépendant, ou cochez Transverse."
+      "Vous ne pouvez modifier que les adhérences dont votre chantier est le demandeur."
     );
   }
+  const { isTransverse, dependantIds } = await prepareAdherenceWrite(data);
   await prisma.$transaction([
     prisma.adherenceDependant.deleteMany({ where: { adherenceId: id } }),
     prisma.adherence.update({
@@ -5913,6 +5962,7 @@ export async function updateAdherence(
         type: data.type,
         domaine: data.domaine,
         description: data.description,
+        livrables: (data.livrables ?? "").trim(),
         criticite: data.criticite,
         statut: data.statut,
         date_identification: data.date_identification
@@ -5943,17 +5993,22 @@ export async function deleteAdherence(id: string, motif?: string) {
   }
   const existing = await prisma.adherence.findUnique({
     where: { id },
-    select: { chantierSourceId: true, deletedAt: true },
+    select: {
+      deletedAt: true,
+      dependants: { select: { chantierId: true } },
+    },
   });
   if (!existing) throw new Error("Adhérence introuvable.");
   if (existing.deletedAt) {
     throw new Error("Cette adhérence est déjà supprimée.");
   }
   try {
-    await requireChantierAccess(existing.chantierSourceId);
+    await assertAdherenceWriteOnDemandeurs(
+      existing.dependants.map((d) => d.chantierId)
+    );
   } catch {
     throw new Error(
-      "Vous ne pouvez supprimer que les adhérences dont vous êtes le chantier source."
+      "Vous ne pouvez supprimer que les adhérences dont votre chantier est le demandeur."
     );
   }
   const session = await requireAuth();
@@ -5980,17 +6035,22 @@ export async function restoreAdherence(id: string, motif?: string) {
   }
   const existing = await prisma.adherence.findUnique({
     where: { id },
-    select: { chantierSourceId: true, deletedAt: true },
+    select: {
+      deletedAt: true,
+      dependants: { select: { chantierId: true } },
+    },
   });
   if (!existing) throw new Error("Adhérence introuvable.");
   if (!existing.deletedAt) {
     throw new Error("Cette adhérence n'est pas supprimée.");
   }
   try {
-    await requireChantierAccess(existing.chantierSourceId);
+    await assertAdherenceWriteOnDemandeurs(
+      existing.dependants.map((d) => d.chantierId)
+    );
   } catch {
     throw new Error(
-      "Vous ne pouvez restaurer que les adhérences dont vous êtes le chantier source."
+      "Vous ne pouvez restaurer que les adhérences dont votre chantier est le demandeur."
     );
   }
   const session = await requireAuth();

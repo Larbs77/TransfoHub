@@ -34,12 +34,14 @@ export function ChantierSelect({
   onChange,
   placeholder = "Sélectionner…",
   disabled = false,
+  className,
 }: {
   chantiers: ChantierSelectOption[];
   value: string;
   onChange: (next: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -83,7 +85,8 @@ export function ChantierSelect({
             "flex h-9 w-full min-w-0 items-center justify-between gap-2 overflow-hidden rounded-md border bg-transparent px-3 text-sm shadow-xs",
             "transition-[color,box-shadow] outline-none focus-visible:ring-[3px] text-left",
             "disabled:cursor-not-allowed disabled:opacity-50",
-            !selectedLabel && "text-muted-foreground"
+            !selectedLabel && "text-muted-foreground",
+            className
           )}
         >
           <span className="min-w-0 flex-1 truncate">
@@ -161,6 +164,7 @@ export function ChantierMultiSelect({
   placeholder = "Sélectionner…",
   disabled = false,
   excludeId,
+  className,
 }: {
   chantiers: ChantierSelectOption[];
   value: string[];
@@ -168,6 +172,7 @@ export function ChantierMultiSelect({
   placeholder?: string;
   disabled?: boolean;
   excludeId?: string;
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -234,7 +239,8 @@ export function ChantierMultiSelect({
             "flex h-9 w-full min-w-0 items-center justify-between gap-2 overflow-hidden rounded-md border bg-transparent px-3 text-sm shadow-xs",
             "transition-[color,box-shadow] outline-none focus-visible:ring-[3px] text-left",
             "disabled:cursor-not-allowed disabled:opacity-50",
-            selected.length === 0 && "text-muted-foreground"
+            selected.length === 0 && "text-muted-foreground",
+            className
           )}
         >
           <span className="min-w-0 flex-1 truncate">{triggerLabel}</span>

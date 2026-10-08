@@ -591,6 +591,8 @@ model Adherence {
   type                   String
   domaine                String    @default("")
   description            String    @default("")
+  /// Livrables sur lesquels l'adhérence se base (saisie libre).
+  livrables              String    @default("")
   criticite              String    @default("MODÉRÉE")
   statut                 String    @default("Planifié")
   date_identification    DateTime?

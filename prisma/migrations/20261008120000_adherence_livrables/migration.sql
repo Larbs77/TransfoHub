@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Adherence" ADD COLUMN IF NOT EXISTS "livrables" TEXT NOT NULL DEFAULT '';

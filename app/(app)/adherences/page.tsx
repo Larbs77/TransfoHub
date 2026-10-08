@@ -28,6 +28,7 @@ export default async function AdherencesPage() {
           adherences={adherences}
           chantiers={chantiersLists.source}
           chantiersDependant={chantiersLists.dependant}
+          allowTransverse={chantiersLists.allowTransverse}
           nextCode={nextCode}
         />
       </main>

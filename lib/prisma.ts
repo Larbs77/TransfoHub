@@ -10,7 +10,7 @@ const globalForPrisma = globalThis as unknown as {
  * Bump whenever the Prisma schema gains fields/models so HMR drops a stale
  * singleton (otherwise findUnique/update rejects unknown fields).
  */
-const PRISMA_MODEL_STAMP = "raid-partage-mentions-v1";
+const PRISMA_MODEL_STAMP = "adherence-livrables-v1";
 
 function clientLooksCurrent(client: PrismaClient): boolean {
   try {
@@ -124,6 +124,10 @@ function clientLooksCurrent(client: PrismaClient): boolean {
         ? fields.some((f) => f.name === "deletedAt")
         : "deletedAt" in fields;
       if (!hasDeletedAt) return false;
+      const hasLivrables = Array.isArray(fields)
+        ? fields.some((f) => f.name === "livrables")
+        : "livrables" in fields;
+      if (!hasLivrables) return false;
     }
 
     const favoriModel = c._runtimeDataModel?.models?.FavoriChantier;

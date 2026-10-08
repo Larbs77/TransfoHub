@@ -88,7 +88,9 @@ Ils pilotent l’avancement et le statut du chantier.
 
 ### 2.7 Adhérence
 
-Dépendance entre chantiers (source → dépendant), avec criticité et statut.
+Dépendance entre chantiers (**fournisseur / source** → **demandeur / dépendant**), avec criticité et statut.
+
+Le PMO chantier déclare **ce que son chantier attend** des autres : il est le demandeur, le chantier choisi est le fournisseur. Le Bureau Programme peut aussi créer des adhérences transverses (un fournisseur pour tous les chantiers).
 
 ### 2.8 Comité
 
@@ -336,8 +338,10 @@ Les autres utilisateurs **ne réassignent pas**.
 ### 5.6 Adhérences
 
 - Registre des interfaces / dépendances  
-- Graphe de dépendances  
-- Criticité, statut, chantiers source / dépendant  
+- Graphe de dépendances (flèche fournisseur → demandeur)  
+- Criticité, statut, chantiers fournisseur (source) / demandeur (dépendant)  
+- Création PMO : « mon chantier (demandeur) » puis « chantier dont je dépends (fournisseur) » ; droit d’écriture sur le demandeur  
+- Liste des livrables (saisie libre) sur lesquels l’adhérence se base    
 
 ### 5.7 Saisie de temps
 

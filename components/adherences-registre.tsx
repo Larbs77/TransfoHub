@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, type ReactNode } from "react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardAction } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,7 +22,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MultiSelect } from "@/components/ui/multi-select";
+import { cn } from "@/lib/utils";
 import {
   Plus,
   Pencil,
@@ -30,12 +31,21 @@ import {
   Search,
   ArrowRight,
   AlertTriangle,
-  TableProperties,
-  GitFork,
+  Table2,
+  Network,
   ChevronLeft,
   ChevronRight,
   ArrowUpDown,
   RotateCcw,
+  SlidersHorizontal,
+  Building2,
+  UserRound,
+  Layers,
+  Flag,
+  CircleDot,
+  Eye,
+  X,
+  type LucideIcon,
 } from "lucide-react";
 import { deleteAdherence, restoreAdherence } from "@/app/(app)/actions";
 import { useCanWritePage, useUser } from "@/components/user-provider";
@@ -71,6 +81,7 @@ interface AdherenceItem {
   type: string;
   domaine: string;
   description: string;
+  livrables?: string;
   criticite: string;
   statut: string;
   date_identification: Date | null;
@@ -94,19 +105,94 @@ interface Props {
   chantiers: ChantierOption[];
   chantiersDependant?: ChantierOption[];
   nextCode: string;
+  allowTransverse?: boolean;
 }
 
-function KpiCard({ label, value, color }: { label: string; value: string | number; color: string }) {
+function KpiCard({
+  label,
+  value,
+  color,
+  active,
+  onClick,
+  title,
+}: {
+  label: string;
+  value: string | number;
+  color: string;
+  active?: boolean;
+  onClick?: () => void;
+  title?: string;
+}) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border p-3">
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-pressed={active}
+      className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-all ${
+        onClick
+          ? "cursor-pointer hover:border-[#0A3C74]/35 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00BDBB]/45"
+          : ""
+      } ${
+        active
+          ? "border-[#0A3C74] bg-[#0A3C74]/[0.05] shadow-sm ring-1 ring-[#0A3C74]/20"
+          : "bg-card"
+      }`}
+    >
       <div
-        className="flex size-9 items-center justify-center rounded-md"
+        className="flex size-9 shrink-0 items-center justify-center rounded-md"
         style={{ backgroundColor: color + "18" }}
       >
-        <span className="text-lg font-bold" style={{ color }}>{value}</span>
+        <span className="text-lg font-bold tabular-nums" style={{ color }}>
+          {value}
+        </span>
       </div>
       <p className="text-xs text-muted-foreground">{label}</p>
+    </button>
+  );
+}
+
+const filterControlClass =
+  "h-9 w-full min-w-0 border-[#0A3C74]/15 bg-background focus-visible:ring-[#00BDBB]/40";
+
+function FilterField({
+  icon: Icon,
+  label,
+  children,
+  className,
+}: {
+  icon: LucideIcon;
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("grid min-w-0 gap-1.5", className)}>
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#0A3C74]/70 dark:text-muted-foreground">
+        <Icon className="size-3.5 text-[#00BDBB]" />
+        {label}
+      </div>
+      {children}
     </div>
+  );
+}
+
+function FilterChip({
+  label,
+  onRemove,
+}: {
+  label: string;
+  onRemove: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onRemove}
+      className="inline-flex max-w-full items-center gap-1 rounded-full border border-[#0A3C74]/15 bg-[#0A3C74]/5 px-2.5 py-0.5 text-xs font-medium text-[#0A3C74] transition-colors hover:border-[#0A3C74]/30 hover:bg-[#0A3C74]/10 dark:text-foreground"
+    >
+      <span className="truncate">{label}</span>
+      <X className="size-3 shrink-0 opacity-60" />
+    </button>
   );
 }
 
@@ -195,6 +281,7 @@ export function AdherencesRegistre({
   chantiers,
   chantiersDependant,
   nextCode,
+  allowTransverse = false,
 }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<AdherenceItem | null>(null);
@@ -202,6 +289,9 @@ export function AdherencesRegistre({
   const [filterType, setFilterType] = useState("all");
   const [filterCriticite, setFilterCriticite] = useState("all");
   const [filterStatut, setFilterStatut] = useState("all");
+  const [filterFournisseur, setFilterFournisseur] = useState<string[]>([]);
+  const [filterDemandeur, setFilterDemandeur] = useState<string[]>([]);
+  const [viewMode, setViewMode] = useState<"registre" | "graphe">("registre");
   const [filterDeleted, setFilterDeleted] = useState<"active" | "deleted" | "all">(
     "active"
   );
@@ -214,11 +304,16 @@ export function AdherencesRegistre({
   const { consultationChantierIds, chantierScope, memberChantierIds, role } =
     useUser();
 
-  function canMutateSource(sourceId: string) {
+  function canMutateAdherence(a: AdherenceItem) {
     if (!canWrite) return false;
-    if (consultationChantierIds.includes(sourceId)) return false;
     if (chantierScope === "all" || role === "Admin") return true;
-    return memberChantierIds.includes(sourceId);
+    const dependantIds = a.dependants?.map((d) => d.chantier.id) ?? [];
+    if (dependantIds.length === 0) return false;
+    return dependantIds.every(
+      (id) =>
+        memberChantierIds.includes(id) &&
+        !consultationChantierIds.includes(id)
+    );
   }
 
   const [sortField, setSortField] = useState<SortField>("code");
@@ -255,19 +350,67 @@ export function AdherencesRegistre({
   const resolues = activeAdherences.filter((a) => a.statut === "Résolu").length;
   const bloquees = activeAdherences.filter((a) => a.statut === "Bloqué").length;
 
+  const fournisseurFilterOptions = useMemo(() => {
+    const map = new Map<string, { value: string; label: string }>();
+    for (const a of adherences) {
+      map.set(a.chantierSource.id, {
+        value: a.chantierSource.id,
+        label: `${a.chantierSource.code} — ${a.chantierSource.nom}`,
+      });
+    }
+    return [...map.values()].sort((a, b) =>
+      a.label.localeCompare(b.label, "fr")
+    );
+  }, [adherences]);
+
+  const demandeurFilterOptions = useMemo(() => {
+    const map = new Map<string, { value: string; label: string }>();
+    let hasTransverse = false;
+    for (const a of adherences) {
+      const deps = chantiersFromDependants(a.dependants);
+      if (!deps.length) hasTransverse = true;
+      for (const d of deps) {
+        map.set(d.id, {
+          value: d.id,
+          label: `${d.code} — ${d.nom}`,
+        });
+      }
+    }
+    const list = [...map.values()].sort((a, b) =>
+      a.label.localeCompare(b.label, "fr")
+    );
+    if (hasTransverse) {
+      list.push({ value: "__transverse__", label: "Transverse" });
+    }
+    return list;
+  }, [adherences]);
+
   const filtered = useMemo(() => {
-    setCurrentPage(1);
     const result = adherences.filter((a) => {
       if (filterDeleted === "active" && isDeleted(a)) return false;
       if (filterDeleted === "deleted" && !isDeleted(a)) return false;
       if (filterType !== "all" && a.type !== filterType) return false;
       if (filterCriticite !== "all" && a.criticite !== filterCriticite) return false;
       if (filterStatut !== "all" && a.statut !== filterStatut) return false;
+      if (
+        filterFournisseur.length > 0 &&
+        !filterFournisseur.includes(a.chantierSourceId)
+      ) {
+        return false;
+      }
+      if (filterDemandeur.length > 0) {
+        const deps = chantiersFromDependants(a.dependants);
+        const match =
+          deps.some((d) => filterDemandeur.includes(d.id)) ||
+          (deps.length === 0 && filterDemandeur.includes("__transverse__"));
+        if (!match) return false;
+      }
       if (search) {
         const s = search.toLowerCase();
         return (
           a.code.toLowerCase().includes(s) ||
           a.description.toLowerCase().includes(s) ||
+          (a.livrables ?? "").toLowerCase().includes(s) ||
           a.chantierSource.code.toLowerCase().includes(s) ||
           a.chantierSource.nom.toLowerCase().includes(s) ||
           chantiersFromDependants(a.dependants).some(
@@ -307,7 +450,99 @@ export function AdherencesRegistre({
     });
 
     return result;
-  }, [adherences, search, filterType, filterCriticite, filterStatut, filterDeleted, sortField, sortDir]);
+  }, [
+    adherences,
+    search,
+    filterType,
+    filterCriticite,
+    filterStatut,
+    filterDeleted,
+    filterFournisseur,
+    filterDemandeur,
+    sortField,
+    sortDir,
+  ]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    search,
+    filterType,
+    filterCriticite,
+    filterStatut,
+    filterDeleted,
+    filterFournisseur,
+    filterDemandeur,
+    pageSize,
+  ]);
+
+  const kpiActive = {
+    total:
+      filterStatut === "all" &&
+      filterCriticite === "all" &&
+      filterType === "all" &&
+      filterFournisseur.length === 0 &&
+      filterDemandeur.length === 0 &&
+      !search,
+    bloquantes: filterCriticite === "BLOQUANTE",
+    enCours: filterStatut === "En cours" && filterCriticite === "all",
+    resolues: filterStatut === "Résolu" && filterCriticite === "all",
+    bloquees: filterStatut === "Bloqué" && filterCriticite === "all",
+  };
+
+  function applyKpiFilter(
+    mode: "total" | "bloquantes" | "enCours" | "resolues" | "bloquees"
+  ) {
+    const already =
+      (mode === "total" && kpiActive.total) ||
+      (mode === "bloquantes" && kpiActive.bloquantes) ||
+      (mode === "enCours" && kpiActive.enCours) ||
+      (mode === "resolues" && kpiActive.resolues) ||
+      (mode === "bloquees" && kpiActive.bloquees);
+    if (already || mode === "total") {
+      setFilterStatut("all");
+      setFilterCriticite("all");
+      setFilterType("all");
+      setFilterFournisseur([]);
+      setFilterDemandeur([]);
+      setSearch("");
+      if (mode === "total" || already) return;
+    }
+    setSearch("");
+    if (mode === "bloquantes") {
+      setFilterCriticite("BLOQUANTE");
+      setFilterStatut("all");
+      return;
+    }
+    setFilterCriticite("all");
+    if (mode === "enCours") setFilterStatut("En cours");
+    if (mode === "resolues") setFilterStatut("Résolu");
+    if (mode === "bloquees") setFilterStatut("Bloqué");
+  }
+
+  const graphAdherences = useMemo(
+    () => filtered.filter((a) => !isDeleted(a)),
+    [filtered]
+  );
+
+  const hasActiveFilters =
+    !!search ||
+    filterType !== "all" ||
+    filterCriticite !== "all" ||
+    filterStatut !== "all" ||
+    filterDeleted !== "active" ||
+    filterFournisseur.length > 0 ||
+    filterDemandeur.length > 0;
+
+  function resetFilters() {
+    setSearch("");
+    setFilterType("all");
+    setFilterCriticite("all");
+    setFilterStatut("all");
+    setFilterDeleted("active");
+    setFilterFournisseur([]);
+    setFilterDemandeur([]);
+  }
 
   const totalPages = pageSize === 0 ? 1 : Math.ceil(filtered.length / pageSize);
   const safePage = Math.min(currentPage, totalPages || 1);
@@ -329,31 +564,338 @@ export function AdherencesRegistre({
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-5 gap-3">
-        <KpiCard label="Total adhérences" value={total} color="#6366f1" />
-        <KpiCard label="Bloquantes" value={bloquantes} color="#dc2626" />
-        <KpiCard label="En cours" value={enCours} color="#3b82f6" />
-        <KpiCard label="Résolues" value={resolues} color="#22c55e" />
-        <KpiCard label="Bloquées" value={bloquees} color="#ef4444" />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+        <KpiCard
+          label="Total adhérences"
+          value={total}
+          color="#3b82f6"
+          active={kpiActive.total}
+          onClick={() => applyKpiFilter("total")}
+          title="Afficher toutes les adhérences"
+        />
+        <KpiCard
+          label="Bloquantes"
+          value={bloquantes}
+          color="#dc2626"
+          active={kpiActive.bloquantes}
+          onClick={() => applyKpiFilter("bloquantes")}
+          title="Filtrer : criticité bloquante"
+        />
+        <KpiCard
+          label="En cours"
+          value={enCours}
+          color="#f97316"
+          active={kpiActive.enCours}
+          onClick={() => applyKpiFilter("enCours")}
+          title="Filtrer : statut En cours"
+        />
+        <KpiCard
+          label="Résolues"
+          value={resolues}
+          color="#22c55e"
+          active={kpiActive.resolues}
+          onClick={() => applyKpiFilter("resolues")}
+          title="Filtrer : statut Résolu"
+        />
+        <KpiCard
+          label="Bloquées"
+          value={bloquees}
+          color="#ef4444"
+          active={kpiActive.bloquees}
+          onClick={() => applyKpiFilter("bloquees")}
+          title="Filtrer : statut Bloqué"
+        />
       </div>
 
-      <Tabs defaultValue="registre" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="registre" className="gap-2">
-            <TableProperties className="size-4" />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div
+          role="tablist"
+          aria-label="Vue adhérences"
+          className="inline-flex h-10 items-center rounded-full border border-[#0A3C74]/15 bg-[#0A3C74]/[0.04] p-1"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === "registre"}
+            onClick={() => setViewMode("registre")}
+            className={cn(
+              "inline-flex h-8 items-center gap-2 rounded-full px-4 text-sm font-medium transition-all",
+              viewMode === "registre"
+                ? "bg-[#0A3C74] text-white shadow-sm"
+                : "text-muted-foreground hover:text-[#0A3C74]"
+            )}
+          >
+            <Table2 className="size-4" />
             Registre
-          </TabsTrigger>
-          <TabsTrigger value="graphe" className="gap-2">
-            <GitFork className="size-4" />
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === "graphe"}
+            onClick={() => setViewMode("graphe")}
+            className={cn(
+              "inline-flex h-8 items-center gap-2 rounded-full px-4 text-sm font-medium transition-all",
+              viewMode === "graphe"
+                ? "bg-[#0A3C74] text-white shadow-sm"
+                : "text-muted-foreground hover:text-[#0A3C74]"
+            )}
+          >
+            <Network className="size-4" />
             Graphe
-          </TabsTrigger>
-        </TabsList>
+          </button>
+        </div>
+        {canWrite ? (
+          <Button
+            size="sm"
+            onClick={() => {
+              setEditItem(null);
+              setDialogOpen(true);
+            }}
+          >
+            <Plus className="size-4" />
+            Nouvelle adhérence
+          </Button>
+        ) : null}
+      </div>
 
-        <TabsContent value="graphe">
-          <AdherenceGraph adherences={activeAdherences} height={600} />
-        </TabsContent>
+      <div className="overflow-visible rounded-xl border bg-card shadow-sm">
+        <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[#0A3C74] dark:text-foreground">
+            <SlidersHorizontal className="size-4 text-[#00BDBB]" />
+            Filtres
+          </div>
+          <Badge
+            variant="outline"
+            className="border-[#00BDBB]/30 bg-[#00BDBB]/5 font-normal text-[#0A3C74] dark:text-foreground"
+          >
+            {filtered.length} affichée{filtered.length > 1 ? "s" : ""} /{" "}
+            {filterDeleted === "deleted" ? adherences.length : total}
+          </Badge>
+          {hasActiveFilters ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto h-8 gap-1.5 text-xs"
+              onClick={resetFilters}
+            >
+              <RotateCcw className="size-3.5" />
+              Réinitialiser
+            </Button>
+          ) : null}
+        </div>
 
-        <TabsContent value="registre">
+        <div className="space-y-4 p-4">
+          <FilterField icon={Search} label="Recherche" className="max-w-xl">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#00BDBB]" />
+              <Input
+                placeholder="Code, description, livrables, chantier, responsable…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className={cn(filterControlClass, "pl-9 pr-8")}
+              />
+              {search ? (
+                <button
+                  type="button"
+                  aria-label="Effacer la recherche"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  onClick={() => setSearch("")}
+                >
+                  <X className="size-3.5" />
+                </button>
+              ) : null}
+            </div>
+          </FilterField>
+
+          <div className="grid gap-3 md:grid-cols-[1fr_auto_1fr] md:items-end">
+            <FilterField icon={Building2} label="Fournisseur">
+              <MultiSelect
+                options={fournisseurFilterOptions}
+                selected={filterFournisseur}
+                onChange={setFilterFournisseur}
+                placeholder="Tous les fournisseurs"
+                chips={false}
+                truncate
+                className="w-full"
+              />
+            </FilterField>
+            <div className="hidden h-9 items-center justify-center pb-0 md:flex">
+              <span className="flex size-8 items-center justify-center rounded-full border border-[#00BDBB]/30 bg-[#00BDBB]/10">
+                <ArrowRight className="size-4 text-[#0A3C74] dark:text-[#00BDBB]" />
+              </span>
+            </div>
+            <FilterField icon={UserRound} label="Demandeur">
+              <MultiSelect
+                options={demandeurFilterOptions}
+                selected={filterDemandeur}
+                onChange={setFilterDemandeur}
+                placeholder="Tous les demandeurs"
+                chips={false}
+                truncate
+                className="w-full"
+              />
+            </FilterField>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+            <FilterField icon={Layers} label="Type">
+              <Select value={filterType} onValueChange={setFilterType}>
+                <SelectTrigger className={filterControlClass}>
+                  <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous types</SelectItem>
+                  {ADHERENCE_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {t}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FilterField>
+            <FilterField icon={Flag} label="Criticité">
+              <Select value={filterCriticite} onValueChange={setFilterCriticite}>
+                <SelectTrigger className={filterControlClass}>
+                  <SelectValue placeholder="Criticité" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Toutes</SelectItem>
+                  {ADHERENCE_CRITICITES.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FilterField>
+            <FilterField icon={CircleDot} label="Statut">
+              <Select value={filterStatut} onValueChange={setFilterStatut}>
+                <SelectTrigger className={filterControlClass}>
+                  <SelectValue placeholder="Statut" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous statuts</SelectItem>
+                  {ADHERENCE_STATUTS.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FilterField>
+            <FilterField icon={Eye} label="Visibilité">
+              <Select
+                value={filterDeleted}
+                onValueChange={(v) =>
+                  setFilterDeleted(v as "active" | "deleted" | "all")
+                }
+              >
+                <SelectTrigger className={filterControlClass}>
+                  <SelectValue placeholder="Visibilité" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Actives</SelectItem>
+                  <SelectItem value="deleted">Supprimées</SelectItem>
+                  <SelectItem value="all">Toutes</SelectItem>
+                </SelectContent>
+              </Select>
+            </FilterField>
+            {viewMode === "registre" ? (
+              <FilterField icon={Table2} label="Afficher">
+                <Select
+                  value={pageSize === 0 ? "all" : String(pageSize)}
+                  onValueChange={(v) => {
+                    setPageSize(v === "all" ? 0 : Number(v));
+                    setCurrentPage(1);
+                  }}
+                >
+                  <SelectTrigger className={filterControlClass}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[5, 10, 15, 20, 30].map((n) => (
+                      <SelectItem key={n} value={String(n)}>
+                        {n} par page
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="all">Tout</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FilterField>
+            ) : null}
+          </div>
+
+          {hasActiveFilters ? (
+            <div className="flex flex-wrap items-center gap-1.5 border-t pt-3">
+              <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Actifs
+              </span>
+              {search ? (
+                <FilterChip
+                  label={`Recherche : ${search}`}
+                  onRemove={() => setSearch("")}
+                />
+              ) : null}
+              {filterFournisseur.map((id) => (
+                <FilterChip
+                  key={`f-${id}`}
+                  label={
+                    fournisseurFilterOptions.find((o) => o.value === id)
+                      ?.label ?? id
+                  }
+                  onRemove={() =>
+                    setFilterFournisseur((prev) =>
+                      prev.filter((v) => v !== id)
+                    )
+                  }
+                />
+              ))}
+              {filterDemandeur.map((id) => (
+                <FilterChip
+                  key={`d-${id}`}
+                  label={
+                    demandeurFilterOptions.find((o) => o.value === id)?.label ??
+                    id
+                  }
+                  onRemove={() =>
+                    setFilterDemandeur((prev) => prev.filter((v) => v !== id))
+                  }
+                />
+              ))}
+              {filterType !== "all" ? (
+                <FilterChip
+                  label={`Type : ${filterType}`}
+                  onRemove={() => setFilterType("all")}
+                />
+              ) : null}
+              {filterCriticite !== "all" ? (
+                <FilterChip
+                  label={filterCriticite}
+                  onRemove={() => setFilterCriticite("all")}
+                />
+              ) : null}
+              {filterStatut !== "all" ? (
+                <FilterChip
+                  label={filterStatut}
+                  onRemove={() => setFilterStatut("all")}
+                />
+              ) : null}
+              {filterDeleted !== "active" ? (
+                <FilterChip
+                  label={
+                    filterDeleted === "deleted" ? "Supprimées" : "Toutes"
+                  }
+                  onRemove={() => setFilterDeleted("active")}
+                />
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {viewMode === "graphe" ? (
+        <AdherenceGraph adherences={graphAdherences} height={600} />
+      ) : (
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">Registre des Adhérences</CardTitle>
@@ -367,104 +909,18 @@ export function AdherencesRegistre({
             {" · "}
             {total} active(s) au total
           </CardDescription>
-          {canWrite && (
-          <CardAction>
-            <Button
-              size="sm"
-              onClick={() => {
-                setEditItem(null);
-                setDialogOpen(true);
-              }}
-            >
-              <Plus className="size-4" />
-              Nouvelle adhérence
-            </Button>
-          </CardAction>
-          )}
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap gap-3 mb-4">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-              <Input
-                className="pl-9"
-                placeholder="Rechercher..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-            <Select
-              value={filterDeleted}
-              onValueChange={(v) =>
-                setFilterDeleted(v as "active" | "deleted" | "all")
-              }
-            >
-              <SelectTrigger className="w-[160px]">
-                <SelectValue placeholder="Visibilité" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="active">Actives</SelectItem>
-                <SelectItem value="deleted">Supprimées</SelectItem>
-                <SelectItem value="all">Toutes</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={filterType} onValueChange={setFilterType}>
-              <SelectTrigger className="w-[150px]"><SelectValue placeholder="Type" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tous types</SelectItem>
-                {ADHERENCE_TYPES.map((t) => (
-                  <SelectItem key={t} value={t}>{t}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={filterCriticite} onValueChange={setFilterCriticite}>
-              <SelectTrigger className="w-[150px]"><SelectValue placeholder="Criticité" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Toutes</SelectItem>
-                {ADHERENCE_CRITICITES.map((c) => (
-                  <SelectItem key={c} value={c}>{c}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={filterStatut} onValueChange={setFilterStatut}>
-              <SelectTrigger className="w-[140px]"><SelectValue placeholder="Statut" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tous statuts</SelectItem>
-                {ADHERENCE_STATUTS.map((s) => (
-                  <SelectItem key={s} value={s}>{s}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-muted-foreground whitespace-nowrap">Afficher</label>
-              <Select
-                value={pageSize === 0 ? "all" : String(pageSize)}
-                onValueChange={(v) => {
-                  setPageSize(v === "all" ? 0 : Number(v));
-                  setCurrentPage(1);
-                }}
-              >
-                <SelectTrigger className="w-20 h-8" size="sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {[5, 10, 15, 20, 30].map((n) => (
-                    <SelectItem key={n} value={String(n)}>{n}</SelectItem>
-                  ))}
-                  <SelectItem value="all">Tout</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
 
           <div className="rounded-md border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
                   <SortableHead field="code" className="w-[80px]">Code</SortableHead>
-                  <SortableHead field="source" className="w-[200px]">Source</SortableHead>
+                  <SortableHead field="source" className="w-[200px]">Fournisseur</SortableHead>
                   <TableHead className="w-[30px]" />
-                  <SortableHead field="dependant" className="w-[200px]">Dépendant</SortableHead>
+                  <SortableHead field="dependant" className="w-[200px]">Demandeur</SortableHead>
+                  <TableHead className="w-[180px]">Livrables</TableHead>
                   <SortableHead field="type" className="w-[100px]">Type</SortableHead>
                   <SortableHead field="criticite" className="w-[90px]">Criticité</SortableHead>
                   <SortableHead field="statut" className="w-[80px]">Statut</SortableHead>
@@ -476,7 +932,7 @@ export function AdherencesRegistre({
               <TableBody>
                 {paginated.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={canWrite ? 12 : 11} className="text-center py-8 text-muted-foreground">
                       Aucune adhérence trouvée
                     </TableCell>
                   </TableRow>
@@ -542,6 +998,18 @@ export function AdherencesRegistre({
                         })()}
                       </TableCell>
                       <TableCell>
+                        {a.livrables?.trim() ? (
+                          <p
+                            className="max-w-[180px] truncate text-xs text-muted-foreground"
+                            title={a.livrables}
+                          >
+                            {a.livrables.replace(/\s+/g, " ")}
+                          </p>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
                         <Badge
                           variant="secondary"
                           style={{
@@ -583,7 +1051,7 @@ export function AdherencesRegistre({
                       <TableCell className="text-xs">{a.responsable}</TableCell>
                       {canWrite && (
                       <TableCell>
-                        {canMutateSource(a.chantierSourceId) ? (
+                        {canMutateAdherence(a) ? (
                         <div className="flex gap-1">
                           {isDeleted(a) ? (
                             <Button
@@ -641,9 +1109,7 @@ export function AdherencesRegistre({
           )}
         </CardContent>
       </Card>
-
-        </TabsContent>
-      </Tabs>
+      )}
 
       <AdherenceFormDialog
         open={dialogOpen}
@@ -651,6 +1117,7 @@ export function AdherencesRegistre({
         adherence={editItem}
         chantiers={chantiers}
         chantiersDependant={chantiersDependant ?? chantiers}
+        allowTransverse={allowTransverse}
         nextCode={nextCode}
       />
       <DeleteConfirmDialog
