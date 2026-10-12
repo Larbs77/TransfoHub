@@ -107,17 +107,19 @@ async function executePlanningFromRequest(request: {
 
       const created = await prisma.jalon.create({
         data: {
-          chantierId,
+          chantier: { connect: { id: chantierId } },
           phase: String(nv.phase ?? "Exécution"),
           nom: String(nv.nom ?? ""),
           description: String(nv.description ?? ""),
           ordre: Number(nv.ordre ?? 0),
           date_debut: optionalIsoDate(nv.date_debut),
-          date_cible: new Date(String(nv.date_cible)),
+          ...(optionalIsoDate(nv.date_cible)
+            ? { date_cible: optionalIsoDate(nv.date_cible)! }
+            : {}),
           date_reelle: nv.date_reelle
             ? new Date(String(nv.date_reelle))
             : null,
-          statut: String(nv.statut ?? "Planifié"),
+          statut: String(nv.statut ?? "A planifier"),
           livrables: String(nv.livrables ?? ""),
           commentaire: String(nv.commentaire ?? ""),
         },
@@ -148,7 +150,7 @@ async function executePlanningFromRequest(request: {
           description: String(nv.description ?? ""),
           ordre: Number(nv.ordre ?? 0),
           date_debut: optionalIsoDate(nv.date_debut),
-          date_cible: new Date(String(nv.date_cible)),
+          date_cible: optionalIsoDate(nv.date_cible),
           date_reelle: nv.date_reelle
             ? new Date(String(nv.date_reelle))
             : null,

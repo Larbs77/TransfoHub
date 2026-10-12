@@ -360,6 +360,7 @@ export default async function ChantierDetailPage({ params }: Props) {
                 <ChantierJalonsTab
                   jalons={chantier.jalons}
                   chantierId={chantier.id}
+                  chantierCode={chantier.code}
                   dateDebut={chantier.date_debut}
                   dateFin={chantier.date_fin}
                   workflowCaps={jalonWorkflow.caps}

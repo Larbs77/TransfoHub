@@ -34,7 +34,7 @@ interface JalonMarker {
   nom: string;
   phase: string;
   statut: string;
-  date_cible: Date;
+  date_cible: Date | null;
   date_reelle: Date | null;
 }
 
@@ -401,6 +401,7 @@ export function ChantierGantt({ chantiers }: Props) {
 
                         {/* Milestone markers */}
                         {c.jalons?.map((j) => {
+                          if (!j.date_cible) return null;
                           const jLeftPct = getLeftPct(j.date_cible);
                           if (jLeftPct < -1 || jLeftPct > 101) return null;
                           const jColor = STATUT_JALON_COLORS[j.statut] ?? "#94a3b8";

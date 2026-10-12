@@ -183,7 +183,7 @@ export type ExistingJalonRow = {
   phase: string;
   nom: string;
   ordre: number;
-  date_cible: Date;
+  date_cible: Date | null;
   date_reelle: Date | null;
   statut: string;
   description: string;

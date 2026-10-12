@@ -30,7 +30,11 @@ import {
   ClipboardList,
   MessageSquareText,
 } from "lucide-react";
-import { PHASES, STATUT_JALON_LIST } from "@/lib/jalon-labels";
+import {
+  PHASES,
+  STATUT_JALON_LIST,
+  resolvePlanningStatut,
+} from "@/lib/jalon-labels";
 import { allChildrenAtteint } from "@/lib/planning-status-rules";
 import type { WorkflowMode } from "@/lib/workflow-shared";
 
@@ -42,7 +46,7 @@ interface JalonData {
   description: string;
   ordre: number;
   date_debut: Date | null;
-  date_cible: Date;
+  date_cible: Date | null;
   date_reelle: Date | null;
   statut: string;
   livrables: string;
@@ -128,7 +132,7 @@ export function JalonFormDialog({
   const [dateDebut, setDateDebut] = useState(toDateInput(jalon?.date_debut));
   const [dateCible, setDateCible] = useState(toDateInput(jalon?.date_cible));
   const [dateReelle, setDateReelle] = useState(toDateInput(jalon?.date_reelle));
-  const [statut, setStatut] = useState(jalon?.statut ?? "Planifié");
+  const [statut, setStatut] = useState(jalon?.statut ?? "A planifier");
   const [livrables, setLivrables] = useState(jalon?.livrables ?? "");
   const [commentaire, setCommentaire] = useState(jalon?.commentaire ?? "");
 
@@ -160,7 +164,7 @@ export function JalonFormDialog({
       setDateDebut(toDateInput(jalon?.date_debut));
       setDateCible(toDateInput(jalon?.date_cible));
       setDateReelle(toDateInput(jalon?.date_reelle));
-      setStatut(jalon?.statut ?? "Planifié");
+      setStatut(jalon?.statut ?? "A planifier");
       setLivrables(jalon?.livrables ?? "");
       setCommentaire(jalon?.commentaire ?? "");
       setMotif("");
@@ -176,6 +180,15 @@ export function JalonFormDialog({
     : `Atteint impossible : ${wsCheck.pending.length} workstream(s) non atteint(s).`;
 
   function handleStatutChange(newStatut: string) {
+    if (
+      (newStatut === "En cours" || newStatut === "Atteint") &&
+      !dateCible
+    ) {
+      setError(
+        "Une date d'échéance est obligatoire pour passer à « En cours » ou « Atteint »."
+      );
+      return;
+    }
     if (newStatut === "Atteint" && !canSetAtteint) {
       setError(
         canSetAtteintHint ??
@@ -198,6 +211,15 @@ export function JalonFormDialog({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (
+      (statut === "En cours" || statut === "Atteint") &&
+      !dateCible
+    ) {
+      setError(
+        "Une date d'échéance est obligatoire pour passer à « En cours » ou « Atteint »."
+      );
+      return;
+    }
     if (statut === "Atteint" && !canSetAtteint) {
       setError(
         canSetAtteintHint ??
@@ -484,18 +506,26 @@ export function JalonFormDialog({
                   </p>
                 </div>
                 <div className="grid gap-1.5">
-                  <FieldLabel required>Date cible</FieldLabel>
+                  <FieldLabel>Date cible (échéance)</FieldLabel>
                   <Input
                     type="date"
                     value={dateCible}
-                    onChange={(e) => setDateCible(e.target.value)}
-                    required
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setDateCible(next);
+                      setStatut((prev) =>
+                        resolvePlanningStatut({ statut: prev, due: next })
+                      );
+                    }}
                     className={
                       planningDatesChanged && workflowMode === "VALIDATION"
                         ? "border-amber-500/50 ring-1 ring-amber-500/30"
                         : undefined
                     }
                   />
+                  <p className="text-[11px] text-muted-foreground">
+                    Facultatif. Le modèle ne la renseigne pas.
+                  </p>
                   {isEdit && workflowMode === "VALIDATION" && (
                     <p className="text-[11px] text-muted-foreground">
                       {planningDatesChanged
@@ -530,9 +560,12 @@ export function JalonFormDialog({
                           key={s}
                           value={s}
                           disabled={
-                            s === "Atteint" &&
-                            !canSetAtteint &&
-                            statut !== "Atteint"
+                            (s === "Atteint" &&
+                              !canSetAtteint &&
+                              statut !== "Atteint") ||
+                            ((s === "En cours" || s === "Atteint") &&
+                              !dateCible &&
+                              statut !== s)
                           }
                         >
                           {s}

@@ -27,6 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { PlanningDeleteDialog } from "@/components/planning-delete-dialog";
 import {
   createWorkstream,
   updateWorkstream,
@@ -47,6 +48,7 @@ import {
   planningRetardDays,
   planningClotureEcartDays,
   toYmdLocal,
+  resolvePlanningStatut,
 } from "@/lib/jalon-labels";
 import { allChildrenAtteint } from "@/lib/planning-status-rules";
 
@@ -78,7 +80,7 @@ export interface WorkstreamData {
 export interface JalonForTree {
   id: string;
   nom: string;
-  date_cible: Date | string;
+  date_cible: Date | string | null;
   statut?: string;
   workstreams?: WorkstreamData[];
 }
@@ -382,7 +384,6 @@ function WorkstreamCard({
   const [editing, setEditing] = useState(false);
   const [addingAct, setAddingAct] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleteMotif, setDeleteMotif] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
   /** Stable "now" (évite mismatch hydratation). */
@@ -395,15 +396,11 @@ function WorkstreamCard({
   const enRetard = retardJours != null;
   const clotureEcart = planningClotureEcartDays(ws.date_fin, ws.date_reelle);
 
-  async function handleDelete() {
+  async function handleDelete(motif: string) {
     setDeleteError("");
-    if (!deleteMotif.trim()) {
-      setDeleteError("Commentaire / motif obligatoire.");
-      return;
-    }
     setDeleting(true);
     try {
-      const res = await deleteWorkstream(ws.id, { motif: deleteMotif.trim() });
+      const res = await deleteWorkstream(ws.id, { motif: motif.trim() });
       setDeleteOpen(false);
       if (res.mode === "validation") {
         onToast("Demande de suppression workstream soumise.");
@@ -587,7 +584,6 @@ function WorkstreamCard({
                     className="size-7 text-destructive"
                     title="Supprimer"
                     onClick={() => {
-                      setDeleteMotif("");
                       setDeleteError("");
                       setDeleteOpen(true);
                     }}
@@ -665,41 +661,21 @@ function WorkstreamCard({
         </div>
       )}
 
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {caps.delete === "VALIDATION"
-                ? "Demande de suppression workstream"
-                : "Supprimer le workstream"}
-            </DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            « {ws.nom} » — {activites.length} activité(s) incluse(s).
-          </p>
-          <Input
-            value={deleteMotif}
-            onChange={(e) => setDeleteMotif(e.target.value)}
-            placeholder="Commentaire / motif obligatoire..."
-          />
-          {deleteError && (
-            <p className="text-sm text-destructive">{deleteError}</p>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteOpen(false)}>
-              Annuler
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={deleting}
-              onClick={handleDelete}
-            >
-              {deleting && <Loader2 className="size-4 animate-spin" />}
-              {caps.delete === "VALIDATION" ? "Soumettre" : "Supprimer"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <PlanningDeleteDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        mode={caps.delete === "VALIDATION" ? "VALIDATION" : "DIRECT"}
+        kind="workstream"
+        itemName={ws.nom}
+        cascadeHint={
+          activites.length > 0
+            ? `Ses ${activites.length} activité(s) seront également supprimées.`
+            : undefined
+        }
+        pending={deleting}
+        error={deleteError}
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }
@@ -725,7 +701,6 @@ function ActiviteRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleteMotif, setDeleteMotif] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [now] = useState(() => new Date());
@@ -735,15 +710,11 @@ function ActiviteRow({
   const enRetard = retardJours != null;
   const clotureEcart = planningClotureEcartDays(act.date_fin, act.date_reelle);
 
-  async function handleDelete() {
+  async function handleDelete(motif: string) {
     setDeleteError("");
-    if (!deleteMotif.trim()) {
-      setDeleteError("Commentaire / motif obligatoire.");
-      return;
-    }
     setDeleting(true);
     try {
-      const res = await deleteActivite(act.id, { motif: deleteMotif.trim() });
+      const res = await deleteActivite(act.id, { motif: motif.trim() });
       setDeleteOpen(false);
       if (res.mode === "validation") {
         onToast("Demande de suppression activité soumise.");
@@ -889,7 +860,6 @@ function ActiviteRow({
                 className="size-7 text-destructive"
                 title="Supprimer"
                 onClick={() => {
-                  setDeleteMotif("");
                   setDeleteError("");
                   setDeleteOpen(true);
                 }}
@@ -901,39 +871,16 @@ function ActiviteRow({
         </div>
       </div>
 
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {caps.delete === "VALIDATION"
-                ? "Demande de suppression activité"
-                : "Supprimer l'activité"}
-            </DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">« {act.nom} »</p>
-          <Input
-            value={deleteMotif}
-            onChange={(e) => setDeleteMotif(e.target.value)}
-            placeholder="Commentaire / motif..."
-          />
-          {deleteError && (
-            <p className="text-sm text-destructive">{deleteError}</p>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteOpen(false)}>
-              Annuler
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={deleting}
-              onClick={handleDelete}
-            >
-              {deleting && <Loader2 className="size-4 animate-spin" />}
-              {caps.delete === "VALIDATION" ? "Soumettre" : "Supprimer"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <PlanningDeleteDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        mode={caps.delete === "VALIDATION" ? "VALIDATION" : "DIRECT"}
+        kind="activite"
+        itemName={act.nom}
+        pending={deleting}
+        error={deleteError}
+        onConfirm={handleDelete}
+      />
     </>
   );
 }
@@ -972,13 +919,19 @@ function DetailForm({
   const [dateReelle, setDateReelle] = useState(
     toInputDate(initial?.date_reelle)
   );
-  const [statut, setStatut] = useState(initial?.statut ?? "Planifié");
+  const [statut, setStatut] = useState(initial?.statut ?? "A planifier");
   const [motif, setMotif] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const needsMotif = createMode === "VALIDATION";
 
   function handleStatutChange(next: string) {
+    if ((next === "En cours" || next === "Atteint") && !dateFin) {
+      setError(
+        "Une date d'échéance est obligatoire pour passer à « En cours » ou « Atteint »."
+      );
+      return;
+    }
     if (next === "Atteint" && !canSetAtteint) {
       setError(
         canSetAtteintHint ??
@@ -999,6 +952,12 @@ function DetailForm({
 
   async function save() {
     if (!nom.trim()) return;
+    if ((statut === "En cours" || statut === "Atteint") && !dateFin) {
+      setError(
+        "Une date d'échéance est obligatoire pour passer à « En cours » ou « Atteint »."
+      );
+      return;
+    }
     if (statut === "Atteint" && !canSetAtteint) {
       setError(
         canSetAtteintHint ??
@@ -1075,7 +1034,13 @@ function DetailForm({
           <Input
             type="date"
             value={dateFin}
-            onChange={(e) => setDateFin(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value;
+              setDateFin(next);
+              setStatut((prev) =>
+                resolvePlanningStatut({ statut: prev, due: next })
+              );
+            }}
             className="h-8 w-[9.5rem]"
             aria-label="Date de fin planifiée"
           />
@@ -1104,7 +1069,12 @@ function DetailForm({
               <option
                 key={s}
                 value={s}
-                disabled={s === "Atteint" && !canSetAtteint && statut !== "Atteint"}
+                disabled={
+                  (s === "Atteint" && !canSetAtteint && statut !== "Atteint") ||
+                  ((s === "En cours" || s === "Atteint") &&
+                    !dateFin &&
+                    statut !== s)
+                }
               >
                 {s}
                 {s === "Atteint" && !canSetAtteint && statut !== "Atteint"

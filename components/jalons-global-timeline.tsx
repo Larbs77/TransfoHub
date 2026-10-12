@@ -55,7 +55,7 @@ interface JalonWithChantier {
   nom: string;
   description: string;
   ordre: number;
-  date_cible: Date;
+  date_cible: Date | null;
   date_reelle: Date | null;
   statut: string;
   livrables: string;
@@ -160,7 +160,11 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
       }
       if (overdueOnly) {
         if (
-          !(new Date(j.date_cible) < now && !["Atteint", "Annulé"].includes(j.statut))
+          !(
+            j.date_cible != null &&
+            new Date(j.date_cible) < now &&
+            !["Atteint", "Annulé"].includes(j.statut)
+          )
         )
           return false;
       }
@@ -200,7 +204,8 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
       return { minDate: d, maxDate: d, range: 1 };
     }
     const dates = filtered.flatMap((j) => {
-      const cDates = [new Date(j.date_cible)];
+      const cDates: Date[] = [];
+      if (j.date_cible) cDates.push(new Date(j.date_cible));
       if (j.date_reelle) cDates.push(new Date(j.date_reelle));
       cDates.push(new Date(j.chantier.date_debut), new Date(j.chantier.date_fin));
       return cDates;
@@ -246,13 +251,17 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
   const todayPct = getLeftPct(now);
 
   function ecartLabel(j: JalonWithChantier): { label: string; color: string } | null {
-    if (j.date_reelle) {
+    if (j.date_reelle && j.date_cible) {
       const days = differenceInDays(new Date(j.date_reelle), new Date(j.date_cible));
       if (days === 0) return { label: "0j", color: "#22c55e" };
       if (days > 0) return { label: `+${days}j`, color: "#ef4444" };
       return { label: `${days}j`, color: "#22c55e" };
     }
-    if (new Date(j.date_cible) < now && !["Atteint", "Annulé"].includes(j.statut)) {
+    if (
+      j.date_cible &&
+      new Date(j.date_cible) < now &&
+      !["Atteint", "Annulé"].includes(j.statut)
+    ) {
       const days = differenceInDays(now, new Date(j.date_cible));
       return { label: `+${days}j`, color: "#ef4444" };
     }
@@ -571,6 +580,7 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
 
                       {/* Milestone diamonds */}
                       {group.jalons.map((j) => {
+                        if (!j.date_cible) return null;
                         const leftPct = getLeftPct(j.date_cible);
                         if (leftPct < -2 || leftPct > 102) return null;
                         const color = jalonDisplayColor(
@@ -663,7 +673,12 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
               </div>
               <div className="flex gap-2 text-muted-foreground">
                 <span>
-                  Cible: {format(new Date(tooltip.jalon.date_cible), "dd MMM yyyy", { locale: fr })}
+                  Cible:{" "}
+                  {tooltip.jalon.date_cible
+                    ? format(new Date(tooltip.jalon.date_cible), "dd MMM yyyy", {
+                        locale: fr,
+                      })
+                    : "—"}
                 </span>
                 {tooltip.jalon.date_reelle && (
                   <>
@@ -764,9 +779,11 @@ export function JalonsGlobalTimeline({ jalons, stats }: Props) {
                       </td>
                       <td className="px-3 py-2.5 font-medium">{j.nom}</td>
                       <td className="px-3 py-2.5 text-xs tabular-nums">
-                        {format(new Date(j.date_cible), "dd MMM yyyy", {
-                          locale: fr,
-                        })}
+                        {j.date_cible
+                          ? format(new Date(j.date_cible), "dd MMM yyyy", {
+                              locale: fr,
+                            })
+                          : "—"}
                       </td>
                       <td className="px-3 py-2.5 text-xs tabular-nums">
                         {j.date_reelle

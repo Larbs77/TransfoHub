@@ -22,7 +22,7 @@ export function allChildrenAtteint(
     .filter((c) => !isAtteintStatut(c.statut))
     .map((c) => ({
       nom: (c.nom ?? "").trim() || "—",
-      statut: (c.statut ?? "Planifié").trim() || "Planifié",
+      statut: (c.statut ?? "A planifier").trim() || "A planifier",
     }));
   return { ok: pending.length === 0, pending };
 }

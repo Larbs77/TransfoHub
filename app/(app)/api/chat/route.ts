@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
     const favorisSet = new Set(favoris.map((f) => f.chantierId));
 
     // Jalons stats
-    const jalonsEnRetard = jalons.filter((j) => new Date(j.date_cible) < now && !["Atteint", "Annulé"].includes(j.statut));
+    const jalonsEnRetard = jalons.filter((j) => j.date_cible != null && new Date(j.date_cible) < now && !["Atteint", "Annulé", "A planifier"].includes(j.statut));
     const jalonsAtteints = jalons.filter((j) => j.statut === "Atteint");
 
     // Consultation Q&A stats

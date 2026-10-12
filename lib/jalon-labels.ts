@@ -8,7 +8,11 @@ export const PHASE_COLORS: Record<string, string> = {
   "Clôture":    "#0508da",
 };
 
+export const STATUT_A_PLANIFIER = "A planifier";
+export const STATUT_PLANIFIE = "Planifié";
+
 export const STATUT_JALON_LABELS: Record<string, string> = {
+  "A planifier": "A planifier",
   "Planifié":  "Planifié",
   "En cours":  "En cours",
   "Atteint":   "Atteint",
@@ -17,6 +21,7 @@ export const STATUT_JALON_LABELS: Record<string, string> = {
 };
 
 export const STATUT_JALON_COLORS: Record<string, string> = {
+  "A planifier": "#cbd5e1",
   "Planifié":  "#94a3b8",
   "En cours":  "#3b82f6",
   "Atteint":   "#22c55e",
@@ -26,10 +31,53 @@ export const STATUT_JALON_COLORS: Record<string, string> = {
 
 export const STATUT_JALON_LIST = Object.keys(STATUT_JALON_LABELS);
 
+export function isAPlanifierStatut(statut: string | null | undefined): boolean {
+  return (statut ?? "").trim() === STATUT_A_PLANIFIER;
+}
+
+function hasPlanningDue(due: Date | string | null | undefined): boolean {
+  if (due == null || due === "") return false;
+  if (typeof due === "string" && !due.trim()) return false;
+  const d = due instanceof Date ? due : new Date(due);
+  return !Number.isNaN(d.getTime());
+}
+
 /**
- * Statuts « clos » : l'élément n'est plus en retard (jalon / workstream / activité).
- * Comparaison normalisée (casse, accents basiques).
+ * Aligns statut with the calendar:
+ * - no échéance → A planifier (unless Reporté / Annulé / already En cours-Atteint which the caller must reject)
+ * - échéance + A planifier / vide → Planifié
  */
+export function resolvePlanningStatut(opts: {
+  statut?: string | null;
+  due?: Date | string | null;
+}): string {
+  const s = (opts.statut ?? "").trim();
+  const due = hasPlanningDue(opts.due);
+  if (!due) {
+    if (!s || s === STATUT_PLANIFIE || s === STATUT_A_PLANIFIER) {
+      return STATUT_A_PLANIFIER;
+    }
+    return s;
+  }
+  if (!s || s === STATUT_A_PLANIFIER) return STATUT_PLANIFIE;
+  return s;
+}
+
+export function assertPlanningStatutVsDue(
+  statut: string,
+  due?: Date | string | null
+): void {
+  const s = (statut ?? "").trim();
+  if (
+    !hasPlanningDue(due) &&
+    (s === "En cours" || s === "Atteint")
+  ) {
+    throw new Error(
+      "Une date d'échéance est obligatoire pour passer à « En cours » ou « Atteint »."
+    );
+  }
+}
+
 export function isPlanningClosedStatut(statut: string | null | undefined): boolean {
   const s = (statut ?? "")
     .trim()
@@ -76,6 +124,7 @@ export function planningRetardDays(
 ): number | null {
   // Terminé / clos → jamais « en retard » (même si la date cible est passée)
   if (isPlanningClosedStatut(statut)) return null;
+  if (isAPlanifierStatut(statut)) return null;
   if (toDate(opts?.dateReelle) != null) return null;
 
   const d = toDate(due);

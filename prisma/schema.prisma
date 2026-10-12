@@ -639,9 +639,10 @@ model Jalon {
   description String       @default("")
   ordre       Int          @default(0)
   date_debut  DateTime?
-  date_cible  DateTime
+  /// Optional until the PMO sets the calendar (template apply does not fill it).
+  date_cible  DateTime?
   date_reelle DateTime?
-  statut      String       @default("Planifié")
+  statut      String       @default("A planifier")
   livrables   String       @default("")
   commentaire String       @default("")
   createdAt   DateTime     @default(now())
@@ -665,7 +666,7 @@ model Workstream {
   date_fin    DateTime?
   /// Date de finalisation réelle (passage au statut Atteint)
   date_reelle DateTime?
-  statut      String     @default("Planifié")
+  statut      String     @default("A planifier")
   commentaire String     @default("")
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
@@ -687,7 +688,7 @@ model Activite {
   date_fin     DateTime?
   /// Date de finalisation réelle (passage au statut Atteint)
   date_reelle  DateTime?
-  statut       String     @default("Planifié")
+  statut       String     @default("A planifier")
   commentaire  String     @default("")
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt

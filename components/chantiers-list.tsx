@@ -69,7 +69,7 @@ interface ChantierWithStats {
   _count: { raids: number };
   raids: { type: string; statut: string }[];
   rmds?: { rmd: { id: string; nom_complet: string } }[];
-  jalons?: { id: string; nom: string; phase: string; statut: string; date_cible: Date; date_reelle: Date | null }[];
+  jalons?: { id: string; nom: string; phase: string; statut: string; date_cible: Date | null; date_reelle: Date | null }[];
 }
 
 interface Props {

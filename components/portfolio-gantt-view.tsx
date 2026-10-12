@@ -45,7 +45,7 @@ import { PHASES, PHASE_COLORS, STATUT_JALON_COLORS } from "@/lib/jalon-labels";
 type D = Date | string | null;
 type Activite = { id: string; nom: string; ordre: number; date_debut: D; date_fin: D; statut: string };
 type Workstream = { id: string; nom: string; ordre: number; date_debut: D; date_fin: D; statut: string; activites: Activite[] };
-type Jalon = { id: string; phase: string; nom: string; ordre: number; date_debut: D; date_cible: Date | string; statut: string; workstreams: Workstream[] };
+type Jalon = { id: string; phase: string; nom: string; ordre: number; date_debut: D; date_cible: Date | string | null; statut: string; workstreams: Workstream[] };
 type Chantier = { id: string; code: string; nom: string; domaine: string; date_debut: Date | string; date_fin: Date | string; jalons: Jalon[] };
 type Scale = "week" | "month" | "quarter";
 type Row = { key: string; kind: "phase" | "jalon" | "workstream" | "activite"; label: string; depth: number; phase: string; start: Date | null; end: Date | null; milestone?: Date | null; statut?: string };

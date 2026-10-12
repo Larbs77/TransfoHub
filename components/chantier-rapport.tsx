@@ -44,7 +44,7 @@ interface Jalon {
   phase: string;
   nom: string;
   statut: string;
-  date_cible: Date;
+  date_cible: Date | null;
   date_reelle: Date | null;
   livrables: string;
   ordre: number;
@@ -204,6 +204,7 @@ function JalonTimeline({ jalons }: { jalons: Jalon[] }) {
         {jalons.map((j) => {
           const color = JALON_STATUT_COLORS[j.statut] ?? "#9ca3af";
           const isRetard =
+            j.date_cible != null &&
             new Date(j.date_cible) < new Date() &&
             !["Atteint", "Annulé"].includes(j.statut);
           return (
@@ -232,7 +233,9 @@ function JalonTimeline({ jalons }: { jalons: Jalon[] }) {
               </div>
               {/* Date */}
               <span className="text-[10px] font-semibold text-gray-500 whitespace-nowrap">
-                {format(new Date(j.date_cible), "dd/MM", { locale: fr })}
+                {j.date_cible
+                  ? format(new Date(j.date_cible), "dd/MM", { locale: fr })
+                  : "—"}
               </span>
               {/* Name */}
               <span
@@ -282,7 +285,11 @@ export function ChantierRapport({ chantier, burnRate, showPrintButton = true }: 
   // Réalisations = Atteint jalons (most recent first)
   const realisations = chantier.jalons
     .filter((j) => j.statut === "Atteint")
-    .sort((a, b) => new Date(b.date_reelle ?? b.date_cible).getTime() - new Date(a.date_reelle ?? a.date_cible).getTime())
+    .sort((a, b) => {
+      const ta = new Date(a.date_reelle ?? a.date_cible ?? 0).getTime();
+      const tb = new Date(b.date_reelle ?? b.date_cible ?? 0).getTime();
+      return tb - ta;
+    })
     .slice(0, 6);
 
   // Actions en cours / à venir
@@ -301,8 +308,17 @@ export function ChantierRapport({ chantier, burnRate, showPrintButton = true }: 
     .slice(0, 8);
 
   const upcomingJalons = chantier.jalons
-    .filter((j) => !["Atteint", "Annulé"].includes(j.statut) && new Date(j.date_cible) >= now)
-    .sort((a, b) => new Date(a.date_cible).getTime() - new Date(b.date_cible).getTime())
+    .filter(
+      (j) =>
+        !["Atteint", "Annulé"].includes(j.statut) &&
+        j.date_cible != null &&
+        new Date(j.date_cible) >= now
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.date_cible as Date).getTime() -
+        new Date(b.date_cible as Date).getTime()
+    )
     .slice(0, 3);
 
   // Points d'attention = open risks sorted by criticité desc
@@ -319,7 +335,10 @@ export function ChantierRapport({ chantier, burnRate, showPrintButton = true }: 
   const totalJalons = chantier.jalons.filter((j) => j.statut !== "Annulé").length;
   const jalonsAtteints = chantier.jalons.filter((j) => j.statut === "Atteint").length;
   const jalonsRetard = chantier.jalons.filter(
-    (j) => new Date(j.date_cible) < now && !["Atteint", "Annulé"].includes(j.statut)
+    (j) =>
+      j.date_cible != null &&
+      new Date(j.date_cible) < now &&
+      !["Atteint", "Annulé"].includes(j.statut)
   ).length;
   const openRaidCount = chantier.raids.filter(
     (r) => !["Clôturé", "Abandonné", "Clos", "Matérialisé", "NA"].includes(r.statut)
@@ -492,7 +511,15 @@ export function ChantierRapport({ chantier, burnRate, showPrintButton = true }: 
                 <BulletItem
                   key={j.id}
                   color="#22c55e"
-                  text={`${j.nom} (${format(new Date(j.date_reelle ?? j.date_cible), "dd/MM/yyyy", { locale: fr })})`}
+                  text={`${j.nom} (${
+                    j.date_reelle || j.date_cible
+                      ? format(
+                          new Date(j.date_reelle ?? j.date_cible as Date),
+                          "dd/MM/yyyy",
+                          { locale: fr }
+                        )
+                      : "—"
+                  })`}
                   subs={
                     j.livrables
                       ? j.livrables
@@ -542,7 +569,7 @@ export function ChantierRapport({ chantier, burnRate, showPrintButton = true }: 
                 <BulletItem
                   key={j.id}
                   color="#6366f1"
-                  text={`[Jalon] ${j.nom} — ${format(new Date(j.date_cible), "dd/MM/yyyy", { locale: fr })}`}
+                  text={`[Jalon] ${j.nom} — ${format(new Date(j.date_cible as Date), "dd/MM/yyyy", { locale: fr })}`}
                 />
               ))}
             </ul>

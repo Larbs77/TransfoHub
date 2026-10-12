@@ -4134,7 +4134,7 @@ export async function getAllJalons(filters?: {
       ...(filters?.overdueOnly
         ? {
             date_cible: { lt: now },
-            statut: { notIn: ["Atteint", "Annulé"] },
+            statut: { notIn: ["Atteint", "Annulé", "A planifier"] },
           }
         : {}),
     },
@@ -4221,7 +4221,7 @@ function jalonPayloadForWorkflow(data: {
   description?: string;
   ordre?: number;
   date_debut?: string | null;
-  date_cible: string;
+  date_cible?: string | null;
   date_reelle?: string | null;
   statut?: string;
   livrables?: string;
@@ -4234,9 +4234,9 @@ function jalonPayloadForWorkflow(data: {
     description: data.description ?? "",
     ordre: data.ordre ?? 0,
     date_debut: data.date_debut ?? null,
-    date_cible: data.date_cible,
+    date_cible: data.date_cible?.trim() ? data.date_cible : null,
     date_reelle: data.date_reelle ?? null,
-    statut: data.statut ?? "Planifié",
+    statut: data.statut ?? "A planifier",
     livrables: data.livrables ?? "",
     commentaire: data.commentaire ?? "",
   };
@@ -4250,7 +4250,7 @@ function jalonSnapshot(j: {
   description: string;
   ordre: number;
   date_debut: Date | null;
-  date_cible: Date;
+  date_cible: Date | null;
   date_reelle: Date | null;
   statut: string;
   livrables: string;
@@ -4266,7 +4266,9 @@ function jalonSnapshot(j: {
     date_debut: j.date_debut
       ? j.date_debut.toISOString().slice(0, 10)
       : null,
-    date_cible: j.date_cible.toISOString().slice(0, 10),
+    date_cible: j.date_cible
+      ? j.date_cible.toISOString().slice(0, 10)
+      : null,
     date_reelle: j.date_reelle
       ? j.date_reelle.toISOString().slice(0, 10)
       : null,
@@ -4284,7 +4286,7 @@ export async function createJalon(
     description?: string;
     ordre?: number;
     date_debut?: string | null;
-    date_cible: string;
+    date_cible?: string | null;
     date_reelle?: string | null;
     statut?: string;
     livrables?: string;
@@ -4294,8 +4296,18 @@ export async function createJalon(
 ): Promise<JalonMutationResult> {
   const session = await requirePageWrite("/jalons");
   await requireChantierAccess(data.chantierId);
+  const { resolvePlanningStatut, assertPlanningStatutVsDue } = await import(
+    "@/lib/jalon-labels"
+  );
+  const resolvedStatut = resolvePlanningStatut({
+    statut: data.statut,
+    due: data.date_cible,
+  });
+  assertPlanningStatutVsDue(resolvedStatut, data.date_cible);
+  data = { ...data, statut: resolvedStatut };
   if (
     data.date_debut &&
+    data.date_cible &&
     new Date(data.date_debut).getTime() > new Date(data.date_cible).getTime()
   ) {
     throw new Error(
@@ -4343,15 +4355,17 @@ export async function createJalon(
 
   await prisma.jalon.create({
     data: {
-      chantierId: data.chantierId,
+      chantier: { connect: { id: data.chantierId } },
       phase: data.phase,
       nom: data.nom,
       description: data.description ?? "",
       ordre: data.ordre ?? 0,
       date_debut: data.date_debut ? new Date(data.date_debut) : null,
-      date_cible: new Date(data.date_cible),
+      ...(data.date_cible?.trim()
+        ? { date_cible: new Date(data.date_cible) }
+        : {}),
       date_reelle: data.date_reelle ? new Date(data.date_reelle) : null,
-      statut: data.statut ?? "Planifié",
+      statut: data.statut ?? "A planifier",
       livrables: data.livrables ?? "",
       commentaire: data.commentaire ?? "",
     },
@@ -4378,7 +4392,7 @@ export async function updateJalon(
     description?: string;
     ordre?: number;
     date_debut?: string | null;
-    date_cible: string;
+    date_cible?: string | null;
     date_reelle?: string | null;
     statut: string;
     livrables?: string;
@@ -4389,12 +4403,22 @@ export async function updateJalon(
   const session = await requirePageWrite("/jalons");
   if (
     data.date_debut &&
+    data.date_cible &&
     new Date(data.date_debut).getTime() > new Date(data.date_cible).getTime()
   ) {
     throw new Error(
       "La date de début du jalon doit être antérieure ou égale à sa date cible."
     );
   }
+  const { resolvePlanningStatut, assertPlanningStatutVsDue } = await import(
+    "@/lib/jalon-labels"
+  );
+  const resolvedStatut = resolvePlanningStatut({
+    statut: data.statut,
+    due: data.date_cible,
+  });
+  assertPlanningStatutVsDue(resolvedStatut, data.date_cible);
+  data = { ...data, statut: resolvedStatut };
   const existing = await prisma.jalon.findUnique({ where: { id } });
   if (!existing) throw new Error("Jalon introuvable.");
   await requireChantierAccess(existing.chantierId);
@@ -4492,7 +4516,9 @@ export async function updateJalon(
             : null,
         date_cible: dateChanged
           ? existing.date_cible
-          : new Date(data.date_cible),
+          : data.date_cible?.trim()
+            ? new Date(data.date_cible)
+            : null,
       },
     });
 
@@ -4553,7 +4579,9 @@ export async function updateJalon(
       livrables: data.livrables ?? "",
       commentaire: data.commentaire ?? "",
       date_debut: data.date_debut ? new Date(data.date_debut) : null,
-      date_cible: new Date(data.date_cible),
+      date_cible: data.date_cible?.trim()
+        ? new Date(data.date_cible)
+        : null,
     },
   });
 
@@ -4737,7 +4765,11 @@ export async function getJalonWorkflowUiState(chantierId: string) {
   };
 }
 
-export async function applyJalonTemplate(chantierId: string) {
+export async function applyJalonTemplate(
+  chantierId: string,
+  chantierCode: string,
+  phase?: string | null
+) {
   const session = await requirePageWrite("/jalons");
   await requireChantierAccess(chantierId);
   const { getSessionJalonWorkflowCaps, modeForOperation, WORKFLOW_OPERATION } =
@@ -4749,17 +4781,37 @@ export async function applyJalonTemplate(chantierId: string) {
       "L'application du modèle n'est disponible qu'en mode Direct pour la création de jalons."
     );
   }
-  const { JALON_TEMPLATES, calculateDateCible } = await import("@/lib/jalon-labels");
+  const { JALON_TEMPLATES, PHASES } = await import("@/lib/jalon-labels");
+  const phaseFilter = (phase ?? "").trim();
+  if (phaseFilter && !(PHASES as readonly string[]).includes(phaseFilter)) {
+    throw new Error("Phase inconnue.");
+  }
 
   const chantier = await prisma.chantier.findUnique({
     where: { id: chantierId },
-    select: { date_debut: true, date_fin: true, _count: { select: { jalons: true } } },
+    select: { code: true },
   });
   if (!chantier) throw new Error("Chantier non trouvé");
-  if (chantier._count.jalons > 0) throw new Error("Des jalons existent déjà pour ce chantier");
+  if (chantier.code.trim() !== (chantierCode ?? "").trim()) {
+    throw new Error("Le code chantier saisi ne correspond pas.");
+  }
+  const existingCount = await prisma.jalon.count({
+    where: {
+      chantierId,
+      ...(phaseFilter ? { phase: phaseFilter } : {}),
+    },
+  });
+  if (existingCount > 0) {
+    throw new Error(
+      phaseFilter
+        ? `Des jalons existent déjà pour la phase « ${phaseFilter} ».`
+        : "Des jalons existent déjà pour ce chantier"
+    );
+  }
 
   // Use DB templates if available, fall back to hardcoded (jalons only)
   const dbTemplates = await prisma.jalonTemplate.findMany({
+    where: phaseFilter ? { phase: phaseFilter } : undefined,
     orderBy: [{ phase: "asc" }, { ordre: "asc" }],
     include: {
       workstreams: {
@@ -4769,20 +4821,27 @@ export async function applyJalonTemplate(chantierId: string) {
     },
   });
 
+  const fallback = phaseFilter
+    ? JALON_TEMPLATES.filter((t) => t.phase === phaseFilter)
+    : JALON_TEMPLATES;
+
+  if (dbTemplates.length === 0 && fallback.length === 0) {
+    throw new Error(
+      phaseFilter
+        ? `Aucun jalon modèle pour la phase « ${phaseFilter} ».`
+        : "Aucun jalon modèle à appliquer."
+    );
+  }
+
   if (dbTemplates.length > 0) {
     for (const t of dbTemplates) {
       await prisma.jalon.create({
         data: {
-          chantierId,
+          chantier: { connect: { id: chantierId } },
           phase: t.phase,
           nom: t.nom,
           ordre: t.ordre,
-          date_cible: calculateDateCible(
-            chantier.date_debut,
-            chantier.date_fin,
-            t.offsetPct
-          ),
-          statut: "Planifié",
+          statut: "A planifier",
           description: "",
           livrables: "",
           commentaire: "",
@@ -4791,13 +4850,13 @@ export async function applyJalonTemplate(chantierId: string) {
               nom: w.nom,
               ordre: w.ordre,
               description: w.description ?? "",
-              statut: "Planifié",
+              statut: "A planifier",
               activites: {
                 create: w.activites.map((a) => ({
                   nom: a.nom,
                   ordre: a.ordre,
                   description: a.description ?? "",
-                  statut: "Planifié",
+                  statut: "A planifier",
                 })),
               },
             })),
@@ -4806,17 +4865,12 @@ export async function applyJalonTemplate(chantierId: string) {
       });
     }
   } else {
-    const jalonsData = JALON_TEMPLATES.map((t) => ({
+    const jalonsData = fallback.map((t) => ({
       chantierId,
       phase: t.phase,
       nom: t.nom,
       ordre: t.ordre,
-      date_cible: calculateDateCible(
-        chantier.date_debut,
-        chantier.date_fin,
-        t.offsetPct
-      ),
-      statut: "Planifié",
+      statut: "A planifier",
       description: "",
       livrables: "",
       commentaire: "",
@@ -5203,9 +5257,14 @@ export async function createWorkstream(
     WORKFLOW_OPERATION,
   } = await import("@/lib/workflow");
   const { buildWorkstreamEntityLabel } = await import("@/lib/workflow-shared");
-  const { resolvePlanningDateReelle } = await import("@/lib/jalon-labels");
+  const { resolvePlanningDateReelle, resolvePlanningStatut, assertPlanningStatutVsDue } =
+    await import("@/lib/jalon-labels");
 
-  const statut = data.statut ?? "Planifié";
+  const statut = resolvePlanningStatut({
+    statut: data.statut,
+    due: data.date_fin,
+  });
+  assertPlanningStatutVsDue(statut, data.date_fin);
   const date_reelle = resolvePlanningDateReelle({
     statut,
     dateReelle: data.date_reelle,
@@ -5292,9 +5351,14 @@ export async function updateWorkstream(
     WORKFLOW_OPERATION,
   } = await import("@/lib/workflow");
   const { buildWorkstreamEntityLabel } = await import("@/lib/workflow-shared");
-  const { resolvePlanningDateReelle } = await import("@/lib/jalon-labels");
+  const { resolvePlanningDateReelle, resolvePlanningStatut, assertPlanningStatutVsDue } =
+    await import("@/lib/jalon-labels");
 
-  const statut = data.statut ?? existing.statut;
+  const statut = resolvePlanningStatut({
+    statut: data.statut ?? existing.statut,
+    due: data.date_fin,
+  });
+  assertPlanningStatutVsDue(statut, data.date_fin);
   if (statut === "Atteint") {
     const { assertWorkstreamCanBeAtteint } = await import(
       "@/lib/planning-status-assert"
@@ -5485,9 +5549,14 @@ export async function createActivite(
     WORKFLOW_OPERATION,
   } = await import("@/lib/workflow");
   const { buildActiviteEntityLabel } = await import("@/lib/workflow-shared");
-  const { resolvePlanningDateReelle } = await import("@/lib/jalon-labels");
+  const { resolvePlanningDateReelle, resolvePlanningStatut, assertPlanningStatutVsDue } =
+    await import("@/lib/jalon-labels");
 
-  const statut = data.statut ?? "Planifié";
+  const statut = resolvePlanningStatut({
+    statut: data.statut,
+    due: data.date_fin,
+  });
+  assertPlanningStatutVsDue(statut, data.date_fin);
   const date_reelle = resolvePlanningDateReelle({
     statut,
     dateReelle: data.date_reelle,
@@ -5578,9 +5647,14 @@ export async function updateActivite(
     WORKFLOW_OPERATION,
   } = await import("@/lib/workflow");
   const { buildActiviteEntityLabel } = await import("@/lib/workflow-shared");
-  const { resolvePlanningDateReelle } = await import("@/lib/jalon-labels");
+  const { resolvePlanningDateReelle, resolvePlanningStatut, assertPlanningStatutVsDue } =
+    await import("@/lib/jalon-labels");
 
-  const statut = data.statut ?? existing.statut;
+  const statut = resolvePlanningStatut({
+    statut: data.statut ?? existing.statut,
+    due: data.date_fin,
+  });
+  assertPlanningStatutVsDue(statut, data.date_fin);
   const date_reelle = resolvePlanningDateReelle({
     statut,
     dateReelle: data.date_reelle,
@@ -6094,13 +6168,13 @@ export async function getJalonStats() {
     prisma.jalon.count({ where: { ...scope } }),
     prisma.jalon.count({ where: { ...scope, statut: "Atteint" } }),
     prisma.jalon.count({
-      where: { ...scope, date_cible: { lt: now }, statut: { notIn: ["Atteint", "Annulé"] } },
+      where: { ...scope, date_cible: { lt: now }, statut: { notIn: ["Atteint", "Annulé", "A planifier"] } },
     }),
     prisma.jalon.count({
       where: {
         ...scope,
         date_cible: { gte: now, lte: in30Days },
-        statut: { notIn: ["Atteint", "Annulé"] },
+        statut: { notIn: ["Atteint", "Annulé", "A planifier"] },
       },
     }),
   ]);
@@ -6849,7 +6923,9 @@ export async function getDashboardCTP(month: number, year: number) {
   const blockerRisks = openRisks.filter((r) => isRisqueCritique(r));
 
   // SPI calculation: ratio of jalons completed on time vs total due by period end
-  const jalonsDueByPeriod = jalons.filter((j) => new Date(j.date_cible) <= periodEnd);
+  const jalonsDueByPeriod = jalons.filter(
+    (j) => j.date_cible != null && new Date(j.date_cible) <= periodEnd
+  );
   const jalonsCompleted = jalonsDueByPeriod.filter((j) => j.statut === "Atteint");
   const spi = jalonsDueByPeriod.length > 0
     ? Number((jalonsCompleted.length / jalonsDueByPeriod.length).toFixed(2))
@@ -6972,7 +7048,9 @@ export async function getDashboardCTR(startDate: string, endDate: string) {
   const blockerRisks = openRisks.filter((r) => isRisqueCritique(r));
 
   // SPI
-  const jalonsDueByPeriod = jalons.filter((j) => new Date(j.date_cible) <= periodEnd);
+  const jalonsDueByPeriod = jalons.filter(
+    (j) => j.date_cible != null && new Date(j.date_cible) <= periodEnd
+  );
   const jalonsCompleted = jalonsDueByPeriod.filter((j) => j.statut === "Atteint");
   const spi = jalonsDueByPeriod.length > 0
     ? Number((jalonsCompleted.length / jalonsDueByPeriod.length).toFixed(2))
@@ -6989,7 +7067,7 @@ export async function getDashboardCTR(startDate: string, endDate: string) {
   const jalonsOnTime = jalonsDueByPeriod.filter((j) => {
     if (j.statut === "Atteint") return true;
     if (j.statut === "En cours" || j.statut === "Planifié") {
-      return new Date(j.date_cible) >= new Date();
+      return j.date_cible != null && new Date(j.date_cible) >= new Date();
     }
     return false;
   });
@@ -7007,7 +7085,9 @@ export async function getDashboardCTR(startDate: string, endDate: string) {
     .filter((c) => c.statut !== "Clôturé" && c.statut !== "Non démarré")
     .map((c) => {
       const cJalons = c.jalons || [];
-      const due = cJalons.filter((j) => new Date(j.date_cible) <= periodEnd);
+      const due = cJalons.filter(
+        (j) => j.date_cible != null && new Date(j.date_cible) <= periodEnd
+      );
       const completed = due.filter((j) => j.statut === "Atteint");
       const cSpi = due.length > 0 ? Number((completed.length / due.length).toFixed(2)) : 1.0;
       // Determine current phase

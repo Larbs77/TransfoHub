@@ -61,9 +61,11 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { PlanningDeleteDialog } from "@/components/planning-delete-dialog";
 
 interface JalonData {
   id: string;
@@ -73,7 +75,7 @@ interface JalonData {
   description: string;
   ordre: number;
   date_debut: Date | null;
-  date_cible: Date;
+  date_cible: Date | null;
   date_reelle: Date | null;
   statut: string;
   livrables: string;
@@ -88,9 +90,12 @@ interface PendingInfo {
   requesterName: string;
 }
 
+type TemplateWizardStep = "intro" | "code" | "confirm";
+
 interface Props {
   jalons: JalonData[];
   chantierId: string;
+  chantierCode: string;
   dateDebut: Date;
   dateFin: Date;
   workflowCaps?: JalonWorkflowCaps;
@@ -140,6 +145,7 @@ const DEFAULT_CAPS: JalonWorkflowCaps = {
 export function ChantierJalonsTab({
   jalons,
   chantierId,
+  chantierCode,
   dateDebut,
   dateFin,
   workflowCaps = DEFAULT_CAPS,
@@ -152,8 +158,13 @@ export function ChantierJalonsTab({
   const [editJalon, setEditJalon] = useState<JalonData | null>(null);
   const [defaultPhase, setDefaultPhase] = useState<string | undefined>();
   const [applyingTemplate, setApplyingTemplate] = useState(false);
+  const [templateWizardOpen, setTemplateWizardOpen] = useState(false);
+  const [templateStep, setTemplateStep] =
+    useState<TemplateWizardStep>("intro");
+  const [templateCodeInput, setTemplateCodeInput] = useState("");
+  const [templateError, setTemplateError] = useState("");
+  const [templatePhase, setTemplatePhase] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<JalonData | null>(null);
-  const [deleteMotif, setDeleteMotif] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState("");
@@ -240,16 +251,16 @@ export function ChantierJalonsTab({
       }) != null
   ).length;
   const prochaine = jalons
-    .filter(
-      (j) =>
-        !isPlanningClosedStatut(j.statut) &&
-        !j.date_reelle &&
-        new Date(j.date_cible) >= now
-    )
-    .sort(
-      (a, b) =>
-        new Date(a.date_cible).getTime() - new Date(b.date_cible).getTime()
-    )[0];
+    .filter((j) => {
+      if (isPlanningClosedStatut(j.statut) || j.date_reelle || !j.date_cible)
+        return false;
+      return new Date(j.date_cible) >= now;
+    })
+    .sort((a, b) => {
+      const ta = a.date_cible ? new Date(a.date_cible).getTime() : Infinity;
+      const tb = b.date_cible ? new Date(b.date_cible).getTime() : Infinity;
+      return ta - tb;
+    })[0];
 
   // Group by phase
   const phaseGroups = PHASES.map((phase) => {
@@ -271,7 +282,7 @@ export function ChantierJalonsTab({
     }
 
     // Terminé : écart historique vs date réelle (pas du « en retard » rouge)
-    if (j.date_reelle) {
+    if (j.date_reelle && j.date_cible) {
       const days = differenceInDays(
         new Date(j.date_reelle),
         new Date(j.date_cible)
@@ -287,24 +298,15 @@ export function ChantierJalonsTab({
     return null;
   }
 
-  async function handleDeleteConfirm() {
+  async function handleDeleteConfirm(motif: string) {
     if (!deleteTarget) return;
     setDeleteError("");
-    if (!deleteMotif.trim()) {
-      setDeleteError(
-        effectiveCaps.delete === "VALIDATION"
-          ? "Le motif de la demande est obligatoire."
-          : "Le commentaire est obligatoire pour supprimer un jalon."
-      );
-      return;
-    }
     setDeleting(true);
     try {
       const result = await deleteJalon(deleteTarget.id, {
-        motif: deleteMotif.trim(),
+        motif: motif.trim(),
       });
       setDeleteTarget(null);
-      setDeleteMotif("");
       if (result.mode === "validation") {
         setToast("Demande de suppression soumise — en attente de validation.");
       }
@@ -316,20 +318,51 @@ export function ChantierJalonsTab({
     }
   }
 
-  async function handleApplyTemplate() {
-    if (!canCreate) return;
-    setApplyingTemplate(true);
-    try {
-      await applyJalonTemplate(chantierId);
-      router.refresh();
-    } catch {
-      // template already applied
-    }
+  function resetTemplateWizard() {
+    setTemplateStep("intro");
+    setTemplateCodeInput("");
+    setTemplateError("");
     setApplyingTemplate(false);
+    setTemplatePhase(null);
+  }
+
+  function openTemplateWizard(phase?: string) {
+    if (!canCreate) return;
+    resetTemplateWizard();
+    setTemplatePhase(phase?.trim() ? phase : null);
+    setTemplateWizardOpen(true);
+  }
+
+  async function confirmApplyTemplate() {
+    if (!canCreate) return;
+    if (templateCodeInput.trim() !== chantierCode.trim()) {
+      setTemplateError("Le code chantier saisi ne correspond pas.");
+      return;
+    }
+    setApplyingTemplate(true);
+    setTemplateError("");
+    try {
+      await applyJalonTemplate(
+        chantierId,
+        templateCodeInput.trim(),
+        templatePhase
+      );
+      setTemplateWizardOpen(false);
+      resetTemplateWizard();
+      router.refresh();
+    } catch (e) {
+      setTemplateError(
+        e instanceof Error ? e.message : "Application du modèle impossible."
+      );
+      setApplyingTemplate(false);
+    }
   }
 
   // Phase timeline visualization — extend range to include all jalons
-  const allDates = jalons.map((j) => new Date(j.date_cible).getTime());
+  const allDates = jalons
+    .filter((j) => j.date_cible)
+    .map((j) => new Date(j.date_cible as Date).getTime())
+    .filter((t) => !Number.isNaN(t));
   const timelineStart = new Date(Math.min(new Date(dateDebut).getTime(), ...allDates));
   const timelineEnd = new Date(Math.max(new Date(dateFin).getTime(), ...allDates));
   const totalDuration = Math.max(differenceInDays(timelineEnd, timelineStart), 1);
@@ -343,7 +376,8 @@ export function ChantierJalonsTab({
   /** Jalons Atteint livrés après la date cible (retard historique enregistré). */
   const atteintsHorsDelai = useMemo(() => {
     return jalons.filter((j) => {
-      if (j.statut !== "Atteint" || !j.date_reelle) return false;
+      if (j.statut !== "Atteint" || !j.date_reelle || !j.date_cible)
+        return false;
       return (
         differenceInDays(new Date(j.date_reelle), new Date(j.date_cible)) > 0
       );
@@ -404,7 +438,7 @@ export function ChantierJalonsTab({
         <KpiCard
           label="Prochaine échéance"
           value={
-            prochaine
+            prochaine?.date_cible
               ? format(new Date(prochaine.date_cible), "dd MMM", { locale: fr })
               : "—"
           }
@@ -432,13 +466,23 @@ export function ChantierJalonsTab({
             {/* Phase bands */}
             <div className="absolute inset-x-0 top-0 h-6 rounded-md overflow-visible">
               {PHASES.map((phase) => {
-                const phaseJalons = jalons.filter((j) => j.phase === phase);
+                const phaseJalons = jalons.filter(
+                  (j) => j.phase === phase && j.date_cible
+                );
                 if (phaseJalons.length === 0) return null;
                 const firstDate = new Date(
-                  Math.min(...phaseJalons.map((j) => new Date(j.date_cible).getTime()))
+                  Math.min(
+                    ...phaseJalons.map((j) =>
+                      new Date(j.date_cible as Date).getTime()
+                    )
+                  )
                 );
                 const lastDate = new Date(
-                  Math.max(...phaseJalons.map((j) => new Date(j.date_cible).getTime()))
+                  Math.max(
+                    ...phaseJalons.map((j) =>
+                      new Date(j.date_cible as Date).getTime()
+                    )
+                  )
                 );
                 const leftPct = (differenceInDays(firstDate, timelineStart) / totalDuration) * 100;
                 const widthPct = Math.max(
@@ -481,15 +525,15 @@ export function ChantierJalonsTab({
 
             {/* Milestone markers */}
             <div className="absolute inset-x-0 top-7 h-8">
-              {jalons.map((j) => {
-                const leftPct = (differenceInDays(new Date(j.date_cible), timelineStart) / totalDuration) * 100;
+              {jalons.filter((j) => j.date_cible).map((j) => {
+                const leftPct = (differenceInDays(new Date(j.date_cible as Date), timelineStart) / totalDuration) * 100;
                 const color = STATUT_JALON_COLORS[j.statut] ?? "#94a3b8";
                 return (
                   <div
                     key={j.id}
                     className="absolute flex flex-col items-center"
                     style={{ left: `${leftPct}%`, transform: "translateX(-50%)" }}
-                    title={`${j.nom} — ${j.statut} — ${format(new Date(j.date_cible), "dd MMM yyyy", { locale: fr })}`}
+                    title={`${j.nom} — ${j.statut} — ${format(new Date(j.date_cible as Date), "dd MMM yyyy", { locale: fr })}`}
                   >
                     <div
                       className="size-3 rotate-45 rounded-sm border-2 border-white"
@@ -605,14 +649,10 @@ export function ChantierJalonsTab({
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={handleApplyTemplate}
+                  onClick={() => openTemplateWizard()}
                   disabled={applyingTemplate}
                 >
-                  {applyingTemplate ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <Wand2 className="size-4" />
-                  )}
+                  <Wand2 className="size-4" />
                   Appliquer modèle
                 </Button>
               )}
@@ -738,13 +778,13 @@ export function ChantierJalonsTab({
             </div>
           )}
           {total === 0 ? (
-            <div className="text-center py-8 text-sm text-muted-foreground">
+            <p className="mb-3 text-sm text-muted-foreground">
               Aucun jalon.
               {canCreate && effectiveCaps.create === "DIRECT"
-                ? " Cliquez sur « Appliquer modèle » pour créer les jalons standard."
+                ? " Appliquez le modèle complet, ou ouvrez une phase pour l'initialiser seule."
                 : ""}
-            </div>
-          ) : (
+            </p>
+          ) : null}
             <Tabs defaultValue={defaultTab} className="space-y-3">
               <TabsList className="h-auto flex-wrap gap-1 bg-muted/40 p-1">
                 {phaseGroups.map((group) => {
@@ -757,7 +797,6 @@ export function ChantierJalonsTab({
                     <TabsTrigger
                       key={group.phase}
                       value={group.phase}
-                      disabled={group.total === 0}
                       title={
                         phaseHasAnomaly
                           ? `${anomalyCount} jalon(s) avec incohérence(s) de planning dans cette phase`
@@ -816,8 +855,20 @@ export function ChantierJalonsTab({
               {phaseGroups.map((group) => (
                 <TabsContent key={group.phase} value={group.phase}>
                   {group.total === 0 ? (
-                    <div className="text-center py-6 text-sm text-muted-foreground">
-                      Aucun jalon pour cette phase
+                    <div className="space-y-3 py-6 text-center">
+                      <p className="text-sm text-muted-foreground">
+                        Aucun jalon pour la phase {group.phase}.
+                      </p>
+                      {canCreate && effectiveCaps.create === "DIRECT" ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openTemplateWizard(group.phase)}
+                        >
+                          <Wand2 className="size-4" />
+                          Appliquer le modèle {group.phase}
+                        </Button>
+                      ) : null}
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -971,9 +1022,13 @@ export function ChantierJalonsTab({
                                       : "—"}
                                   </TableCell>
                                   <TableCell className="text-xs">
-                                    {format(new Date(j.date_cible), "dd MMM yyyy", {
-                                      locale: fr,
-                                    })}
+                                    {j.date_cible
+                                      ? format(
+                                          new Date(j.date_cible),
+                                          "dd MMM yyyy",
+                                          { locale: fr }
+                                        )
+                                      : "—"}
                                   </TableCell>
                                   <TableCell className="text-xs">
                                     {j.date_reelle
@@ -1046,7 +1101,6 @@ export function ChantierJalonsTab({
                                           }
                                           onClick={() => {
                                             setDeleteError("");
-                                            setDeleteMotif("");
                                             setDeleteTarget(j);
                                           }}
                                         >
@@ -1084,9 +1138,215 @@ export function ChantierJalonsTab({
                 </TabsContent>
               ))}
             </Tabs>
-          )}
         </CardContent>
       </Card>
+
+      <Dialog
+        open={templateWizardOpen}
+        onOpenChange={(open) => {
+          if (applyingTemplate) return;
+          setTemplateWizardOpen(open);
+          if (!open) resetTemplateWizard();
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Wand2 className="size-5 text-[#00BDBB]" />
+              {templatePhase
+                ? `Modèle — ${templatePhase}`
+                : "Appliquer le modèle de jalons"}
+            </DialogTitle>
+            <DialogDescription>
+              Assistant en 3 étapes pour créer la structure de planning sur{" "}
+              <span className="font-mono font-medium text-foreground">
+                {chantierCode}
+              </span>
+              {templatePhase ? (
+                <>
+                  {" "}
+                  (phase {templatePhase} uniquement)
+                </>
+              ) : (
+                " (toutes les phases)"
+              )}
+              . Aucune date d&apos;échéance n&apos;est posée.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            {(
+              [
+                ["intro", "1 · Présentation"],
+                ["code", "2 · Chantier"],
+                ["confirm", "3 · Confirmation"],
+              ] as const
+            ).map(([step, label]) => (
+              <div
+                key={step}
+                className={
+                  templateStep === step
+                    ? "rounded-md bg-[#0A3C74] px-2 py-1.5 text-center font-semibold text-white"
+                    : "rounded-md bg-muted px-2 py-1.5 text-center text-muted-foreground"
+                }
+              >
+                {label}
+              </div>
+            ))}
+          </div>
+
+          {templateStep === "intro" && (
+            <div className="space-y-2 rounded-lg border bg-muted/40 p-4 text-sm">
+              <p>
+                {templatePhase
+                  ? `Cette fonction crée les jalons standard de la phase ${templatePhase}, avec leurs workstreams et activités s'ils sont définis dans Paramètres.`
+                  : "Cette fonction crée d'un coup les jalons standard de toutes les phases, avec leurs workstreams et activités s'ils sont définis dans Paramètres."}
+              </p>
+              <p>
+                Seule la structure est injectée (noms, ordre, statut « A
+                planifier »).
+                Les dates d&apos;échéance restent vides : vous les renseignerez
+                ensuite, jalon par jalon.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {templatePhase
+                  ? `Disponible uniquement si la phase ${templatePhase} n'a encore aucun jalon.`
+                  : "Disponible uniquement s'il n'existe encore aucun jalon sur le chantier."}
+              </p>
+            </div>
+          )}
+
+          {templateStep === "code" && (
+            <div className="space-y-3">
+              <p className="rounded-lg border bg-muted/40 p-3 text-sm">
+                Tapez exactement le code
+                <strong className="ml-1 font-mono">{chantierCode}</strong>.
+              </p>
+              <Input
+                aria-label="Code du chantier"
+                className="font-mono"
+                value={templateCodeInput}
+                onChange={(e) => {
+                  setTemplateCodeInput(e.target.value);
+                  setTemplateError("");
+                }}
+                placeholder={chantierCode}
+                autoComplete="off"
+                disabled={applyingTemplate}
+              />
+            </div>
+          )}
+
+          {templateStep === "confirm" && (
+            <div className="space-y-2 rounded-lg border border-[#00BDBB]/30 bg-[#00BDBB]/8 p-4 text-sm">
+              <p className="font-medium">Ce qui va se passer</p>
+              <p>
+                {templatePhase ? (
+                  <>
+                    Le modèle de la phase{" "}
+                    <span className="font-semibold">{templatePhase}</span> sera
+                    créé sur{" "}
+                    <span className="font-mono font-semibold">
+                      {chantierCode}
+                    </span>
+                    : jalons, workstreams et activités du catalogue, au statut
+                    « A planifier ».
+                  </>
+                ) : (
+                  <>
+                    Le modèle complet (toutes les phases) sera créé sur{" "}
+                    <span className="font-mono font-semibold">
+                      {chantierCode}
+                    </span>
+                    : jalons, workstreams et activités du catalogue, au statut
+                    « A planifier ».
+                  </>
+                )}
+              </p>
+              <p>
+                Aucune date cible n&apos;est calculée. Vous pourrez les poser
+                ensuite sur chaque jalon. Cette action ne peut pas être annulée
+                d&apos;un clic : il faudra supprimer les jalons un par un, ou
+                purger le planning.
+              </p>
+            </div>
+          )}
+
+          {templateError ? (
+            <p className="text-sm text-destructive" role="alert">
+              {templateError}
+            </p>
+          ) : null}
+
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={applyingTemplate}
+              onClick={() => {
+                setTemplateWizardOpen(false);
+                resetTemplateWizard();
+              }}
+            >
+              Annuler
+            </Button>
+            <div className="flex gap-2">
+              {templateStep !== "intro" && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={applyingTemplate}
+                  onClick={() => {
+                    setTemplateError("");
+                    if (templateStep === "confirm") {
+                      setTemplateStep("code");
+                    } else {
+                      setTemplateStep("intro");
+                      setTemplateCodeInput("");
+                    }
+                  }}
+                >
+                  Retour
+                </Button>
+              )}
+              {templateStep === "intro" && (
+                <Button type="button" onClick={() => setTemplateStep("code")}>
+                  Suivant
+                </Button>
+              )}
+              {templateStep === "code" && (
+                <Button
+                  type="button"
+                  disabled={
+                    applyingTemplate ||
+                    templateCodeInput.trim() !== chantierCode.trim()
+                  }
+                  onClick={() => setTemplateStep("confirm")}
+                >
+                  Suivant
+                </Button>
+              )}
+              {templateStep === "confirm" && (
+                <Button
+                  type="button"
+                  disabled={
+                    applyingTemplate ||
+                    templateCodeInput.trim() !== chantierCode.trim()
+                  }
+                  onClick={confirmApplyTemplate}
+                >
+                  {applyingTemplate ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Wand2 className="size-4" />
+                  )}
+                  Appliquer le modèle
+                </Button>
+              )}
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Form Dialog */}
       <JalonFormDialog
@@ -1104,64 +1364,32 @@ export function ChantierJalonsTab({
         }}
       />
 
-      <Dialog
+      <PlanningDeleteDialog
         open={!!deleteTarget}
         onOpenChange={(o) => {
           if (!o) setDeleteTarget(null);
         }}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {effectiveCaps.delete === "VALIDATION"
-                ? "Demande de suppression"
-                : "Supprimer le jalon"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              {deleteTarget
-                ? effectiveCaps.delete === "VALIDATION"
-                  ? `Soumettre une demande de suppression pour « ${deleteTarget.nom} » ?`
-                  : `Confirmer la suppression de « ${deleteTarget.nom} » ? Un commentaire est obligatoire.`
-                : ""}
-            </p>
-            <div className="grid gap-1.5">
-              <label className="text-sm font-medium">
-                {effectiveCaps.delete === "VALIDATION"
-                  ? "Motif"
-                  : "Commentaire"}{" "}
-                <span className="text-destructive">*</span>
-              </label>
-              <Input
-                value={deleteMotif}
-                onChange={(e) => setDeleteMotif(e.target.value)}
-                placeholder="Justifiez la suppression..."
-              />
-            </div>
-            {deleteError && (
-              <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 text-sm text-destructive">
-                {deleteError}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
-              Annuler
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={deleting}
-              onClick={handleDeleteConfirm}
-            >
-              {deleting && <Loader2 className="size-4 animate-spin" />}
-              {effectiveCaps.delete === "VALIDATION"
-                ? "Soumettre"
-                : "Supprimer"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        mode={effectiveCaps.delete === "VALIDATION" ? "VALIDATION" : "DIRECT"}
+        kind="jalon"
+        itemName={deleteTarget?.nom ?? ""}
+        cascadeHint={
+          deleteTarget
+            ? (() => {
+                const ws = deleteTarget.workstreams?.length ?? 0;
+                const act =
+                  deleteTarget.workstreams?.reduce(
+                    (n, w) => n + (w.activites?.length ?? 0),
+                    0
+                  ) ?? 0;
+                if (ws === 0 && act === 0) return undefined;
+                return `Ses ${ws} workstream(s) et ${act} activité(s) seront également supprimés.`;
+              })()
+            : undefined
+        }
+        pending={deleting}
+        error={deleteError}
+        onConfirm={handleDeleteConfirm}
+      />
     </div>
   );
 }

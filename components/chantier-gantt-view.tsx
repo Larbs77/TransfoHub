@@ -82,7 +82,7 @@ export type GanttJalon = {
   nom: string;
   ordre: number;
   date_debut: Date | string | null;
-  date_cible: Date | string;
+  date_cible: Date | string | null;
   date_reelle: Date | string | null;
   statut: string;
   workstreams?: GanttWorkstream[];

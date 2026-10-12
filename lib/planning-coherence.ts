@@ -88,7 +88,7 @@ export function checkActiviteVsWorkstream(
 export type TreeJalon = {
   id: string;
   nom: string;
-  date_cible: Date | string;
+  date_cible: Date | string | null;
   statut?: string | null;
   workstreams?: TreeWorkstream[];
 };

@@ -9,7 +9,7 @@ export const PHASES_ORDER = ["Précadrage", "Cadrage", "Exécution", "Clôture"]
 
 export function computeMeteo(
   chantier: { avancement: number; date_debut: Date; date_fin: Date },
-  jalons: { statut: string; date_cible: Date }[],
+  jalons: { statut: string; date_cible: Date | null }[],
   raids: {
     type: string;
     statut: string;
@@ -21,7 +21,10 @@ export function computeMeteo(
   const now = new Date();
 
   const jalonsEnRetard = jalons.filter(
-    (j) => new Date(j.date_cible) < now && !["Atteint", "Annulé"].includes(j.statut)
+    (j) =>
+      j.date_cible != null &&
+      new Date(j.date_cible) < now &&
+      !["Atteint", "Annulé", "A planifier"].includes(j.statut)
   ).length;
 
   const risquesCritiques = raids.filter(

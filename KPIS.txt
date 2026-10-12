@@ -231,6 +231,7 @@ Adhérence au planning FDR
   jalonsOnTime =
     - statut Atteint → OK
     - statut En cours ou Planifié ET date_cible ≥ aujourd’hui → OK
+    - « A planifier » (pas d’échéance) : hors jalonsDue
   adherencePlanning = round( onTime / due × 100 )  (100 % si due = 0)
 
 Taux de staffing

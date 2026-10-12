@@ -18,7 +18,7 @@ export type ExcelPlanningPreview = { chantierId:string; chantierCode:string; cha
 
 export const PLANNING_HEADERS = ["Niveau *","Phase","Élément *","Ordre","Date de début","Date de fin / cible","Date réelle","Statut","Description","Livrables","Commentaire","ID technique"] as const;
 /** Même catalogue que les jalons (Atteint = terminé métier). */
-const DETAIL_STATUSES=["Planifié","En cours","Atteint","Reporté","Annulé"];
+const DETAIL_STATUSES=["A planifier","Planifié","En cours","Atteint","Reporté","Annulé"];
 const norm=(v:unknown)=>String(v??"").normalize("NFC").trim().replace(/\s+/g," ");
 const key=(v:unknown)=>norm(v).toLocaleLowerCase("fr");
 const iso=(d:Date|null)=>d?`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")}`:"";
