@@ -5,7 +5,8 @@
  * - Internal: debut ≤ fin when both set
  * - Activité ⊂ Workstream (when both sides have dates)
  * - Workstream fin ≤ Jalon date_cible (model A)
- * - Statut cascade : parent « Atteint » avec enfant non Atteint
+ * - Statut ↔ échéance (A planifier vs date)
+ * - Cascade : A planifier / Planifié / En cours / Atteint
  */
 
 export type CoherenceIssue = {
@@ -14,8 +15,40 @@ export type CoherenceIssue = {
   message: string;
 };
 
+const STATUT_A_PLANIFIER = "A planifier";
+const STATUT_PLANIFIE = "Planifié";
+const STATUT_EN_COURS = "En cours";
+const STATUT_ATTEINT = "Atteint";
+const SKIP_CASCADE = new Set(["Annulé", "Reporté"]);
+const CALENDARED = new Set([STATUT_PLANIFIE, STATUT_EN_COURS, STATUT_ATTEINT]);
+const STARTED = new Set([STATUT_EN_COURS, STATUT_ATTEINT]);
+
 function isAtteint(statut: string | null | undefined): boolean {
-  return (statut ?? "").trim() === "Atteint";
+  return (statut ?? "").trim() === STATUT_ATTEINT;
+}
+
+function normStatut(statut: string | null | undefined): string {
+  const s = (statut ?? "").trim();
+  return s || STATUT_A_PLANIFIER;
+}
+
+function isAPlanifier(statut: string | null | undefined): boolean {
+  return normStatut(statut) === STATUT_A_PLANIFIER;
+}
+
+function skipCascade(statut: string | null | undefined): boolean {
+  return SKIP_CASCADE.has(normStatut(statut));
+}
+
+function hasDue(v: Date | string | null | undefined): boolean {
+  return toDate(v) != null;
+}
+
+function hasAnyDate(
+  debut?: Date | string | null,
+  fin?: Date | string | null
+): boolean {
+  return hasDue(debut) || hasDue(fin);
 }
 
 function toDate(v: Date | string | null | undefined): Date | null {
@@ -125,7 +158,7 @@ export function checkStatutCascadeIncoherence(
     if (isAtteint(ws.statut)) {
       for (const act of acts) {
         if (isAtteint(act.statut)) continue;
-        const actStatut = (act.statut ?? "Planifié").trim() || "Planifié";
+        const actStatut = normStatut(act.statut);
         issues.push({
           level: "workstream",
           entityId: ws.id,
@@ -143,7 +176,7 @@ export function checkStatutCascadeIncoherence(
   if (isAtteint(jalon.statut)) {
     for (const ws of wsList) {
       if (!isAtteint(ws.statut)) {
-        const wsStatut = (ws.statut ?? "Planifié").trim() || "Planifié";
+        const wsStatut = normStatut(ws.statut);
         issues.push({
           level: "jalon",
           entityId: jalon.id,
@@ -159,13 +192,229 @@ export function checkStatutCascadeIncoherence(
       // WS Atteint mais activités non Atteint → remonte aussi au jalon
       for (const act of ws.activites ?? []) {
         if (isAtteint(act.statut)) continue;
-        const actStatut = (act.statut ?? "Planifié").trim() || "Planifié";
+        const actStatut = normStatut(act.statut);
         issues.push({
           level: "jalon",
           entityId: jalon.id,
           message: `Jalon « ${jalon.nom} » est Atteint alors que l'activité « ${act.nom} » (workstream « ${ws.nom} ») est encore « ${actStatut} ».`,
         });
       }
+    }
+  }
+
+  return issues;
+}
+
+function pushStatutVsDue(
+  issues: CoherenceIssue[],
+  level: CoherenceIssue["level"],
+  entityId: string,
+  label: string,
+  statut: string | null | undefined,
+  due: Date | string | null | undefined
+) {
+  if (skipCascade(statut)) return;
+  const s = normStatut(statut);
+  if (isAPlanifier(s) && hasDue(due)) {
+    issues.push({
+      level,
+      entityId,
+      message: `${label} est « A planifier » alors qu'une date d'échéance est renseignée (attendu : Planifié).`,
+    });
+    return;
+  }
+  if (CALENDARED.has(s) && !hasDue(due)) {
+    issues.push({
+      level,
+      entityId,
+      message: `${label} est « ${s} » sans date d'échéance.`,
+    });
+  }
+}
+
+/**
+ * P1 (A planifier / dates) + P2 (progression) — hors cascade Atteint déjà couverte.
+ */
+export function checkStatutProgressionIncoherence(
+  jalon: TreeJalon
+): CoherenceIssue[] {
+  const issues: CoherenceIssue[] = [];
+  const wsList = jalon.workstreams ?? [];
+  const jalonLabel = `Jalon « ${jalon.nom} »`;
+
+  pushStatutVsDue(
+    issues,
+    "jalon",
+    jalon.id,
+    jalonLabel,
+    jalon.statut,
+    jalon.date_cible
+  );
+
+  if (isAPlanifier(jalon.statut) && !skipCascade(jalon.statut)) {
+    for (const ws of wsList) {
+      if (skipCascade(ws.statut)) continue;
+      const wsCalendared = CALENDARED.has(normStatut(ws.statut));
+      const wsDated = hasAnyDate(ws.date_debut, ws.date_fin);
+      if (wsCalendared || wsDated) {
+        const why = wsCalendared
+          ? `est « ${normStatut(ws.statut)} »`
+          : "a des dates";
+        issues.push({
+          level: "jalon",
+          entityId: jalon.id,
+          message: `${jalonLabel} est « A planifier » alors que le workstream « ${ws.nom} » ${why}.`,
+        });
+        issues.push({
+          level: "workstream",
+          entityId: ws.id,
+          message: `Workstream « ${ws.nom} » ${why} alors que le jalon parent « ${jalon.nom} » est « A planifier ».`,
+        });
+      }
+      for (const act of ws.activites ?? []) {
+        if (skipCascade(act.statut)) continue;
+        const actCalendared = CALENDARED.has(normStatut(act.statut));
+        const actDated = hasAnyDate(act.date_debut, act.date_fin);
+        if (actCalendared || actDated) {
+          const why = actCalendared
+            ? `est « ${normStatut(act.statut)} »`
+            : "a des dates";
+          issues.push({
+            level: "jalon",
+            entityId: jalon.id,
+            message: `${jalonLabel} est « A planifier » alors que l'activité « ${act.nom} » ${why}.`,
+          });
+          issues.push({
+            level: "activite",
+            entityId: act.id,
+            message: `Activité « ${act.nom} » ${why} alors que le jalon parent « ${jalon.nom} » est « A planifier ».`,
+          });
+        }
+      }
+    }
+  }
+
+  if (normStatut(jalon.statut) === STATUT_PLANIFIE) {
+    for (const ws of wsList) {
+      if (skipCascade(ws.statut)) continue;
+      if (STARTED.has(normStatut(ws.statut))) {
+        issues.push({
+          level: "jalon",
+          entityId: jalon.id,
+          message: `${jalonLabel} est « Planifié » alors que le workstream « ${ws.nom} » est « ${normStatut(ws.statut)} ».`,
+        });
+        issues.push({
+          level: "workstream",
+          entityId: ws.id,
+          message: `Workstream « ${ws.nom} » est « ${normStatut(ws.statut)} » alors que le jalon parent « ${jalon.nom} » est encore « Planifié ».`,
+        });
+      }
+      for (const act of ws.activites ?? []) {
+        if (skipCascade(act.statut)) continue;
+        if (STARTED.has(normStatut(act.statut))) {
+          issues.push({
+            level: "jalon",
+            entityId: jalon.id,
+            message: `${jalonLabel} est « Planifié » alors que l'activité « ${act.nom} » est « ${normStatut(act.statut)} ».`,
+          });
+          issues.push({
+            level: "activite",
+            entityId: act.id,
+            message: `Activité « ${act.nom} » est « ${normStatut(act.statut)} » alors que le jalon parent « ${jalon.nom} » est encore « Planifié ».`,
+          });
+        }
+      }
+    }
+  }
+
+  if (
+    normStatut(jalon.statut) === STATUT_EN_COURS &&
+    wsList.length > 0 &&
+    wsList.every((ws) => isAPlanifier(ws.statut) || skipCascade(ws.statut)) &&
+    wsList.some((ws) => isAPlanifier(ws.statut))
+  ) {
+    issues.push({
+      level: "jalon",
+      entityId: jalon.id,
+      message: `${jalonLabel} est « En cours » alors que tous ses workstreams sont encore « A planifier ».`,
+    });
+  }
+
+  for (const ws of wsList) {
+    const wsLabel = `Workstream « ${ws.nom} »`;
+    const acts = ws.activites ?? [];
+    pushStatutVsDue(
+      issues,
+      "workstream",
+      ws.id,
+      wsLabel,
+      ws.statut,
+      ws.date_fin
+    );
+
+    if (isAPlanifier(ws.statut) && !skipCascade(ws.statut)) {
+      for (const act of acts) {
+        if (skipCascade(act.statut)) continue;
+        const actCalendared = CALENDARED.has(normStatut(act.statut));
+        const actDated = hasAnyDate(act.date_debut, act.date_fin);
+        if (actCalendared || actDated) {
+          const why = actCalendared
+            ? `est « ${normStatut(act.statut)} »`
+            : "a des dates";
+          issues.push({
+            level: "workstream",
+            entityId: ws.id,
+            message: `${wsLabel} est « A planifier » alors que l'activité « ${act.nom} » ${why}.`,
+          });
+          issues.push({
+            level: "activite",
+            entityId: act.id,
+            message: `Activité « ${act.nom} » ${why} alors que le workstream parent « ${ws.nom} » est « A planifier ».`,
+          });
+        }
+      }
+    }
+
+    if (normStatut(ws.statut) === STATUT_PLANIFIE) {
+      for (const act of acts) {
+        if (skipCascade(act.statut)) continue;
+        if (STARTED.has(normStatut(act.statut))) {
+          issues.push({
+            level: "workstream",
+            entityId: ws.id,
+            message: `${wsLabel} est « Planifié » alors que l'activité « ${act.nom} » est « ${normStatut(act.statut)} ».`,
+          });
+          issues.push({
+            level: "activite",
+            entityId: act.id,
+            message: `Activité « ${act.nom} » est « ${normStatut(act.statut)} » alors que le workstream parent « ${ws.nom} » est encore « Planifié ».`,
+          });
+        }
+      }
+    }
+
+    if (
+      normStatut(ws.statut) === STATUT_EN_COURS &&
+      acts.length > 0 &&
+      acts.every((a) => isAPlanifier(a.statut) || skipCascade(a.statut)) &&
+      acts.some((a) => isAPlanifier(a.statut))
+    ) {
+      issues.push({
+        level: "workstream",
+        entityId: ws.id,
+        message: `${wsLabel} est « En cours » alors que toutes ses activités sont encore « A planifier ».`,
+      });
+    }
+
+    for (const act of acts) {
+      pushStatutVsDue(
+        issues,
+        "activite",
+        act.id,
+        `Activité « ${act.nom} »`,
+        act.statut,
+        act.date_fin
+      );
     }
   }
 
@@ -217,6 +466,7 @@ export function collectJalonCoherenceIssues(jalon: TreeJalon): CoherenceIssue[] 
 
   // Statut parent Atteint / enfant non Atteint
   issues.push(...checkStatutCascadeIncoherence(jalon));
+  issues.push(...checkStatutProgressionIncoherence(jalon));
 
   return issues;
 }

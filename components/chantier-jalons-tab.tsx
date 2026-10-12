@@ -720,7 +720,7 @@ export function ChantierJalonsTab({
                     ? "border-amber-500/40 bg-amber-500/[0.08]"
                     : "border-border bg-muted/20"
                 }`}
-                title="Incohérences de dates : activité hors workstream, workstream après jalon, plages inversées…"
+                title="Incohérences de dates et de statuts : A planifier vs enfants calendrés, cascade de progression, plages inversées…"
               >
                 <span
                   className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg ${
@@ -736,7 +736,7 @@ export function ChantierJalonsTab({
                     Anomalies de planning
                   </p>
                   <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-                    Incohérences de dates dans l&apos;arbre
+                    Incohérences de dates et de statuts dans l&apos;arbre
                   </p>
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     <Badge
