@@ -64,6 +64,7 @@ export function ChantierSelect({
   }
 
   return (
+    <div className="min-w-0 w-full max-w-full">
     <Popover
       open={open}
       onOpenChange={(next) => {
@@ -82,7 +83,7 @@ export function ChantierSelect({
           className={cn(
             "border-input text-foreground focus-visible:border-ring focus-visible:ring-ring/50",
             "dark:bg-input/30 dark:hover:bg-input/50",
-            "flex h-9 w-full min-w-0 items-center justify-between gap-2 overflow-hidden rounded-md border bg-transparent px-3 text-sm shadow-xs",
+            "flex h-9 w-full max-w-full min-w-0 items-center justify-between gap-2 overflow-hidden rounded-md border bg-transparent px-3 text-sm shadow-xs",
             "transition-[color,box-shadow] outline-none focus-visible:ring-[3px] text-left",
             "disabled:cursor-not-allowed disabled:opacity-50",
             !selectedLabel && "text-muted-foreground",
@@ -104,7 +105,7 @@ export function ChantierSelect({
         data-chantier-picker
         align="start"
         sideOffset={4}
-        className="z-[200] w-[min(36rem,calc(100vw-2rem))] min-w-[var(--radix-popover-trigger-width)] p-0"
+        className="z-[200] w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-trigger-width)] overflow-hidden p-0"
       >
         <div className="relative border-b p-1.5">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -132,20 +133,15 @@ export function ChantierSelect({
                   title={formatChantierSelectLabel(c)}
                   onClick={() => choose(c.id)}
                   className={cn(
-                    "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent",
+                    "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent",
                     checked && "bg-primary/5"
                   )}
                 >
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-mono text-xs font-semibold text-[#0A3C74] dark:text-foreground">
-                      {c.code}
-                    </span>
-                    <span className="mt-0.5 block text-sm leading-snug whitespace-normal text-foreground/90">
-                      {c.nom}
-                    </span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {formatChantierSelectLabel(c)}
                   </span>
                   {checked ? (
-                    <CheckIcon className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                    <CheckIcon className="size-3.5 shrink-0 text-primary" />
                   ) : null}
                 </button>
               );
@@ -154,6 +150,7 @@ export function ChantierSelect({
         </div>
       </PopoverContent>
     </Popover>
+    </div>
   );
 }
 
@@ -214,6 +211,7 @@ export function ChantierMultiSelect({
             .join(", ")} +${selected.length - 3}`;
 
   return (
+    <div className="min-w-0 w-full max-w-full">
     <Popover
       open={open}
       onOpenChange={(next) => {
@@ -236,7 +234,7 @@ export function ChantierMultiSelect({
           className={cn(
             "border-input text-foreground focus-visible:border-ring focus-visible:ring-ring/50",
             "dark:bg-input/30 dark:hover:bg-input/50",
-            "flex h-9 w-full min-w-0 items-center justify-between gap-2 overflow-hidden rounded-md border bg-transparent px-3 text-sm shadow-xs",
+            "flex h-9 w-full max-w-full min-w-0 items-center justify-between gap-2 overflow-hidden rounded-md border bg-transparent px-3 text-sm shadow-xs",
             "transition-[color,box-shadow] outline-none focus-visible:ring-[3px] text-left",
             "disabled:cursor-not-allowed disabled:opacity-50",
             selected.length === 0 && "text-muted-foreground",
@@ -261,7 +259,7 @@ export function ChantierMultiSelect({
         data-chantier-picker
         align="start"
         sideOffset={4}
-        className="z-[200] w-[min(36rem,calc(100vw-2rem))] min-w-[var(--radix-popover-trigger-width)] p-0"
+        className="z-[200] w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-trigger-width)] overflow-hidden p-0"
       >
         <div className="relative border-b p-1.5">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -289,13 +287,13 @@ export function ChantierMultiSelect({
                   title={formatChantierSelectLabel(c)}
                   onClick={() => toggle(c.id)}
                   className={cn(
-                    "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent",
+                    "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent",
                     checked && "bg-primary/5"
                   )}
                 >
                   <span
                     className={cn(
-                      "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-sm border",
+                      "flex size-4 shrink-0 items-center justify-center rounded-sm border",
                       checked
                         ? "border-primary bg-primary text-primary-foreground"
                         : "border-input"
@@ -303,13 +301,8 @@ export function ChantierMultiSelect({
                   >
                     {checked && <CheckIcon className="size-3" />}
                   </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-mono text-xs font-semibold text-[#0A3C74] dark:text-foreground">
-                      {c.code}
-                    </span>
-                    <span className="mt-0.5 block text-sm leading-snug whitespace-normal text-foreground/90">
-                      {c.nom}
-                    </span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {formatChantierSelectLabel(c)}
                   </span>
                 </button>
               );
@@ -318,5 +311,6 @@ export function ChantierMultiSelect({
         </div>
       </PopoverContent>
     </Popover>
+    </div>
   );
 }

@@ -19,6 +19,7 @@ import {
   Select,
   SelectContent,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -391,7 +392,11 @@ export function AdherencesRegistre({
       if (filterDeleted === "deleted" && !isDeleted(a)) return false;
       if (filterType !== "all" && a.type !== filterType) return false;
       if (filterCriticite !== "all" && a.criticite !== filterCriticite) return false;
-      if (filterStatut !== "all" && a.statut !== filterStatut) return false;
+      if (filterStatut === "__open__") {
+        if (a.statut === "Résolu") return false;
+      } else if (filterStatut !== "all" && a.statut !== filterStatut) {
+        return false;
+      }
       if (
         filterFournisseur.length > 0 &&
         !filterFournisseur.includes(a.chantierSourceId)
@@ -774,6 +779,8 @@ export function AdherencesRegistre({
                   <SelectValue placeholder="Statut" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="__open__">Non clôturées</SelectItem>
+                  <SelectSeparator />
                   <SelectItem value="all">Tous statuts</SelectItem>
                   {ADHERENCE_STATUTS.map((s) => (
                     <SelectItem key={s} value={s}>
@@ -876,7 +883,11 @@ export function AdherencesRegistre({
               ) : null}
               {filterStatut !== "all" ? (
                 <FilterChip
-                  label={filterStatut}
+                  label={
+                    filterStatut === "__open__"
+                      ? "Non clôturées"
+                      : filterStatut
+                  }
                   onRemove={() => setFilterStatut("all")}
                 />
               ) : null}

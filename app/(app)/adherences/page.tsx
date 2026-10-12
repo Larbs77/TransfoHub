@@ -1,7 +1,7 @@
 import { requirePageAccess } from "@/lib/auth";
 import { getAdherences, getChantiersForAdherenceForm, getNextAdherenceCode } from "@/app/(app)/actions";
 import { AdherencesRegistre } from "@/components/adherences-registre";
-import { Link2 } from "lucide-react";
+import { Link2, Lightbulb } from "lucide-react";
 
 export default async function AdherencesPage() {
   await requirePageAccess("/adherences");
@@ -22,6 +22,18 @@ export default async function AdherencesPage() {
               Cartographie des dépendances entre chantiers du programme de transformation
             </p>
           </div>
+        </div>
+
+        <div className="flex max-w-3xl items-start gap-2.5 rounded-lg bg-gradient-to-r from-[#00BDBB]/12 to-[#0A3C74]/[0.06] px-3 py-2.5">
+          <Lightbulb className="mt-0.5 size-3.5 shrink-0 text-[#00BDBB]" />
+          <p className="text-[11px] italic leading-relaxed text-muted-foreground">
+            <span className="font-medium not-italic text-foreground">
+              Explication :{" "}
+            </span>
+            Le chantier demandeur ne peut avancer que lorsque le chantier
+            fournisseur a produit et clos les livrables et actions convenus.
+            L&apos;adhérence consigne cet engagement entre les chantiers.
+          </p>
         </div>
 
         <AdherencesRegistre
