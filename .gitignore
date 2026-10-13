@@ -20,6 +20,9 @@
 # production
 /build
 
+# Local database backups produced by scripts/backup-postgres.sh
+/backups
+
 # misc
 .DS_Store
 *.pem

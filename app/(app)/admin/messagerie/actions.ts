@@ -12,6 +12,13 @@ import {
   type MailConfigPublic,
   type MailSecurity,
 } from "@/lib/mail";
+import {
+  listChantierOptions,
+  listRelanceRuns,
+  previewRelances,
+  sendRelanceTest,
+  sendRelancesNow,
+} from "@/lib/mail-relances";
 
 async function requireMailAdmin() {
   await requireRole("Admin");
@@ -44,6 +51,7 @@ export type MailServerFormInput = {
   app_url: string;
   programme_office_email: string;
   app_mail_enabled: boolean;
+  relance_mail_enabled: boolean;
 };
 
 function validateInput(data: MailServerFormInput): string | null {
@@ -155,6 +163,7 @@ export async function saveMailServerConfig(
     app_url: data.app_url.trim().replace(/\/+$/, ""),
     programme_office_email: data.programme_office_email.trim(),
     app_mail_enabled: !!data.app_mail_enabled,
+    relance_mail_enabled: !!data.relance_mail_enabled,
   };
 
   const saved = existing
@@ -221,4 +230,36 @@ export async function testMailServerConfig(params: {
   });
   revalidatePath("/admin/messagerie");
   return { ok: false, error: result.error };
+}
+
+export async function listChantiersForRelanceAdmin() {
+  await requireMailAdmin();
+  return listChantierOptions();
+}
+
+export async function listRelanceRunsAdmin() {
+  await requireMailAdmin();
+  return listRelanceRuns();
+}
+
+export async function previewRelancesAdmin() {
+  await requireMailAdmin();
+  return previewRelances();
+}
+
+export async function sendRelancesNowAdmin() {
+  await requireMailAdmin();
+  const result = await sendRelancesNow();
+  revalidatePath("/admin/messagerie");
+  return result;
+}
+
+export async function sendRelanceTestAdmin(params: {
+  chantierId: string;
+  to: string;
+}) {
+  await requireMailAdmin();
+  const result = await sendRelanceTest(params);
+  revalidatePath("/admin/messagerie");
+  return result;
 }

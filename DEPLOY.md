@@ -226,9 +226,22 @@ pm2 logs transfohub --lines 30
 | Admin | Changer le mot de passe après 1ʳᵉ connexion |
 | Migrations | `npm run db:migrate` après chaque release |
 | HTTPS | Certbot actif |
-| Backups | `pg_dump` planifié (cron) |
+| Backups | `scripts/backup-postgres.sh` (versionné, le déploiement ne l'efface plus). Cron : `deploy/cron-backup.example` |
 | Avatars | `public/uploads/avatars` writable par le user PM2 |
 | SMTP | Configurer dans Technique → Messagerie après login admin |
+| Relances | Case « Relances automatiques », puis cron ci-dessous. Fuseau du serveur : `Africa/Casablanca` pour que les échéances coïncident avec le tableau de bord |
+
+Relances d'actions (lundi et jeudi, 2 h–8 h, rattrapage inclus). Le script ne fait rien en dehors de ce créneau :
+
+```bash
+sudo mkdir -p /var/www/transfohub/logs
+sudo crontab -u <user-pm2> -e
+```
+
+```cron
+CRON_TZ=Africa/Casablanca
+*/15 2-7 * * 1,4 cd /var/www/transfohub && /usr/bin/npm run mail:relances >> logs/relances.log 2>&1
+```
 
 Backup DB exemple :
 

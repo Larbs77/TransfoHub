@@ -37,6 +37,8 @@ import {
   type MailServerFormInput,
 } from "./actions";
 import type { MailConfigPublic, MailSecurity } from "@/lib/mail";
+import type { RelanceRunView } from "@/lib/mail-relances";
+import { MailRelancePanel } from "./mail-relance-panel";
 
 const PORT_PRESETS: { label: string; port: number; security: MailSecurity }[] =
   [
@@ -69,6 +71,7 @@ type FormState = {
   app_url: string;
   programme_office_email: string;
   app_mail_enabled: boolean;
+  relance_mail_enabled: boolean;
 };
 
 function fromConfig(config: MailConfigPublic | null): FormState {
@@ -96,6 +99,7 @@ function fromConfig(config: MailConfigPublic | null): FormState {
     app_url: config?.app_url ?? "",
     programme_office_email: config?.programme_office_email ?? "",
     app_mail_enabled: config?.app_mail_enabled ?? false,
+    relance_mail_enabled: config?.relance_mail_enabled ?? false,
   };
 }
 
@@ -119,8 +123,14 @@ function Field({
 
 export function MailServerForm({
   initialConfig,
+  chantiers,
+  initialRuns,
+  scheduleLabel,
 }: {
   initialConfig: MailConfigPublic | null;
+  chantiers: { id: string; code: string; nom: string }[];
+  initialRuns: RelanceRunView[];
+  scheduleLabel: string;
 }) {
   const [form, setForm] = useState<FormState>(() => fromConfig(initialConfig));
   const [configId, setConfigId] = useState(initialConfig?.id);
@@ -141,6 +151,9 @@ export function MailServerForm({
     ok: initialConfig?.last_test_ok ?? null,
     message: initialConfig?.last_test_message ?? "",
   });
+  const [savedRelance, setSavedRelance] = useState(
+    Boolean(initialConfig?.relance_mail_enabled)
+  );
   const [isPending, startTransition] = useTransition();
   const [testAtLabel, setTestAtLabel] = useState<string | null>(null);
 
@@ -176,6 +189,7 @@ export function MailServerForm({
         const saved = await saveMailServerConfig(payload);
         setConfigId(saved.id);
         setHasPassword(saved.has_password);
+        setSavedRelance(saved.relance_mail_enabled);
         setForm((f) => ({
           ...f,
           auth_password: "",
@@ -475,6 +489,39 @@ export function MailServerForm({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
+            <Bell className="size-4 text-primary" />
+            Relances automatiques
+          </CardTitle>
+          <CardDescription>
+            Relevés d&apos;actions par chantier, le lundi et le jeudi à 2 h
+            (Africa/Casablanca), aux directeurs de chantier et aux PMO.
+            Indépendant des mails applicatifs et du test SMTP.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <label className="flex items-start gap-3 rounded-lg border border-[#0A3C74]/15 bg-[#0A3C74]/[0.03] p-3 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 rounded border"
+              checked={form.relance_mail_enabled}
+              onChange={(e) => set("relance_mail_enabled", e.target.checked)}
+            />
+            <span>
+              <span className="font-medium">
+                Activer les relances automatiques
+              </span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                Décochez pour suspendre uniquement ces envois. Décoché par
+                défaut. L&apos;envoi manuel et le test restent possibles.
+              </span>
+            </span>
+          </label>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
             <Shield className="size-4 text-primary" />
             Options avancées
           </CardTitle>
@@ -702,6 +749,15 @@ export function MailServerForm({
           )}
         </CardContent>
       </Card>
+
+      <MailRelancePanel
+        configId={configId}
+        savedEnabled={savedRelance}
+        draftEnabled={form.relance_mail_enabled}
+        chantiers={chantiers}
+        initialRuns={initialRuns}
+        initialScheduleLabel={scheduleLabel}
+      />
     </div>
   );
 }

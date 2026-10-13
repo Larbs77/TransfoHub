@@ -48,6 +48,7 @@ export type MailConfigPublic = {
   app_url: string;
   programme_office_email: string;
   app_mail_enabled: boolean;
+  relance_mail_enabled: boolean;
   last_test_at: Date | null;
   last_test_ok: boolean | null;
   last_test_message: string;
@@ -84,6 +85,7 @@ export function toPublicConfig(row: {
   app_url?: string;
   programme_office_email?: string;
   app_mail_enabled?: boolean;
+  relance_mail_enabled?: boolean;
   last_test_at: Date | null;
   last_test_ok: boolean | null;
   last_test_message: string;
@@ -114,6 +116,7 @@ export function toPublicConfig(row: {
     app_url: row.app_url ?? "",
     programme_office_email: row.programme_office_email ?? "",
     app_mail_enabled: Boolean(row.app_mail_enabled),
+    relance_mail_enabled: Boolean(row.relance_mail_enabled),
     last_test_at: row.last_test_at,
     last_test_ok: row.last_test_ok,
     last_test_message: row.last_test_message,

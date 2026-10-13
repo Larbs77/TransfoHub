@@ -10,7 +10,7 @@ const globalForPrisma = globalThis as unknown as {
  * Bump whenever the Prisma schema gains fields/models so HMR drops a stale
  * singleton (otherwise findUnique/update rejects unknown fields).
  */
-const PRISMA_MODEL_STAMP = "jalon-a-planifier-v1";
+const PRISMA_MODEL_STAMP = "mail-relance-v1";
 
 function clientLooksCurrent(client: PrismaClient): boolean {
   try {
@@ -18,6 +18,7 @@ function clientLooksCurrent(client: PrismaClient): boolean {
       user?: unknown;
       appRole?: { findFirst?: unknown };
       mailServerConfig?: { findFirst?: unknown };
+      relanceRun?: { findMany?: unknown };
       comiteParametre?: { findMany?: unknown };
       equipe?: { findMany?: unknown };
       ressourceEquipeFonctionnelle?: { findMany?: unknown };
@@ -47,6 +48,7 @@ function clientLooksCurrent(client: PrismaClient): boolean {
     if (!c.user) return false;
     if (typeof c.appRole?.findFirst !== "function") return false;
     if (typeof c.mailServerConfig?.findFirst !== "function") return false;
+    if (typeof c.relanceRun?.findMany !== "function") return false;
     if (typeof c.comiteParametre?.findMany !== "function") return false;
     if (typeof c.equipe?.findMany !== "function") return false;
     if (typeof c.ressourceEquipeFonctionnelle?.findMany !== "function") return false;
@@ -141,6 +143,10 @@ function clientLooksCurrent(client: PrismaClient): boolean {
         ? fields.some((f) => f.name === "app_mail_enabled")
         : "app_mail_enabled" in fields;
       if (!hasAppMail) return false;
+      const hasRelanceMail = Array.isArray(fields)
+        ? fields.some((f) => f.name === "relance_mail_enabled")
+        : "relance_mail_enabled" in fields;
+      if (!hasRelanceMail) return false;
     }
 
     const favoriModel = c._runtimeDataModel?.models?.FavoriChantier;

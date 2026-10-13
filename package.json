@@ -12,7 +12,8 @@
     "db:migrate:dev": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
-    "db:status": "prisma migrate status"
+    "db:status": "prisma migrate status",
+    "mail:relances": "tsx scripts/send-relances.ts"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"

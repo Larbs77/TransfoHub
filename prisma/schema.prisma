@@ -815,6 +815,9 @@ model MailServerConfig {
   programme_office_email   String    @default("")
   /// When false, RAID/app notification mails are not sent (SMTP test still works).
   app_mail_enabled         Boolean   @default(false)
+  /// Monday/Thursday 02:00 Africa/Casablanca chantier action reminders.
+  /// Independent of app_mail_enabled. Default off.
+  relance_mail_enabled     Boolean   @default(false)
   last_test_at             DateTime?
   last_test_ok             Boolean?
   last_test_message        String    @default("")
@@ -822,4 +825,62 @@ model MailServerConfig {
   updatedAt                DateTime  @updatedAt
 
   @@index([is_default, is_active])
+}
+
+/// One execution of chantier action reminders (scheduled, manual, or test).
+model RelanceRun {
+  id            String    @id @default(uuid())
+  /// planifie | manuel | test
+  trigger       String
+  /// Casablanca calendar day of the slot (yyyy-mm-dd). Empty for a test.
+  slotKey       String    @default("")
+  /// envoye | partiel | echec | ignore | encours
+  status        String
+  /// disabled | empty | no_config | sent | manual | test
+  reason        String    @default("")
+  chantierCount Int       @default(0)
+  sentCount     Int       @default(0)
+  failedCount   Int       @default(0)
+  message       String    @default("")
+  startedAt     DateTime  @default(now())
+  finishedAt    DateTime?
+  items         RelanceRunItem[]
+
+  @@index([startedAt])
+  @@index([trigger, slotKey, reason])
+}
+
+/// One chantier inside a relance run.
+model RelanceRunItem {
+  id           String     @id @default(uuid())
+  runId        String
+  chantierId   String     @default("")
+  chantierCode String     @default("")
+  chantierNom  String     @default("")
+  /// envoye | echec
+  status       String
+  recipients   String     @default("")
+  missingNames String     @default("")
+  overdueCount Int        @default(0)
+  weekCount    Int        @default(0)
+  error        String     @default("")
+  createdAt    DateTime   @default(now())
+  run          RelanceRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+}
+
+/// Idempotency of the scheduled slot: at most one successful send per chantier and morning.
+model RelanceDispatch {
+  id         String   @id @default(uuid())
+  chantierId String
+  /// Casablanca yyyy-mm-dd of the Monday or Thursday slot.
+  slotKey    String
+  /// pending | sent | failed
+  status     String   @default("pending")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([chantierId, slotKey])
+  @@index([slotKey])
 }

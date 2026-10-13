@@ -1,0 +1,10 @@
+# Sauvegarde quotidienne TransfoHub. Installer avec : crontab -e
+# scripts/backup-postgres.sh est versionné : un déploiement ne le supprime plus.
+#
+# Prod (admin_keba) :
+#   15 2 * * * BACKUP_DIR=/home/admin_keba/backups/transfohub BACKUP_FORMAT=both /home/admin_keba/workspace/TransfoHub-main/scripts/backup-postgres.sh >> /home/admin_keba/backups/transfohub/backup.log 2>&1
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+15 2 * * * BACKUP_DIR=/home/admin_keba/backups/transfohub BACKUP_FORMAT=both /home/admin_keba/workspace/TransfoHub-main/scripts/backup-postgres.sh >> /home/admin_keba/backups/transfohub/backup.log 2>&1
