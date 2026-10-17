@@ -277,7 +277,11 @@ export function MaintenancePanel({
       setFileContent(text);
       startTransition(async () => {
         try {
-          const result = await verifyDbImportAction(file.name, text, mode);
+          const result = await verifyDbImportAction({
+            fileName: file.name,
+            content: text,
+            mode,
+          });
           setVerify(result);
           setMessage({
             type: result.ok ? "info" : "error",
@@ -301,7 +305,11 @@ export function MaintenancePanel({
     if (!fileContent || !fileName) return;
     setVerify(null);
     startTransition(async () => {
-      const result = await verifyDbImportAction(fileName, fileContent, next);
+      const result = await verifyDbImportAction({
+        fileName,
+        content: fileContent,
+        mode: next,
+      });
       setVerify(result);
     });
   }
@@ -403,7 +411,8 @@ export function MaintenancePanel({
 
         for (let i = 0; i < tables.length; i++) {
           const table: TableDump = tables[i];
-          const rows = table.rowCount ?? table.rows?.length ?? 0;
+          const rowList = table.rows ?? [];
+          const rows = rowList.length;
           const base = 30;
           const span = 65;
           setProgressPct(Math.round(base + ((i + 0.5) / total) * span));
@@ -421,16 +430,36 @@ export function MaintenancePanel({
             "step",
             `▶ Chargement des données — table « ${table.name} » (${rows} ligne${rows > 1 ? "s" : ""})…`
           );
-          const res = await restoreStepImportTableAction(table);
-          if (!res.ok) {
-            return fail(
-              res.error || `Échec chargement table « ${table.name} »`
-            );
+          // Chunk rows so each Server Action payload stays a JSON string in a
+          // single object (React Flight rejects large nested row arrays).
+          const ROW_CHUNK = 250;
+          let tableInserted = 0;
+          for (let off = 0; off < rowList.length; off += ROW_CHUNK) {
+            const chunkRows = rowList.slice(off, off + ROW_CHUNK);
+            const res = await restoreStepImportTableAction({
+              tableJson: JSON.stringify({
+                name: table.name,
+                columns: table.columns,
+                rows: chunkRows,
+                rowCount: chunkRows.length,
+              }),
+            });
+            if (!res.ok) {
+              return fail(
+                res.error || `Échec chargement table « ${table.name} »`
+              );
+            }
+            tableInserted += res.inserted ?? 0;
+            if (rowList.length > ROW_CHUNK) {
+              setProgressLabel(
+                `Chargement « ${table.name} » (${Math.min(off + ROW_CHUNK, rows)}/${rows})…`
+              );
+            }
           }
-          totalInserted += res.inserted ?? 0;
+          totalInserted += tableInserted;
           pushLog(
             "ok",
-            `✓ Table « ${table.name} » — ${res.inserted ?? 0} ligne(s) insérée(s).`
+            `✓ Table « ${table.name} » — ${tableInserted} ligne(s) insérée(s).`
           );
           setProgressPct(Math.round(base + ((i + 1) / total) * span));
         }
@@ -455,7 +484,11 @@ export function MaintenancePanel({
         let batch = 0;
         while (!done) {
           batch++;
-          const res = await restoreStepSqlBatchAction(fileContent, offset, 40);
+          const res = await restoreStepSqlBatchAction({
+            sql: fileContent,
+            offset,
+            limit: 40,
+          });
           if (!res.ok) return fail(res.error || "Échec SQL");
           total = res.total ?? 0;
           const executed = res.executed ?? 0;

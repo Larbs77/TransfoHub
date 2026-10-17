@@ -32,9 +32,9 @@ export type VerifyResult = {
   summary: string;
   tableCount?: number;
   rowCount?: number;
-  /** Parsed dump if kind === dump */
+  /** Parsed dump — server-only; never send through Server Action Flight. */
   dump?: TransfoDump;
-  /** Normalized SQL text if kind === sql */
+  /** Normalized SQL — server-only; never send through Server Action Flight. */
   sql?: string;
 };
 
@@ -595,10 +595,10 @@ export function verifyImportPayload(
     if (!Array.isArray(dump.tables)) {
       errors.push("Le dump ne contient pas de liste de tables.");
     }
-    const tableCount = dump.tables?.length ?? 0;
+    const tables = dump.tables;
+    const tableCount = tables?.length ?? 0;
     const rowCount =
-      dump.tables?.reduce((s, t) => s + (t.rowCount ?? t.rows?.length ?? 0), 0) ??
-      0;
+      tables?.reduce((s, t) => s + (t.rowCount ?? t.rows?.length ?? 0), 0) ?? 0;
 
     if (mode === "truncate") {
       warnings.push(
