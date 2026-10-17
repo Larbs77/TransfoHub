@@ -583,17 +583,14 @@ export function NavBar({ children }: { children?: React.ReactNode }) {
             )}
           </div>
 
-          {/* Alert + Collapse toggle */}
+          {/* Collapse toggle */}
           <div
             className={`border-t px-3 py-2 ${
               collapsed
                 ? "flex flex-col items-center gap-2"
-                : "flex items-center justify-between"
+                : "flex items-center justify-end"
             }`}
           >
-            <div className="hidden lg:block">
-              <AlertBell />
-            </div>
             <button
               onClick={() => setCollapsed((c) => !c)}
               className="hidden lg:flex items-center justify-center rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
@@ -615,6 +612,9 @@ export function NavBar({ children }: { children?: React.ReactNode }) {
           collapsed ? "lg:pl-[68px]" : "lg:pl-64"
         }`}
       >
+        <header className="sticky top-0 z-30 hidden h-14 items-center justify-end border-b bg-card/95 px-4 backdrop-blur-sm lg:flex">
+          <AlertBell />
+        </header>
         {children}
       </div>
     </TooltipProvider>

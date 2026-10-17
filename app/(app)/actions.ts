@@ -52,9 +52,12 @@ import {
 } from "@/lib/comite-niveau";
 import {
   countUnreadNotifications,
+  countUserNotifications,
   listUserNotifications,
   markAllNotificationsRead,
   markNotificationRead,
+  markNotificationUnread,
+  type ListNotificationsOpts,
   notifyRaidAssigned,
   notifyRaidChanged,
 } from "@/lib/notifications";
@@ -1649,10 +1652,50 @@ export async function markMyNotificationRead(notificationId: string) {
   await markNotificationRead(session.userId, notificationId);
 }
 
+export async function markMyNotificationUnread(notificationId: string) {
+  const session = await requireAuth();
+  if (session.isMaintenance) return;
+  await markNotificationUnread(session.userId, notificationId);
+}
+
 export async function markAllMyNotificationsRead() {
   const session = await requireAuth();
   if (session.isMaintenance) return 0;
   return markAllNotificationsRead(session.userId);
+}
+
+const CENTRE_PAGE_SIZE = 30;
+
+export async function getMyNotificationsCentre(opts?: {
+  readState?: ListNotificationsOpts["readState"];
+  type?: string;
+  q?: string;
+  periodDays?: number | null;
+  page?: number;
+}) {
+  const session = await requireAuth();
+  if (session.isMaintenance) {
+    return { items: [] as Awaited<ReturnType<typeof listUserNotifications>>, total: 0, unreadCount: 0, page: 1, pageSize: CENTRE_PAGE_SIZE };
+  }
+  const page = Math.max(1, opts?.page ?? 1);
+  const since =
+    opts?.periodDays && opts.periodDays > 0
+      ? new Date(Date.now() - opts.periodDays * 24 * 60 * 60 * 1000)
+      : undefined;
+  const query: ListNotificationsOpts = {
+    readState: opts?.readState ?? "all",
+    type: opts?.type || undefined,
+    q: opts?.q,
+    since,
+    limit: CENTRE_PAGE_SIZE,
+    offset: (page - 1) * CENTRE_PAGE_SIZE,
+  };
+  const [items, total, unreadCount] = await Promise.all([
+    listUserNotifications(session.userId, query),
+    countUserNotifications(session.userId, query),
+    countUnreadNotifications(session.userId),
+  ]);
+  return { items, total, unreadCount, page, pageSize: CENTRE_PAGE_SIZE };
 }
 
 // ── Chantier CRUD ────────────────────────────────────

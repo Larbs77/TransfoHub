@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Bell, CheckCheck, AlertTriangle, Inbox } from "lucide-react";
-import { format } from "date-fns";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Bell, CheckCheck, AlertTriangle, Inbox, History } from "lucide-react";
+import { format, formatDistanceToNow } from "date-fns";
 import { fr } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +17,7 @@ import {
   markAllMyNotificationsRead,
   markMyNotificationRead,
 } from "@/app/(app)/actions";
+import { NOTIFICATION_TYPE_LABELS } from "@/lib/notification-labels";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -45,23 +46,25 @@ export function AlertBell() {
   const router = useRouter();
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [notifs, setNotifs] = useState<UserNotif[]>([]);
+  const [unreadItems, setUnreadItems] = useState<UserNotif[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [inboxFilter, setInboxFilter] = useState<"unread" | "all">("unread");
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [a, n] = await Promise.all([
+      const empty = { items: [] as UserNotif[], unreadCount: 0 };
+      const [a, n, unread] = await Promise.all([
         getAlerts().catch(() => [] as Alert[]),
-        getMyNotifications().catch(() => ({
-          items: [] as UserNotif[],
-          unreadCount: 0,
-        })),
+        getMyNotifications().catch(() => empty),
+        getMyNotifications({ unreadOnly: true }).catch(() => empty),
       ]);
       setAlerts(a);
       setNotifs(n.items);
-      setUnreadCount(n.unreadCount);
+      setUnreadItems(unread.items);
+      setUnreadCount(unread.unreadCount);
     } finally {
       setLoading(false);
     }
@@ -76,17 +79,23 @@ export function AlertBell() {
     if (open) refresh();
   }, [open, refresh]);
 
-  const badgeCount = unreadCount + alerts.length;
+  const visibleNotifs = useMemo(() => {
+    if (inboxFilter === "unread") return unreadItems;
+    return notifs;
+  }, [inboxFilter, notifs, unreadItems]);
+
+  /** Badge = unread events only. Operational alerts have their own tab count. */
+  const badgeCount = unreadCount;
 
   async function handleNotifClick(n: UserNotif) {
     if (!n.readAt) {
       try {
         await markMyNotificationRead(n.id);
+        const now = new Date();
         setNotifs((prev) =>
-          prev.map((x) =>
-            x.id === n.id ? { ...x, readAt: new Date() } : x
-          )
+          prev.map((x) => (x.id === n.id ? { ...x, readAt: now } : x))
         );
+        setUnreadItems((prev) => prev.filter((x) => x.id !== n.id));
         setUnreadCount((c) => Math.max(0, c - 1));
       } catch {
         /* ignore */
@@ -101,9 +110,11 @@ export function AlertBell() {
   async function handleMarkAllRead() {
     try {
       await markAllMyNotificationsRead();
+      const now = new Date();
       setNotifs((prev) =>
-        prev.map((x) => ({ ...x, readAt: x.readAt ?? new Date() }))
+        prev.map((x) => ({ ...x, readAt: x.readAt ?? now }))
       );
+      setUnreadItems([]);
       setUnreadCount(0);
     } catch {
       /* ignore */
@@ -113,7 +124,16 @@ export function AlertBell() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative"
+          aria-label={
+            unreadCount > 0
+              ? `Notifications, ${unreadCount} non lue${unreadCount > 1 ? "s" : ""}`
+              : "Notifications"
+          }
+        >
           <Bell className="size-5" />
           {badgeCount > 0 && (
             <span className="absolute -top-1 -right-1 flex size-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
@@ -122,13 +142,13 @@ export function AlertBell() {
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[min(100vw-2rem,26rem)] p-0">
+      <PopoverContent align="end" className="w-[min(100vw-2rem,28rem)] p-0">
         <Tabs defaultValue="notifications" className="w-full">
           <div className="border-b px-2 pt-2">
             <TabsList className="grid h-auto w-full grid-cols-2 gap-1 bg-muted/50 p-1">
               <TabsTrigger value="notifications" className="gap-1.5 text-xs">
                 <Inbox className="size-3.5" />
-                Notifications
+                Inbox
                 {unreadCount > 0 && (
                   <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">
                     {unreadCount}
@@ -137,7 +157,7 @@ export function AlertBell() {
               </TabsTrigger>
               <TabsTrigger value="alertes" className="gap-1.5 text-xs">
                 <AlertTriangle className="size-3.5" />
-                Alertes / Relances
+                Échéances
                 {alerts.length > 0 && (
                   <span className="rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-semibold text-destructive-foreground">
                     {alerts.length}
@@ -148,10 +168,28 @@ export function AlertBell() {
           </div>
 
           <TabsContent value="notifications" className="mt-0">
-            <div className="flex items-center justify-between border-b px-3 py-2">
-              <p className="text-xs text-muted-foreground">
-                {loading ? "Chargement…" : `${notifs.length} notification(s)`}
-              </p>
+            <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+              <div className="flex gap-1">
+                <Button
+                  type="button"
+                  variant={inboxFilter === "unread" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setInboxFilter("unread")}
+                >
+                  Non lues
+                  {unreadCount > 0 ? ` (${unreadCount})` : ""}
+                </Button>
+                <Button
+                  type="button"
+                  variant={inboxFilter === "all" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setInboxFilter("all")}
+                >
+                  Récentes
+                </Button>
+              </div>
               {unreadCount > 0 && (
                 <Button
                   variant="ghost"
@@ -165,13 +203,20 @@ export function AlertBell() {
               )}
             </div>
             <div className="max-h-80 overflow-y-auto">
-              {notifs.length === 0 ? (
+              {loading && notifs.length === 0 ? (
                 <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-                  Aucune notification
+                  Chargement…
+                </p>
+              ) : visibleNotifs.length === 0 ? (
+                <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  {inboxFilter === "unread"
+                    ? "Aucune notification non lue"
+                    : "Aucune notification récente"}
                 </p>
               ) : (
-                notifs.map((n) => {
+                visibleNotifs.map((n) => {
                   const unread = !n.readAt;
+                  const typeLabel = NOTIFICATION_TYPE_LABELS[n.type] ?? n.type;
                   return (
                     <button
                       key={n.id}
@@ -182,8 +227,10 @@ export function AlertBell() {
                       }`}
                     >
                       <div className="flex items-start gap-2">
-                        {unread && (
+                        {unread ? (
                           <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
+                        ) : (
+                          <span className="mt-1.5 size-1.5 shrink-0" />
                         )}
                         <div className="min-w-0 flex-1">
                           <span
@@ -199,13 +246,15 @@ export function AlertBell() {
                             </p>
                           )}
                           <p className="mt-1 text-[10px] text-muted-foreground">
-                            {format(new Date(n.createdAt), "dd MMM yyyy HH:mm", {
+                            {typeLabel}
+                            {" · "}
+                            {formatDistanceToNow(new Date(n.createdAt), {
+                              addSuffix: true,
                               locale: fr,
                             })}
-                            {n.type === "raid_assigned" ? " · Assignation" : ""}
-                            {n.type === "raid_changed" ? " · Modification" : ""}
-                            {n.type === "raid_shared" ? " · Partage" : ""}
-                            {n.type === "raid_mention" ? " · Mention" : ""}
+                            {n.readAt
+                              ? ` · Lu le ${format(new Date(n.readAt), "dd MMM HH:mm", { locale: fr })}`
+                              : ""}
                           </p>
                         </div>
                       </div>
@@ -214,12 +263,25 @@ export function AlertBell() {
                 })
               )}
             </div>
+            <div className="flex items-center justify-between border-t px-3 py-2">
+              <p className="text-[10px] text-muted-foreground">
+                {loading
+                  ? "Chargement…"
+                  : `${notifs.length} plus récente(s) — l’historique complet est dans le centre`}
+              </p>
+              <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" asChild>
+                <Link href="/notifications" onClick={() => setOpen(false)}>
+                  <History className="size-3.5" />
+                  Voir l&apos;historique
+                </Link>
+              </Button>
+            </div>
           </TabsContent>
 
           <TabsContent value="alertes" className="mt-0">
             <div className="border-b px-3 py-2">
               <p className="text-xs text-muted-foreground">
-                Alertes opérationnelles calculées (actions échues, Q&A critiques)
+                File opérationnelle : actions RAID échues et Q&A critiques. Ce n&apos;est pas l&apos;inbox.
               </p>
             </div>
             <div className="max-h-80 overflow-y-auto">

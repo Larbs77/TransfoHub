@@ -1,24 +1,45 @@
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma/client";
 import { isKanbanLeadershipRole } from "@/lib/raid-labels";
 import { scheduleRaidEventMails } from "@/lib/raid-notification-mail";
+import {
+  NOTIFICATION_TYPE_LABELS,
+  NOTIFICATION_TYPES,
+  type AppNotification,
+  type NotificationReadState,
+  type NotificationType,
+} from "@/lib/notification-labels";
 
-export type NotificationType =
-  | "raid_assigned"
-  | "raid_changed"
-  | "raid_shared"
-  | "raid_mention";
+export type { AppNotification, NotificationReadState, NotificationType };
+export { NOTIFICATION_TYPE_LABELS, NOTIFICATION_TYPES };
 
-export type AppNotification = {
-  id: string;
-  type: string;
-  title: string;
-  message: string;
-  href: string;
-  entityType: string;
-  entityId: string;
-  readAt: Date | null;
-  createdAt: Date;
+export type ListNotificationsOpts = {
+  readState?: NotificationReadState;
+  type?: string;
+  q?: string;
+  since?: Date;
+  limit?: number;
+  offset?: number;
 };
+
+function notificationWhere(
+  userId: string,
+  opts?: ListNotificationsOpts
+): Prisma.NotificationWhereInput {
+  const where: Prisma.NotificationWhereInput = { userId };
+  if (opts?.readState === "unread") where.readAt = null;
+  if (opts?.readState === "read") where.readAt = { not: null };
+  if (opts?.type) where.type = opts.type;
+  if (opts?.since) where.createdAt = { gte: opts.since };
+  const q = opts?.q?.trim();
+  if (q) {
+    where.OR = [
+      { title: { contains: q, mode: "insensitive" } },
+      { message: { contains: q, mode: "insensitive" } },
+    ];
+  }
+  return where;
+}
 
 /** Resolve active app user ids linked to these ressources. */
 export async function userIdsForRessourceIds(
@@ -326,36 +347,50 @@ export async function notifyRaidMentions(params: {
   });
 }
 
+const NOTIF_SELECT = {
+  id: true,
+  type: true,
+  title: true,
+  message: true,
+  href: true,
+  entityType: true,
+  entityId: true,
+  readAt: true,
+  createdAt: true,
+} as const;
+
 export async function listUserNotifications(
   userId: string,
-  opts?: { unreadOnly?: boolean; limit?: number }
+  opts?: ListNotificationsOpts & { unreadOnly?: boolean }
 ): Promise<AppNotification[]> {
   const limit = opts?.limit ?? 50;
+  const offset = opts?.offset ?? 0;
+  const readState: NotificationReadState | undefined = opts?.unreadOnly
+    ? "unread"
+    : opts?.readState;
   return prisma.notification.findMany({
-    where: {
-      userId,
-      ...(opts?.unreadOnly ? { readAt: null } : {}),
-    },
+    where: notificationWhere(userId, { ...opts, readState }),
     orderBy: { createdAt: "desc" },
     take: limit,
-    select: {
-      id: true,
-      type: true,
-      title: true,
-      message: true,
-      href: true,
-      entityType: true,
-      entityId: true,
-      readAt: true,
-      createdAt: true,
-    },
+    skip: offset,
+    select: NOTIF_SELECT,
+  });
+}
+
+export async function countUserNotifications(
+  userId: string,
+  opts?: ListNotificationsOpts & { unreadOnly?: boolean }
+): Promise<number> {
+  const readState: NotificationReadState | undefined = opts?.unreadOnly
+    ? "unread"
+    : opts?.readState;
+  return prisma.notification.count({
+    where: notificationWhere(userId, { ...opts, readState }),
   });
 }
 
 export async function countUnreadNotifications(userId: string): Promise<number> {
-  return prisma.notification.count({
-    where: { userId, readAt: null },
-  });
+  return countUserNotifications(userId, { readState: "unread" });
 }
 
 export async function markNotificationRead(
@@ -365,6 +400,16 @@ export async function markNotificationRead(
   await prisma.notification.updateMany({
     where: { id: notificationId, userId, readAt: null },
     data: { readAt: new Date() },
+  });
+}
+
+export async function markNotificationUnread(
+  userId: string,
+  notificationId: string
+): Promise<void> {
+  await prisma.notification.updateMany({
+    where: { id: notificationId, userId },
+    data: { readAt: null },
   });
 }
 
