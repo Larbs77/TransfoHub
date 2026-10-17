@@ -2,8 +2,6 @@
 
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { format } from "date-fns";
-import { fr } from "date-fns/locale";
 import { Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Calendar, Search, ShieldAlert, Columns3, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -69,6 +67,7 @@ import {
   type RaidVisibilityFilter,
   risqueAActionsLieesOuvertes,
   raidEffectiveEcheance,
+  formatRaidCalendarDate,
   type StatusConfigItem,
   type RaidFieldOptionItem,
 } from "@/lib/raid-labels";
@@ -173,6 +172,8 @@ interface Props {
   chantiers?: ChantierFilterOption[];
   /** Same catalog as the RAID create form (`getComitesForSelect`). */
   comites?: ComiteFilterOption[];
+  /** Server clock — keeps échéance labels identical on SSR and hydrate. */
+  nowMs: number;
 }
 
 type SortField = "intitule" | "statut" | "categorie" | "responsable" | "date_identification" | "date_echeance" | "criticite";
@@ -303,6 +304,7 @@ function RaidTable({
   onQueryPatch,
   showDoublonVisibility = false,
   detailFrom,
+  nowMs,
 }: {
   items: RaidRow[];
   showType: boolean;
@@ -327,6 +329,7 @@ function RaidTable({
   showDoublonVisibility?: boolean;
   /** Register URL stored on the detail link so Retour restores filters. */
   detailFrom?: string;
+  nowMs: number;
 }) {
   const canWriteRaid = useCanWritePage("/raid");
   const { ressourceId } = useUser();
@@ -455,8 +458,7 @@ function RaidTable({
     }
   }
 
-  // Stable "now" to avoid SSR/client hydration mismatch from new Date() in render
-  const [now] = useState(() => new Date());
+  const now = useMemo(() => new Date(nowMs), [nowMs]);
 
   const isRisqueView = items.length > 0 && items.every((i) => i.type === "Risque");
   const isActionView = items.length > 0 && items.every((i) => i.type === "Action");
@@ -1026,7 +1028,7 @@ function RaidTable({
                         title={r.deleteMotif || undefined}
                       >
                         Supprimée
-                        {` le ${format(new Date(r.deletedAt), "dd/MM/yyyy", { locale: fr })}`}
+                        {` le ${formatRaidCalendarDate(r.deletedAt, "dd/MM/yyyy")}`}
                         {r.deleteMotif ? ` — ${r.deleteMotif}` : ""}
                       </p>
                     ) : null}
@@ -1073,12 +1075,12 @@ function RaidTable({
                       r.date_echeance && (
                         <div
                           className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400"
-                          title={`Échéance initiale dépassée : ${format(new Date(r.date_echeance), "dd/MM/yyyy")}`}
+                          title={`Échéance initiale dépassée : ${formatRaidCalendarDate(r.date_echeance, "dd/MM/yyyy")}`}
                         >
                           <AlertTriangle className="size-3 shrink-0 text-amber-500" />
                           <span className="truncate">
                             Échéance initiale{" "}
-                            {format(new Date(r.date_echeance), "dd/MM/yy")}{" "}
+                            {formatRaidCalendarDate(r.date_echeance, "dd/MM/yy")}{" "}
                             · dépassée
                           </span>
                         </div>
@@ -1119,9 +1121,7 @@ function RaidTable({
                     </Badge>
                   </TableCell>
                   <TableCell className="p-1.5 text-xs tabular-nums text-muted-foreground">
-                    {r.date_identification
-                      ? format(new Date(r.date_identification), "dd/MM/yy")
-                      : "—"}
+                    {formatRaidCalendarDate(r.date_identification, "dd/MM/yy")}
                   </TableCell>
                   {isActionView && (
                     <TableCell className="p-1.5 text-xs tabular-nums">
@@ -1138,7 +1138,7 @@ function RaidTable({
                           now
                         );
                         const initiale = r.date_echeance
-                          ? format(new Date(r.date_echeance), "dd/MM/yy")
+                          ? formatRaidCalendarDate(r.date_echeance, "dd/MM/yy")
                           : null;
                         return (
                           <span
@@ -1151,7 +1151,7 @@ function RaidTable({
                                 : "Échéance actualisée"
                             }
                           >
-                            {format(ech, "dd/MM/yy")}
+                            {formatRaidCalendarDate(ech, "dd/MM/yy")}
                           </span>
                         );
                       })()}
@@ -1324,7 +1324,7 @@ function RaidScopeToggles({
   );
 }
 
-export function RaidList({ items, filterType, initialProbabilite, initialImpact, initialRisque, initialMaitrise, initialStatut, initialOverdue, initialCritical, initialRaidScope = "mine", showSharedScope = true, statusConfigs, fieldOptions, chantiers = [], comites = [] }: Props) {
+export function RaidList({ items, filterType, initialProbabilite, initialImpact, initialRisque, initialMaitrise, initialStatut, initialOverdue, initialCritical, initialRaidScope = "mine", showSharedScope = true, statusConfigs, fieldOptions, chantiers = [], comites = [], nowMs }: Props) {
   const { ressourceId, displayName } = useUser();
   const canWriteRaid = useCanWritePage("/raid");
   const router = useRouter();
@@ -1485,10 +1485,10 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
               ? `${r.chantier.code} - ${r.chantier.nom}`
               : "",
             "Échéance act.": ech
-              ? format(ech, "dd MMM yyyy", { locale: fr })
+              ? formatRaidCalendarDate(ech, "dd MMM yyyy")
               : "",
             "Échéance init.": r.date_echeance
-              ? format(new Date(r.date_echeance), "dd MMM yyyy", { locale: fr })
+              ? formatRaidCalendarDate(r.date_echeance, "dd MMM yyyy")
               : "",
           },
         };
@@ -1586,6 +1586,7 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
               onQueryPatch={urlSync ? patchQuery : undefined}
               showDoublonVisibility={filterType === "Action"}
               detailFrom={detailFrom}
+              nowMs={nowMs}
               onFilteredChange={(rows) => {
                 filteredIdsRef.current[filterType] = rows.map((r) => r.id);
               }}
@@ -1597,6 +1598,7 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
                 items={typeItems}
                 statusConfigs={statusConfigs}
                 detailFrom={detailFrom}
+                nowMs={nowMs}
               />
             </TabsContent>
           )}
@@ -1770,6 +1772,7 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
                     }
                     showDoublonVisibility={t === "Action"}
                     detailFrom={detailFrom}
+                    nowMs={nowMs}
                     onFilteredChange={(rows) => {
                       filteredIdsRef.current[t] = rows.map((r) => r.id);
                     }}
@@ -1782,6 +1785,7 @@ export function RaidList({ items, filterType, initialProbabilite, initialImpact,
                       items={tItems}
                       statusConfigs={statusConfigs}
                       detailFrom={detailFrom}
+                      nowMs={nowMs}
                     />
                   </TabsContent>
                 )}

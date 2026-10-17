@@ -6,6 +6,7 @@ import {
   IMPACT_LABELS,
   PROBABILITE_LABELS,
   RAID_AUDIT_FIELD_LABELS,
+  formatRaidCalendarDate,
 } from "@/lib/raid-labels";
 
 export type RaidAuditAction =
@@ -138,11 +139,7 @@ export function formatRaidAuditDate(
   value: Date | string | null | undefined
 ): string {
   if (value == null || value === "") return AUDIT_EMPTY;
-  const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return AUDIT_EMPTY;
-  const key = d.toISOString().slice(0, 10);
-  const [y, m, day] = key.split("-");
-  return `${day}/${m}/${y}`;
+  return formatRaidCalendarDate(value, "dd/MM/yyyy");
 }
 
 export function formatChantierAuditLabel(

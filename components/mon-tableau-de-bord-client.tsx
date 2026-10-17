@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { raidDetailHref } from "@/lib/raid-list-query";
-import { format } from "date-fns";
-import { fr } from "date-fns/locale";
 import {
   LayoutDashboard,
   FolderKanban,
@@ -74,6 +72,7 @@ import {
   type RaidVisibilityFilter,
   isRaidInitialEcheancePast,
   raidEffectiveEcheance,
+  formatRaidCalendarDate,
   getLabelsForKind,
   mergeFieldLabelsWithData,
   getStatutsFromConfig,
@@ -201,6 +200,7 @@ function PersonalRaidTypeTable({
   chantiers = EMPTY_CHANTIERS,
   comites = EMPTY_COMITES,
   onFilteredChange,
+  nowMs,
 }: {
   items: PersonalRaidRow[];
   raidType: string;
@@ -209,6 +209,7 @@ function PersonalRaidTypeTable({
   chantiers?: ChantierFilterOption[];
   comites?: ComiteFilterOption[];
   onFilteredChange?: (rows: PersonalRaidRow[]) => void;
+  nowMs: number;
 }) {
   const [search, setSearch] = useState("");
   const [filterCategorie, setFilterCategorie] = useState<string[]>([]);
@@ -225,7 +226,7 @@ function PersonalRaidTypeTable({
     useState<RaidVisibilityFilter>("active");
   const [pageSize, setPageSize] = useState<number>(10);
   const [currentPage, setCurrentPage] = useState(1);
-  const [now] = useState(() => new Date());
+  const now = useMemo(() => new Date(nowMs), [nowMs]);
 
   const isRisqueView = raidType === "Risque";
   const isActionView = raidType === "Action";
@@ -716,12 +717,12 @@ function PersonalRaidTypeTable({
                     r.date_echeance && (
                       <span
                         className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400"
-                        title={`Échéance initiale dépassée : ${format(new Date(r.date_echeance), "dd/MM/yyyy")}`}
+                        title={`Échéance initiale dépassée : ${formatRaidCalendarDate(r.date_echeance, "dd/MM/yyyy")}`}
                       >
                         <AlertTriangle className="size-3 shrink-0 text-amber-500" />
                         <span className="truncate">
                           Échéance initiale{" "}
-                          {format(new Date(r.date_echeance), "dd/MM/yy")}{" "}
+                          {formatRaidCalendarDate(r.date_echeance, "dd/MM/yy")}{" "}
                           · dépassée
                         </span>
                       </span>
@@ -752,7 +753,7 @@ function PersonalRaidTypeTable({
                       r.date_echeance
                     );
                     return ech
-                      ? format(ech, "dd MMM yyyy", { locale: fr })
+                      ? formatRaidCalendarDate(ech, "dd MMM yyyy")
                       : "—";
                   })()}
                 </td>
@@ -853,6 +854,7 @@ export function MonTableauDeBordClient({
   comites = EMPTY_COMITES,
   capacite = null,
   capaciteYear,
+  nowMs,
 }: {
   data: PersonalDashboardData;
   statusConfigs?: StatusConfigItem[];
@@ -861,6 +863,7 @@ export function MonTableauDeBordClient({
   comites?: ComiteFilterOption[];
   capacite?: PersonalCapaciteData | null;
   capaciteYear: number;
+  nowMs: number;
 }) {
   const filteredIdsRef = useRef<Record<string, string[]>>({});
   const [chantierFilter, setChantierFilter] = useState<string>("__all__");
@@ -964,7 +967,7 @@ export function MonTableauDeBordClient({
               ? `${r.chantierCode}${r.chantierNom ? ` — ${r.chantierNom}` : ""}`
               : "",
             "Échéance act.": ech
-              ? format(ech, "dd MMM yyyy", { locale: fr })
+              ? formatRaidCalendarDate(ech, "dd MMM yyyy")
               : "",
             Périmètre: r.isMine ? "M'est assigné" : "Chantier",
           },
@@ -1484,6 +1487,7 @@ export function MonTableauDeBordClient({
                                 fieldOptions={fieldOptions}
                                 chantiers={chantiers}
                                 comites={comites}
+                                nowMs={nowMs}
                                 onFilteredChange={(rows) => {
                                   filteredIdsRef.current[t] = rows.map((r) => r.id);
                                 }}
@@ -1500,6 +1504,7 @@ export function MonTableauDeBordClient({
                               ) : (
                                 <ActionKanban
                                   detailFrom="/mon-tableau-de-bord"
+                                  nowMs={nowMs}
                                   items={items.map((r) => ({
                                     id: r.id,
                                     type: r.type,

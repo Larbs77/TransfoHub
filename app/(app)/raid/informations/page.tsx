@@ -42,6 +42,7 @@ export default async function RaidInformationsPage({ searchParams }: Props) {
               fieldOptions={fieldOptions}
               chantiers={chantiers}
               comites={comites}
+              nowMs={Date.now()}
             />
           </CardContent>
         </Card>

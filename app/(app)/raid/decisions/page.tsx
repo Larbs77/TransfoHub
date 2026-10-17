@@ -45,6 +45,7 @@ export default async function RaidDecisionsPage({ searchParams }: Props) {
               fieldOptions={fieldOptions}
               chantiers={chantiers}
               comites={comites}
+              nowMs={Date.now()}
             />
           </CardContent>
         </Card>

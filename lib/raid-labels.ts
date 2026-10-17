@@ -80,16 +80,60 @@ export function raidEffectiveEcheance(
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function endOfDay(d: Date): Date {
-  return new Date(
-    d.getFullYear(),
-    d.getMonth(),
-    d.getDate(),
-    23,
-    59,
-    59,
-    999
-  );
+const FR_MONTHS_SHORT = [
+  "janv.",
+  "févr.",
+  "mars",
+  "avr.",
+  "mai",
+  "juin",
+  "juil.",
+  "août",
+  "sept.",
+  "oct.",
+  "nov.",
+  "déc.",
+] as const;
+
+/** UTC calendar day `YYYY-MM-DD` — stable across Node TZ and the browser. */
+export function raidCalendarDay(
+  value: Date | string | null | undefined
+): string | null {
+  if (value == null || value === "") return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+}
+
+export type RaidCalendarDatePattern =
+  | "dd/MM/yyyy"
+  | "dd/MM/yy"
+  | "dd MMM yyyy"
+  | "dd MMM yy";
+
+/** Format a RAID date by its UTC calendar day (no local TZ shift on hydrate). */
+export function formatRaidCalendarDate(
+  value: Date | string | null | undefined,
+  pattern: RaidCalendarDatePattern = "dd/MM/yyyy"
+): string {
+  const key = raidCalendarDay(value);
+  if (!key) return "—";
+  const [y, m, day] = key.split("-");
+  const monthName = FR_MONTHS_SHORT[Number(m) - 1] ?? m;
+  switch (pattern) {
+    case "dd/MM/yy":
+      return `${day}/${m}/${y.slice(2)}`;
+    case "dd MMM yyyy":
+      return `${day} ${monthName} ${y}`;
+    case "dd MMM yy":
+      return `${day} ${monthName} ${y.slice(2)}`;
+    default:
+      return `${day}/${m}/${y}`;
+  }
+}
+
+function endOfIsoDayMs(isoDay: string): number {
+  return Date.parse(`${isoDay}T23:59:59.999Z`);
 }
 
 function localDayStartMs(d: Date): number {
@@ -179,7 +223,9 @@ export function isRaidOverdue(
   if (isRaidClosed(statut)) return false;
   const d = raidEffectiveEcheance(dateEcheanceActualisee, dateEcheanceInitiale);
   if (!d) return false;
-  return endOfDay(d).getTime() < now.getTime();
+  const day = raidCalendarDay(d);
+  if (!day) return false;
+  return endOfIsoDayMs(day) < now.getTime();
 }
 
 /**
@@ -192,13 +238,9 @@ export function isRaidInitialEcheancePast(
   now: Date = new Date()
 ): boolean {
   if (isRaidClosed(statut)) return false;
-  if (dateEcheanceInitiale == null || dateEcheanceInitiale === "") return false;
-  const d =
-    dateEcheanceInitiale instanceof Date
-      ? dateEcheanceInitiale
-      : new Date(dateEcheanceInitiale);
-  if (Number.isNaN(d.getTime())) return false;
-  return endOfDay(d).getTime() < now.getTime();
+  const day = raidCalendarDay(dateEcheanceInitiale);
+  if (!day) return false;
+  return endOfIsoDayMs(day) < now.getTime();
 }
 
 /**

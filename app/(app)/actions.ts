@@ -53,10 +53,15 @@ import {
 import {
   countUnreadNotifications,
   countUserNotifications,
+  getAttentionPilotage,
+  getUserRaidChangeNotifScope,
   listUserNotifications,
   markAllNotificationsRead,
   markNotificationRead,
   markNotificationUnread,
+  markNotificationsUnread,
+  markRaidThreadRead,
+  setUserRaidChangeNotifScope,
   type ListNotificationsOpts,
   notifyRaidAssigned,
   notifyRaidChanged,
@@ -1658,10 +1663,48 @@ export async function markMyNotificationUnread(notificationId: string) {
   await markNotificationUnread(session.userId, notificationId);
 }
 
-export async function markAllMyNotificationsRead() {
+export async function markMyNotificationsUnread(ids: string[]) {
   const session = await requireAuth();
   if (session.isMaintenance) return 0;
+  return markNotificationsUnread(session.userId, ids);
+}
+
+export async function markMyRaidThreadRead(entityId: string) {
+  const session = await requireAuth();
+  if (session.isMaintenance) return 0;
+  return markRaidThreadRead(session.userId, entityId);
+}
+
+export async function markAllMyNotificationsRead() {
+  const session = await requireAuth();
+  if (session.isMaintenance) return { count: 0, ids: [] as string[] };
   return markAllNotificationsRead(session.userId);
+}
+
+export async function getMyRaidChangeNotifScope() {
+  const session = await requireAuth();
+  if (session.isMaintenance) return "chantier" as const;
+  return getUserRaidChangeNotifScope(session.userId);
+}
+
+export async function saveMyRaidChangeNotifScope(scope: "chantier" | "mine") {
+  const session = await requireAuth();
+  if (session.isMaintenance) return;
+  await setUserRaidChangeNotifScope(session.userId, scope);
+}
+
+export async function getNotificationPilotage() {
+  const session = await requireAuth();
+  if (session.isMaintenance) {
+    throw new Error("Accès non autorisé");
+  }
+  if (
+    session.role !== "Admin" &&
+    session.role !== "Programme_Office"
+  ) {
+    throw new Error("Accès non autorisé");
+  }
+  return getAttentionPilotage({ chantierIds: "all" });
 }
 
 const CENTRE_PAGE_SIZE = 30;
@@ -1696,6 +1739,178 @@ export async function getMyNotificationsCentre(opts?: {
     countUnreadNotifications(session.userId),
   ]);
   return { items, total, unreadCount, page, pageSize: CENTRE_PAGE_SIZE };
+}
+
+export async function getHeaderSignals(): Promise<{
+  activeActions: number;
+  overdueActions: number;
+  dueThisWeek: number;
+  dueNextWeek: number;
+  closeRate: number;
+}> {
+  const empty = {
+    activeActions: 0,
+    overdueActions: 0,
+    dueThisWeek: 0,
+    dueNextWeek: 0,
+    closeRate: 0,
+  };
+  const session = await requireAuth();
+  if (session.isMaintenance) return empty;
+  const chantierIds = await getUserChantierIds(session);
+  const chantierScope =
+    chantierIds === "all" ? {} : { chantierId: { in: chantierIds } };
+  const now = new Date();
+
+  const actions = await prisma.raid.findMany({
+    where: {
+      ...chantierScope,
+      deletedAt: null,
+      type: "Action",
+      statut: { not: "Doublon" },
+    },
+    select: {
+      statut: true,
+      date_echeance: true,
+      date_echeance_actualisee: true,
+    },
+  });
+
+  let activeActions = 0;
+  let overdueActions = 0;
+  let dueThisWeek = 0;
+  let dueNextWeek = 0;
+  let closedActions = 0;
+  for (const a of actions) {
+    if (a.statut === "Clôturé") closedActions += 1;
+    if (!isActionActive(a.statut)) continue;
+    activeActions += 1;
+    if (
+      isRaidOverdue(a.statut, a.date_echeance_actualisee, a.date_echeance, now)
+    ) {
+      overdueActions += 1;
+    }
+    if (
+      isRaidDueThisWeek(
+        a.statut,
+        a.date_echeance_actualisee,
+        a.date_echeance,
+        now
+      )
+    ) {
+      dueThisWeek += 1;
+    }
+    if (
+      isRaidDueNextWeek(
+        a.statut,
+        a.date_echeance_actualisee,
+        a.date_echeance,
+        now
+      )
+    ) {
+      dueNextWeek += 1;
+    }
+  }
+  const closeRate =
+    actions.length > 0
+      ? Math.round((closedActions / actions.length) * 100)
+      : 0;
+
+  return {
+    activeActions,
+    overdueActions,
+    dueThisWeek,
+    dueNextWeek,
+    closeRate,
+  };
+}
+
+export async function searchApp(raw: string): Promise<
+  {
+    kind: "chantier" | "raid";
+    id: string;
+    href: string;
+    title: string;
+    subtitle: string;
+  }[]
+> {
+  const session = await requireAuth();
+  if (session.isMaintenance) return [];
+  const q = raw.trim().slice(0, 64);
+  if (q.length < 2) return [];
+  const chantierIds = await getUserChantierIds(session);
+  if (chantierIds !== "all" && chantierIds.length === 0) return [];
+  const chantierWhere =
+    chantierIds === "all" ? {} : { id: { in: chantierIds } };
+  const shareOr = await sharedRaidVisibilityOr(session.ressourceId);
+  const raidPerimeter =
+    chantierIds === "all"
+      ? {}
+      : {
+          OR: [
+            { chantierId: { in: chantierIds } },
+            ...(shareOr ? [shareOr] : []),
+          ],
+        };
+
+  const [chantiers, raids] = await Promise.all([
+    prisma.chantier.findMany({
+      where: {
+        AND: [
+          chantierWhere,
+          {
+            OR: [
+              { code: { contains: q, mode: "insensitive" } },
+              { nom: { contains: q, mode: "insensitive" } },
+            ],
+          },
+        ],
+      },
+      select: { id: true, code: true, nom: true, statut: true },
+      orderBy: { code: "asc" },
+      take: 5,
+    }),
+    prisma.raid.findMany({
+      where: {
+        deletedAt: null,
+        AND: [
+          raidPerimeter,
+          {
+            OR: [
+              { code: { contains: q, mode: "insensitive" } },
+              { intitule: { contains: q, mode: "insensitive" } },
+            ],
+          },
+        ],
+      },
+      select: {
+        id: true,
+        code: true,
+        type: true,
+        intitule: true,
+        chantier: { select: { code: true } },
+      },
+      orderBy: { code: "asc" },
+      take: 6,
+    }),
+  ]);
+
+  return [
+    ...chantiers.map((c) => ({
+      kind: "chantier" as const,
+      id: c.id,
+      href: `/chantiers/${c.id}`,
+      title: `${c.code} — ${c.nom}`,
+      subtitle: c.statut || "Chantier",
+    })),
+    ...raids.map((r) => ({
+      kind: "raid" as const,
+      id: r.id,
+      href: `/raid/${r.id}`,
+      title: `${r.code} — ${r.intitule}`,
+      subtitle: [r.type, r.chantier?.code].filter(Boolean).join(" · "),
+    })),
+  ];
 }
 
 // ── Chantier CRUD ────────────────────────────────────

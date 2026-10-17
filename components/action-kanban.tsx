@@ -14,8 +14,6 @@ import {
 } from "@dnd-kit/core";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { format } from "date-fns";
-import { fr } from "date-fns/locale";
 import {
   CalendarDays,
   User,
@@ -34,6 +32,7 @@ import {
   isRaidOverdue,
   isActionDoublon,
   raidEffectiveEcheance,
+  formatRaidCalendarDate,
   canMoveRaidKanbanClient,
 } from "@/lib/raid-labels";
 import {
@@ -94,6 +93,7 @@ interface Props {
   statusConfigs?: StatusConfigItem[];
   /** Register URL attached to the open link (Retour on the detail page). */
   detailFrom?: string;
+  nowMs: number;
 }
 
 // ── OpenProject-style Kanban Card ──────────────────────
@@ -229,9 +229,7 @@ function KanbanCard({
             >
               <CalendarDays className="size-3" />
               <span>
-                {format(effectiveEcheance, "dd MMM yy", {
-                  locale: fr,
-                })}
+                {formatRaidCalendarDate(effectiveEcheance, "dd MMM yy")}
               </span>
             </div>
           )}
@@ -378,6 +376,7 @@ export function ActionKanban({
   items: propItems,
   statusConfigs,
   detailFrom,
+  nowMs,
 }: Props) {
   const [items, setItems] = useState(propItems);
   const [moveCtx, setMoveCtx] = useState<MoveCtx | null>(null);
@@ -389,7 +388,7 @@ export function ActionKanban({
   const [moveComment, setMoveComment] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const [now] = useState(() => new Date());
+  const now = useMemo(() => new Date(nowMs), [nowMs]);
   const canWriteRaid = useCanWritePage("/raid");
 
   useEffect(() => {

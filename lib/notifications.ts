@@ -6,11 +6,17 @@ import {
   NOTIFICATION_TYPE_LABELS,
   NOTIFICATION_TYPES,
   type AppNotification,
+  type AttentionTypeStats,
   type NotificationReadState,
   type NotificationType,
 } from "@/lib/notification-labels";
 
-export type { AppNotification, NotificationReadState, NotificationType };
+export type {
+  AppNotification,
+  AttentionTypeStats,
+  NotificationReadState,
+  NotificationType,
+};
 export { NOTIFICATION_TYPE_LABELS, NOTIFICATION_TYPES };
 
 export type ListNotificationsOpts = {
@@ -133,6 +139,44 @@ async function mailUserIdsForRaidChange(
   return primary ? [primary] : [];
 }
 
+async function raidNotifyContext(raidId: string): Promise<{
+  chantierId: string;
+  chantierCode: string;
+  responsableRessourceId: string | null;
+}> {
+  const raid = await prisma.raid.findUnique({
+    where: { id: raidId },
+    select: {
+      responsableRessourceId: true,
+      chantier: { select: { id: true, code: true } },
+    },
+  });
+  return {
+    chantierId: raid?.chantier?.id ?? "",
+    chantierCode: raid?.chantier?.code ?? "",
+    responsableRessourceId: raid?.responsableRessourceId ?? null,
+  };
+}
+
+async function filterRaidChangedRecipients(
+  userIds: string[],
+  assigneeRessourceId: string | null
+): Promise<string[]> {
+  if (userIds.length === 0) return [];
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds } },
+    select: { id: true, ressourceId: true, notif_raid_changes: true },
+  });
+  return users
+    .filter((u) => {
+      if (u.notif_raid_changes !== "mine") return true;
+      return (
+        !!assigneeRessourceId && u.ressourceId === assigneeRessourceId
+      );
+    })
+    .map((u) => u.id);
+}
+
 export async function createNotifications(params: {
   userIds: string[];
   type: NotificationType | string;
@@ -141,6 +185,9 @@ export async function createNotifications(params: {
   href?: string;
   entityType?: string;
   entityId?: string;
+  actorName?: string;
+  chantierId?: string;
+  chantierCode?: string;
   /** Do not notify this user (usually the actor). */
   excludeUserId?: string | null;
 }): Promise<number> {
@@ -159,6 +206,9 @@ export async function createNotifications(params: {
       href: params.href ?? "",
       entityType: params.entityType ?? "",
       entityId: params.entityId ?? "",
+      actorName: params.actorName ?? "",
+      chantierId: params.chantierId ?? "",
+      chantierCode: params.chantierCode ?? "",
     })),
   });
   return userIds.length;
@@ -197,6 +247,7 @@ export async function notifyRaidAssigned(params: {
     : "";
   const title = `Assignation RAID : ${label}`;
   const message = `Vous avez été assigné(e) à ${label}${by}.`;
+  const ctx = await raidNotifyContext(params.raidId);
   await createNotifications({
     userIds,
     type: "raid_assigned",
@@ -205,6 +256,9 @@ export async function notifyRaidAssigned(params: {
     href: raidHref(params.raidId),
     entityType: "raid",
     entityId: params.raidId,
+    actorName: params.actorName?.trim() ?? "",
+    chantierId: ctx.chantierId,
+    chantierCode: ctx.chantierCode,
     excludeUserId: params.actorUserId,
   });
   scheduleRaidEventMails({
@@ -233,7 +287,12 @@ export async function notifyRaidChanged(params: {
   sendMail?: boolean;
 }): Promise<void> {
   if (!params.chantierId) return;
-  const userIds = await getChantierLeadershipUserIds(params.chantierId);
+  const ctx = await raidNotifyContext(params.raidId);
+  const leadershipIds = await getChantierLeadershipUserIds(params.chantierId);
+  const userIds = await filterRaidChangedRecipients(
+    leadershipIds,
+    ctx.responsableRessourceId
+  );
   const label = raidLabel(params.code, params.intitule);
   const by = params.actorName?.trim()
     ? ` (${params.actorName.trim()})`
@@ -248,6 +307,9 @@ export async function notifyRaidChanged(params: {
     href: raidHref(params.raidId),
     entityType: "raid",
     entityId: params.raidId,
+    actorName: params.actorName?.trim() ?? "",
+    chantierId: ctx.chantierId || params.chantierId,
+    chantierCode: ctx.chantierCode,
     excludeUserId: params.actorUserId,
   });
   if (params.sendMail === false) return;
@@ -277,6 +339,11 @@ export async function notifyRaidShared(params: {
   actorName?: string;
 }): Promise<void> {
   const userIds = await getChantierLeadershipUserIds(params.targetChantierId);
+  const ctx = await raidNotifyContext(params.raidId);
+  const target = await prisma.chantier.findUnique({
+    where: { id: params.targetChantierId },
+    select: { id: true, code: true },
+  });
   const label = raidLabel(params.code, params.intitule);
   const by = params.actorName?.trim()
     ? ` par ${params.actorName.trim()}`
@@ -296,6 +363,9 @@ export async function notifyRaidShared(params: {
     href: raidHref(params.raidId),
     entityType: "raid",
     entityId: params.raidId,
+    actorName: params.actorName?.trim() ?? "",
+    chantierId: target?.id || ctx.chantierId,
+    chantierCode: target?.code || ctx.chantierCode,
     excludeUserId: params.actorUserId,
   });
   const mailUserId = await getPrimaryChantierLeadershipUserId(
@@ -327,6 +397,7 @@ export async function notifyRaidMentions(params: {
     : "";
   const title = `Mention RAID : ${label}`;
   const message = `Vous avez été mentionné(e) sur ${label}${by}.`;
+  const ctx = await raidNotifyContext(params.raidId);
   await createNotifications({
     userIds,
     type: "raid_mention",
@@ -335,6 +406,9 @@ export async function notifyRaidMentions(params: {
     href: raidHref(params.raidId),
     entityType: "raid",
     entityId: params.raidId,
+    actorName: params.actorName?.trim() ?? "",
+    chantierId: ctx.chantierId,
+    chantierCode: ctx.chantierCode,
     excludeUserId: params.actorUserId,
   });
   scheduleRaidEventMails({
@@ -355,6 +429,9 @@ const NOTIF_SELECT = {
   href: true,
   entityType: true,
   entityId: true,
+  actorName: true,
+  chantierId: true,
+  chantierCode: true,
   readAt: true,
   createdAt: true,
 } as const;
@@ -413,10 +490,175 @@ export async function markNotificationUnread(
   });
 }
 
-export async function markAllNotificationsRead(userId: string): Promise<number> {
+export async function markNotificationsUnread(
+  userId: string,
+  ids: string[]
+): Promise<number> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length === 0) return 0;
   const result = await prisma.notification.updateMany({
-    where: { userId, readAt: null },
+    where: { userId, id: { in: unique } },
+    data: { readAt: null },
+  });
+  return result.count;
+}
+
+export async function markRaidThreadRead(
+  userId: string,
+  entityId: string
+): Promise<number> {
+  if (!entityId) return 0;
+  const result = await prisma.notification.updateMany({
+    where: {
+      userId,
+      entityType: "raid",
+      entityId,
+      type: "raid_changed",
+      readAt: null,
+    },
     data: { readAt: new Date() },
   });
   return result.count;
+}
+
+export async function markAllNotificationsRead(
+  userId: string
+): Promise<{ count: number; ids: string[] }> {
+  const unread = await prisma.notification.findMany({
+    where: { userId, readAt: null },
+    select: { id: true },
+  });
+  const ids = unread.map((r) => r.id);
+  if (ids.length === 0) return { count: 0, ids: [] };
+  const result = await prisma.notification.updateMany({
+    where: { userId, id: { in: ids } },
+    data: { readAt: new Date() },
+  });
+  return { count: result.count, ids };
+}
+
+export async function getUserRaidChangeNotifScope(
+  userId: string
+): Promise<"chantier" | "mine"> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { notif_raid_changes: true },
+  });
+  return user?.notif_raid_changes === "mine" ? "mine" : "chantier";
+}
+
+export async function setUserRaidChangeNotifScope(
+  userId: string,
+  scope: "chantier" | "mine"
+): Promise<void> {
+  await prisma.user.update({
+    where: { id: userId },
+    data: { notif_raid_changes: scope === "mine" ? "mine" : "chantier" },
+  });
+}
+
+const MS_24H = 24 * 60 * 60 * 1000;
+
+export type AttentionStaleRow = {
+  id: string;
+  type: string;
+  title: string;
+  href: string;
+  chantierCode: string;
+  createdAt: Date;
+  recipient: string;
+};
+
+export async function getAttentionPilotage(opts?: {
+  chantierIds?: string[] | "all";
+}): Promise<{
+  windowDays: number;
+  assigned: AttentionTypeStats;
+  mention: AttentionTypeStats;
+  unreadOpen: number;
+  stale: AttentionStaleRow[];
+}> {
+  const since7 = new Date(Date.now() - 7 * MS_24H);
+  const since24 = new Date(Date.now() - MS_24H);
+  const ids = opts?.chantierIds;
+  const chantierFilter: Prisma.NotificationWhereInput =
+    !ids || ids === "all"
+      ? {}
+      : ids.length > 0
+        ? { chantierId: { in: ids } }
+        : { id: { in: [] } };
+
+  async function statsFor(type: string): Promise<AttentionTypeStats> {
+    const base: Prisma.NotificationWhereInput = {
+      type,
+      createdAt: { gte: since7 },
+      ...chantierFilter,
+    };
+    const rows = await prisma.notification.findMany({
+      where: base,
+      select: { createdAt: true, readAt: true },
+    });
+    const total = rows.length;
+    const read = rows.filter((r) => r.readAt).length;
+    const readWithin24h = rows.filter((r) => {
+      if (!r.readAt) return false;
+      return r.readAt.getTime() - r.createdAt.getTime() <= MS_24H;
+    }).length;
+    return {
+      total,
+      read,
+      readWithin24h,
+      rate24h: total === 0 ? null : Math.round((readWithin24h / total) * 100),
+    };
+  }
+
+  const [assigned, mention, unreadOpen, staleRows] = await Promise.all([
+    statsFor("raid_assigned"),
+    statsFor("raid_mention"),
+    prisma.notification.count({
+      where: {
+        readAt: null,
+        type: { in: ["raid_assigned", "raid_mention"] },
+        ...chantierFilter,
+      },
+    }),
+    prisma.notification.findMany({
+      where: {
+        type: { in: ["raid_assigned", "raid_mention"] },
+        readAt: null,
+        createdAt: { lt: since24 },
+        ...chantierFilter,
+      },
+      orderBy: { createdAt: "asc" },
+      take: 40,
+      select: {
+        id: true,
+        type: true,
+        title: true,
+        href: true,
+        chantierCode: true,
+        createdAt: true,
+        user: {
+          select: { first_name: true, last_name: true, username: true },
+        },
+      },
+    }),
+  ]);
+
+  return {
+    windowDays: 7,
+    assigned,
+    mention,
+    unreadOpen,
+    stale: staleRows.map((r) => ({
+      id: r.id,
+      type: r.type,
+      title: r.title,
+      href: r.href,
+      chantierCode: r.chantierCode,
+      createdAt: r.createdAt,
+      recipient:
+        `${r.user.first_name} ${r.user.last_name}`.trim() || r.user.username,
+    })),
+  };
 }

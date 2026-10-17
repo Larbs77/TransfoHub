@@ -37,6 +37,7 @@ export default async function MonTableauDeBordPage() {
           comites={comites}
           capacite={capacite}
           capaciteYear={capaciteYear}
+          nowMs={Date.now()}
         />
       </main>
     </div>

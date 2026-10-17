@@ -16,15 +16,20 @@ import {
 } from "lucide-react";
 import {
   getMyNotificationsCentre,
+  getMyRaidChangeNotifScope,
   markMyNotificationRead,
   markMyNotificationUnread,
+  saveMyRaidChangeNotifScope,
 } from "@/app/(app)/actions";
 import {
   NOTIFICATION_TYPE_LABELS,
   NOTIFICATION_TYPES,
+  notificationTypeChipClass,
   type AppNotification,
   type NotificationReadState,
+  type RaidChangeNotifScope,
 } from "@/lib/notification-labels";
+import { useUser } from "@/components/user-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -47,6 +52,9 @@ type PeriodKey = "7" | "30" | "90" | "all";
 
 export function NotificationsCentre() {
   const router = useRouter();
+  const user = useUser();
+  const canPilot =
+    user.role === "Admin" || user.role === "Programme_Office";
   const [items, setItems] = useState<AppNotification[]>([]);
   const [total, setTotal] = useState(0);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -58,6 +66,8 @@ export function NotificationsCentre() {
   const [period, setPeriod] = useState<PeriodKey>("all");
   const [q, setQ] = useState("");
   const [qDraft, setQDraft] = useState("");
+  const [raidScope, setRaidScope] = useState<RaidChangeNotifScope>("chantier");
+  const [scopeSaving, setScopeSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,6 +91,10 @@ export function NotificationsCentre() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void getMyRaidChangeNotifScope().then(setRaidScope).catch(() => undefined);
+  }, []);
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
@@ -118,6 +132,61 @@ export function NotificationsCentre() {
                 ? ` ${unreadCount} non lue${unreadCount > 1 ? "s" : ""}.`
                 : " Tout est lu."}
             </p>
+          </div>
+          {canPilot ? (
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/notifications/pilotage">Pilotage attention</Link>
+            </Button>
+          ) : null}
+        </div>
+
+        <div className="rounded-xl border bg-card p-4">
+          <p className="text-sm font-semibold text-primary">
+            Modifications RAID (inbox)
+          </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Les assignations, mentions et partages vous parviennent toujours.
+            Ceci réduit seulement le bruit des modifications de fiches.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={raidScope === "chantier" ? "secondary" : "outline"}
+              disabled={scopeSaving}
+              onClick={() => {
+                void (async () => {
+                  setScopeSaving(true);
+                  try {
+                    await saveMyRaidChangeNotifScope("chantier");
+                    setRaidScope("chantier");
+                  } finally {
+                    setScopeSaving(false);
+                  }
+                })();
+              }}
+            >
+              Tout le chantier
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={raidScope === "mine" ? "secondary" : "outline"}
+              disabled={scopeSaving}
+              onClick={() => {
+                void (async () => {
+                  setScopeSaving(true);
+                  try {
+                    await saveMyRaidChangeNotifScope("mine");
+                    setRaidScope("mine");
+                  } finally {
+                    setScopeSaving(false);
+                  }
+                })();
+              }}
+            >
+              Mes RAID seulement
+            </Button>
           </div>
         </div>
 
@@ -218,6 +287,8 @@ export function NotificationsCentre() {
                 <TableHead className="w-28">Statut</TableHead>
                 <TableHead className="w-32">Type</TableHead>
                 <TableHead>Objet</TableHead>
+                <TableHead className="w-24">Chantier</TableHead>
+                <TableHead className="w-32">Auteur</TableHead>
                 <TableHead className="w-40">Reçu le</TableHead>
                 <TableHead className="w-40">Lu le</TableHead>
                 <TableHead className="w-44 text-right">Actions</TableHead>
@@ -226,13 +297,13 @@ export function NotificationsCentre() {
             <TableBody>
               {loading && items.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-12 text-center text-muted-foreground">
+                  <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">
                     Chargement…
                   </TableCell>
                 </TableRow>
               ) : items.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-12 text-center text-muted-foreground">
+                  <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">
                     <Inbox className="mx-auto mb-2 size-8 opacity-40" />
                     Aucune notification pour ces filtres.
                   </TableCell>
@@ -256,7 +327,11 @@ export function NotificationsCentre() {
                         )}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-xs">
-                        {NOTIFICATION_TYPE_LABELS[n.type] ?? n.type}
+                        <span
+                          className={`inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${notificationTypeChipClass(n.type)}`}
+                        >
+                          {NOTIFICATION_TYPE_LABELS[n.type] ?? n.type}
+                        </span>
                       </TableCell>
                       <TableCell className="max-w-md whitespace-normal">
                         <button
@@ -273,6 +348,12 @@ export function NotificationsCentre() {
                             </p>
                           ) : null}
                         </button>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                        {n.chantierCode || "—"}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                        {n.actorName || "—"}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                         {format(new Date(n.createdAt), "dd MMM yyyy HH:mm", {

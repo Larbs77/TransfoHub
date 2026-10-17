@@ -290,6 +290,7 @@ export default async function ChantierDetailPage({ params }: Props) {
                     { id: chantier.id, code: chantier.code, nom: chantier.nom },
                   ]}
                   comites={comites}
+                  nowMs={Date.now()}
                 />
               </CardContent>
             </Card>

@@ -144,6 +144,8 @@ model User {
   ressourceId     String?    @unique
   failed_attempts Int        @default(0)
   dashboard_type  String     @default("complete")
+  /// In-app RAID change noise: chantier (leadership, default) | mine (assignee only)
+  notif_raid_changes String  @default("chantier")
   locked_until    DateTime?
   last_login      DateTime?
   created_by      String     @default("")
@@ -179,6 +181,9 @@ model Notification {
   /// Optional entity ref: "raid"
   entityType String    @default("")
   entityId   String    @default("")
+  actorName     String @default("")
+  chantierId    String @default("")
+  chantierCode  String @default("")
   readAt     DateTime?
   createdAt  DateTime  @default(now())
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -186,6 +191,8 @@ model Notification {
   @@index([userId, createdAt])
   @@index([userId, readAt])
   @@index([entityType, entityId])
+  @@index([chantierId, createdAt])
+  @@index([type, createdAt])
 }
 
 /// Dynamic application role (permissions + data scope)

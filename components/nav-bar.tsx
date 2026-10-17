@@ -37,7 +37,9 @@ import {
   History,
   GanttChart,
 } from "lucide-react";
-import { AlertBell } from "@/components/alert-bell";
+import { InboxDrawer, InboxTrigger } from "@/components/alert-bell";
+import { InboxProvider, useInbox } from "@/components/inbox-provider";
+import { AppTopBar } from "@/components/app-top-bar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserAvatar } from "@/components/user-avatar";
 import {
@@ -323,6 +325,7 @@ export function NavBar({ children }: { children?: React.ReactNode }) {
   const closeMobile = () => setMobileOpen(false);
 
   return (
+    <InboxProvider>
     <TooltipProvider>
       {/* Mobile top bar */}
       <header className="fixed top-0 left-0 right-0 z-40 flex h-14 items-center justify-between border-b bg-card px-4 lg:hidden">
@@ -338,7 +341,7 @@ export function NavBar({ children }: { children?: React.ReactNode }) {
           </span>
           <span className="text-sm font-bold text-primary">TransfoHub</span>
         </Link>
-        <AlertBell />
+        <InboxTrigger compact />
       </header>
 
       {/* Mobile overlay */}
@@ -607,16 +610,35 @@ export function NavBar({ children }: { children?: React.ReactNode }) {
       </aside>
 
       {/* Main content area */}
+      <MainColumn collapsed={collapsed}>{children}</MainColumn>
+      <InboxDrawer />
+    </TooltipProvider>
+    </InboxProvider>
+  );
+}
+
+function MainColumn({
+  collapsed,
+  children,
+}: {
+  collapsed: boolean;
+  children?: React.ReactNode;
+}) {
+  const { open, isLg } = useInbox();
+  return (
+    <div
+      className={`pt-14 lg:pt-0 transition-all duration-300 ${
+        collapsed ? "lg:pl-[68px]" : "lg:pl-64"
+      }`}
+    >
+      <AppTopBar />
       <div
-        className={`pt-14 lg:pt-0 transition-all duration-300 ${
-          collapsed ? "lg:pl-[68px]" : "lg:pl-64"
+        className={`transition-all duration-300 ${
+          open && isLg ? "lg:pr-96" : ""
         }`}
       >
-        <header className="sticky top-0 z-30 hidden h-14 items-center justify-end border-b bg-card/95 px-4 backdrop-blur-sm lg:flex">
-          <AlertBell />
-        </header>
         {children}
       </div>
-    </TooltipProvider>
+    </div>
   );
 }
