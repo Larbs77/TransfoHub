@@ -87,6 +87,7 @@ import {
   isActionDoublon,
   STATUT_ACTION_DOUBLON,
   isRaidOverdue,
+  raidCalendarDay,
   isRaidDueThisWeek,
   isRaidDueNextWeek,
   actionRequiresEcheance,
@@ -2237,6 +2238,10 @@ export async function createRaid(data: {
     );
   }
   const echeanceInitiale = data.date_echeance ? new Date(data.date_echeance) : null;
+  const identificationDay =
+    data.date_identification ||
+    raidCalendarDay(new Date()) ||
+    new Date().toISOString().slice(0, 10);
   // À la création : actualisée = initiale (sauf override explicite)
   const echeanceActu = data.date_echeance_actualisee
     ? new Date(data.date_echeance_actualisee)
@@ -2260,7 +2265,7 @@ export async function createRaid(data: {
       responsableRessourceId: data.responsableRessourceId || null,
       equipeId: teamAssign.equipeId,
       statut: data.statut,
-      date_identification: data.date_identification ? new Date(data.date_identification) : null,
+      date_identification: new Date(`${identificationDay}T00:00:00.000Z`),
       date_revision: data.date_revision ? new Date(data.date_revision) : null,
       date_echeance: echeanceInitiale,
       date_echeance_actualisee: echeanceActu,

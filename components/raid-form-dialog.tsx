@@ -109,6 +109,14 @@ function toDateInput(d: Date | null) {
   return new Date(d).toISOString().split("T")[0];
 }
 
+/** Jour civil local, pour le champ `<input type="date">`. */
+function todayDateInput(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
 const RAID_FIELD_NONE = "__none__";
 
 export function RaidFormDialog({
@@ -166,7 +174,9 @@ export function RaidFormDialog({
     { id: string; nom_complet: string; type: string; organisation: string }[]
   >([]);
   const [statut, setStatut] = useState(raid?.statut ?? "");
-  const [dateIdent, setDateIdent] = useState(toDateInput(raid?.date_identification ?? null));
+  const [dateIdent, setDateIdent] = useState(
+    raid ? toDateInput(raid.date_identification) : todayDateInput()
+  );
   const [dateRev, setDateRev] = useState(toDateInput(raid?.date_revision ?? null));
   /** Création : une seule saisie (= initiale + actualisée). Édition : initiale figée. */
   const [dateEcheance, setDateEcheance] = useState(toDateInput(raid?.date_echeance ?? null));
@@ -226,6 +236,12 @@ export function RaidFormDialog({
     if (domaine && !labels.includes(domaine)) return [domaine, ...labels];
     return labels;
   })();
+
+  useEffect(() => {
+    if (open && !raid) {
+      setDateIdent((current) => current || todayDateInput());
+    }
+  }, [open, raid]);
 
   useEffect(() => {
     if (open) {
@@ -879,6 +895,11 @@ export function RaidFormDialog({
                     value={dateIdent}
                     onChange={(e) => setDateIdent(e.target.value)}
                   />
+                  {!isEdit ? (
+                    <p className="text-[11px] leading-snug text-muted-foreground">
+                      Préremplie avec la date du jour. Vous pouvez la modifier.
+                    </p>
+                  ) : null}
                 </div>
                 <div className="grid gap-1.5">
                   <label className="text-sm font-medium">Date révision</label>
