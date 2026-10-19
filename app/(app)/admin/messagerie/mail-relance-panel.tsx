@@ -285,7 +285,7 @@ export function MailRelancePanel({
               title={
                 !configId
                   ? "Enregistrez d'abord la configuration"
-                  : "Envoyer aux directeurs et PMO"
+                  : "Envoyer aux directeurs, suppléants et PMO"
               }
             >
               <Send className="mr-1.5 size-4" />
@@ -329,7 +329,7 @@ export function MailRelancePanel({
 
           {confirming && (
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              Les directeurs de chantier et les PMO des chantiers éligibles
+              Les directeurs de chantier, les suppléants et les PMO des chantiers éligibles
               recevront le mail maintenant, même si les relances automatiques
               sont décochées et même si le créneau du jour est déjà parti. Le
               décompte est recalculé à l&apos;envoi.
@@ -480,8 +480,9 @@ export function MailRelancePanel({
           </CardTitle>
           <CardDescription>
             Choisir un chantier et une adresse. Le mail part uniquement à cette
-            adresse, avec le préfixe [Test]. Les directeurs et les PMO ne sont
-            pas destinataires, et le créneau planifié n&apos;est pas consommé.
+            adresse, avec le préfixe [Test]. Les directeurs, les suppléants et
+            les PMO ne sont pas destinataires, et le créneau planifié n&apos;est
+            pas consommé.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

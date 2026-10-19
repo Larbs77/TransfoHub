@@ -2,8 +2,9 @@
  * Chantier action reminders.
  *
  * Scheduled: Monday and Thursday, 02:00–08:00 Africa/Casablanca, at most once
- * per chantier and per morning. Manual sends ignore that lock. A test send
- * goes to the typed address only and does not consume the slot.
+ * per chantier and per morning. Recipients are the chantier directeur, the
+ * suppléant, and the PMO. Manual sends ignore that lock. A test send goes to
+ * the typed address only and does not consume the slot.
  *
  * Échéance buckets use the same helpers as the home dashboard, so the figures
  * match the screen. The slot clock itself is always Casablanca.
@@ -143,6 +144,11 @@ type RunRow = {
 
 function isDirecteurRole(role: string): boolean {
   return role.trim().toLowerCase() === "directeur de chantier";
+}
+
+/** « Directeur de chantier - suppléant », y compris les variantes accentuées. */
+function isSuppleantRole(role: string): boolean {
+  return /suppl[eé]ant/i.test(role.trim());
 }
 
 function isPmoRole(role: string): boolean {
@@ -398,21 +404,30 @@ function buildDigest(
 ): Digest {
   const grouped = new Map<
     string,
-    { nom: string; email: string | null; directeur: boolean; pmo: boolean }
+    {
+      nom: string;
+      email: string | null;
+      directeur: boolean;
+      suppleant: boolean;
+      pmo: boolean;
+    }
   >();
   for (const membre of membres) {
     const directeur = isDirecteurRole(membre.role);
+    const suppleant = isSuppleantRole(membre.role);
     const pmo = isPmoRole(membre.role);
-    if (!directeur && !pmo) continue;
+    if (!directeur && !suppleant && !pmo) continue;
     const current = grouped.get(membre.ressourceId) ?? {
       nom: membre.ressource.nom_complet.trim() || "Sans nom",
       email:
         validEmail(membre.ressource.email) ??
         validEmail(membre.ressource.user?.email),
       directeur: false,
+      suppleant: false,
       pmo: false,
     };
     current.directeur = current.directeur || directeur;
+    current.suppleant = current.suppleant || suppleant;
     current.pmo = current.pmo || pmo;
     if (!current.nom || current.nom === "Sans nom") {
       current.nom = membre.ressource.nom_complet.trim() || current.nom;
@@ -422,6 +437,7 @@ function buildDigest(
 
   const people = [...grouped.values()].sort((a, b) => {
     if (a.directeur !== b.directeur) return a.directeur ? -1 : 1;
+    if (a.suppleant !== b.suppleant) return a.suppleant ? -1 : 1;
     return a.nom.localeCompare(b.nom, "fr");
   });
   const seenEmails = new Set<string>();
@@ -430,6 +446,7 @@ function buildDigest(
   for (const person of people) {
     const roles = [
       person.directeur ? "Directeur de chantier" : null,
+      person.suppleant ? "Suppléant" : null,
       person.pmo ? "PMO" : null,
     ]
       .filter(Boolean)

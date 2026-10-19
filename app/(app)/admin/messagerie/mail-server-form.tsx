@@ -494,7 +494,8 @@ export function MailServerForm({
           </CardTitle>
           <CardDescription>
             Relevés d&apos;actions par chantier, le lundi et le jeudi à 2 h
-            (Africa/Casablanca), aux directeurs de chantier et aux PMO.
+            (Africa/Casablanca), aux directeurs de chantier, aux suppléants et
+            aux PMO.
             Indépendant des mails applicatifs et du test SMTP.
           </CardDescription>
         </CardHeader>
