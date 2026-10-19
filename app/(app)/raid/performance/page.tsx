@@ -10,6 +10,7 @@ interface Props {
     from?: string | string[];
     to?: string | string[];
     origine?: string | string[];
+    cycle?: string | string[];
   }>;
 }
 
@@ -26,11 +27,12 @@ export default async function RaidPerformancePage({ searchParams }: Props) {
     from: one(params.from),
     to: one(params.to),
     origine: one(params.origine),
+    cycle: one(params.cycle),
   });
   if (!data) return null;
   return (
     <RaidPerformanceScreen
-      key={`${data.window.search}-${data.medianOrigin}`}
+      key={`${data.window.search}-${data.medianOrigin}-${data.cycleStart}`}
       data={data}
     />
   );

@@ -6,9 +6,10 @@ import {
   RAID_PERF_NONE,
   buildRaidPerformance,
   canSeeRaidPerformance,
+  parseCycleStart,
   parseMedianOrigin,
   resolvePerfWindow,
-  withMedianOrigin,
+  withPerfSearch,
   toPerfInputs,
   type PerfScreen,
   type RaidPerformancePayload,
@@ -48,9 +49,11 @@ export async function loadRaidPerformance(opts: {
   from?: string;
   to?: string;
   origine?: string;
+  cycle?: string;
   teamId?: string;
 }): Promise<RaidPerformancePayload | null> {
   const origin = parseMedianOrigin(opts.origine);
+  const cycleStart = parseCycleStart(opts.cycle);
   const window = resolvePerfWindow(opts.now, opts.preset, opts.from, opts.to);
   const [raids, logs] = await Promise.all([
     prisma.raid.findMany({
@@ -179,7 +182,8 @@ export async function loadRaidPerformance(opts: {
     window,
     opts.now,
     focus,
-    screenFor(focus, withMedianOrigin(window.search, origin)),
-    origin
+    screenFor(focus, withPerfSearch(window.search, origin, cycleStart)),
+    origin,
+    cycleStart
   );
 }

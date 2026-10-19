@@ -10,11 +10,13 @@ import {
   buildRaidPerformance,
   daySpan,
   orderPerfGroups,
+  parseCycleStart,
   parseMedianOrigin,
   perfCardHistory,
   resolvePerfWindow,
   toPerfInputs,
   withMedianOrigin,
+  withPerfSearch,
   type PerfGroup,
   type PerfScreen,
   type RawPerfLog,
@@ -83,6 +85,8 @@ function group(
     cycleMedian: null,
     cycleP90: null,
     cycleN: 0,
+    cycleExcludedNoStart: 0,
+    cycleExcludedInverted: 0,
     blindPrise: 0,
     blindClose: 0,
     stockOpen: 0,
@@ -362,6 +366,94 @@ check("origine identification : exclusions, délai 0 conservé en création, cyc
   assert.equal(identification.evidence.prise.length, identification.programme.priseN);
 });
 
+check("cycle : identification sans salle d'attente, défaut inchangé", () => {
+  assert.equal(parseCycleStart(undefined), "prise");
+  assert.equal(parseCycleStart("identification"), "identification");
+  assert.equal(parseCycleStart("autre"), "prise");
+  assert.equal(withPerfSearch("preset=90", "creation", "prise"), "preset=90");
+  assert.equal(
+    withPerfSearch("preset=90", "identification", "prise"),
+    "preset=90&origine=identification"
+  );
+  assert.equal(
+    withPerfSearch("preset=90", "creation", "identification"),
+    "preset=90&cycle=identification"
+  );
+  assert.equal(
+    withPerfSearch("preset=90", "identification", "identification"),
+    "preset=90&origine=identification&cycle=identification"
+  );
+  const rows: RawPerfRaid[] = [
+    raid({
+      id: "both",
+      statut: "Clôturé",
+      createdAt: "2026-09-01T00:00:00.000Z",
+      dateIdentification: "2026-08-20T00:00:00.000Z",
+      dateFinReelle: "2026-09-12T00:00:00.000Z",
+      initiale: null,
+    }),
+    raid({
+      id: "no-journal",
+      statut: "Clôturé",
+      createdAt: "2026-09-01T00:00:00.000Z",
+      dateIdentification: "2026-09-01T00:00:00.000Z",
+      dateFinReelle: "2026-09-11T00:00:00.000Z",
+      initiale: null,
+    }),
+    raid({
+      id: "no-ident",
+      statut: "Clôturé",
+      dateIdentification: null,
+      dateFinReelle: "2026-09-10T00:00:00.000Z",
+      initiale: null,
+    }),
+    raid({
+      id: "after-close",
+      statut: "Clôturé",
+      dateIdentification: "2026-09-20T00:00:00.000Z",
+      dateFinReelle: "2026-09-10T00:00:00.000Z",
+      initiale: null,
+    }),
+  ];
+  const logs: RawPerfLog[] = [
+    { raidId: "both", newValue: "En cours", createdAt: "2026-09-02T00:00:00.000Z" },
+    { raidId: "no-ident", newValue: "En cours", createdAt: "2026-09-08T00:00:00.000Z" },
+    { raidId: "after-close", newValue: "En cours", createdAt: "2026-09-05T00:00:00.000Z" },
+  ];
+  const inputs = toPerfInputs(rows, logs);
+  const window = resolvePerfWindow(NOW, "90");
+  const prise = buildRaidPerformance(inputs, window, NOW, null, SCREEN, "creation", "prise");
+  const ident = buildRaidPerformance(
+    inputs,
+    window,
+    NOW,
+    null,
+    SCREEN,
+    "creation",
+    "identification"
+  );
+  assert.equal(prise.cycleStart, "prise");
+  assert.equal(prise.programme.cycleN, 3);
+  assert.equal(prise.programme.cycleMedian, 5);
+  assert.equal(prise.programme.cycleExcludedNoStart, 1);
+  assert.equal(prise.programme.cycleExcludedInverted, 0);
+  assert.equal(prise.evidence.cycle.length, 3);
+  assert.equal(ident.cycleStart, "identification");
+  assert.equal(ident.programme.cycleN, 2);
+  assert.equal(ident.programme.cycleMedian, 17);
+  assert.equal(ident.programme.cycleP90, 23);
+  assert.equal(ident.programme.cycleExcludedNoStart, 1);
+  assert.equal(ident.programme.cycleExcludedInverted, 1);
+  assert.equal(ident.evidence.cycle.length, 2);
+  assert.equal(ident.programme.priseMedian, prise.programme.priseMedian);
+  assert.equal(ident.programme.tenuePct, prise.programme.tenuePct);
+  assert.equal(ident.programme.stockOverdue, prise.programme.stockOverdue);
+  assert.equal(ident.programme.glide, prise.programme.glide);
+  assert.equal(prise.cycleStarts.identification.median, 17);
+  assert.equal(prise.cycleStarts.identification.n, 2);
+  assert.equal(ident.cycleStarts.prise.median, 5);
+});
+
 check("coloration à partir de cinq dues, ex æquo neutre", () => {
   const rows: RawPerfRaid[] = [];
   function add(
@@ -470,9 +562,14 @@ check("écarts historiques masqués, libellés du lot 1", () => {
   assert.match(screen, /Date d'identification/);
   assert.match(screen, /Voir le détail du calcul/);
   assert.match(screen, /ne changent pas avec ce choix/);
-  assert.match(screen, /withMedianOrigin/);
+  assert.match(screen, /withPerfSearch/);
+  assert.match(screen, /Sortie de salle d'attente/);
+  assert.match(screen, /name="cycle"/);
+  assert.match(screen, /"Explication"/);
   assert.match(screen, /Les délais du tableau sont triés/);
   assert.match(screen, /name="origine"/);
+  assert.match(screen, /overflow-y-auto overflow-x-hidden/);
+  assert.match(screen, /w-full table-fixed border-collapse/);
   assert.doesNotMatch(screen, /En écart/);
   assert.doesNotMatch(screen, /Rythme sur la période/);
   assert.doesNotMatch(screen, /"Glissement"/);

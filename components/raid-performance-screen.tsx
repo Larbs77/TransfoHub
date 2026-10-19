@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ComponentType } from "react";
+import { useMemo, useState, type ComponentType, type ReactNode } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -40,6 +40,8 @@ import {
 } from "@/components/ui/table";
 import { formatRaidCalendarDate } from "@/lib/raid-labels";
 import type {
+  CycleStart,
+  CycleStartSnapshot,
   MedianOrigin,
   PerfActionFlag,
   PerfCardKey,
@@ -54,7 +56,7 @@ import {
   RAID_PERF_MIN_DUE,
   orderPerfGroups,
   perfCardHistory,
-  withMedianOrigin,
+  withPerfSearch,
   type PerfGroupSortKey,
 } from "@/lib/raid-performance";
 import { cn } from "@/lib/utils";
@@ -138,6 +140,27 @@ function Delta({
   );
 }
 
+function InfoNote({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        type="button"
+        className="text-[11px] font-medium text-[#0A3C74] underline-offset-2 hover:underline dark:text-[#00BDBB]"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {open ? "Masquer" : "Explication"}
+      </button>
+      {open ? (
+        <div className="mt-1 space-y-1 text-xs leading-relaxed text-muted-foreground">
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function KpiCard({
   label,
   value,
@@ -149,6 +172,7 @@ function KpiCard({
   reference,
   history,
   historyNote,
+  note,
   compareLabel,
   deltaScope,
   accent,
@@ -166,6 +190,7 @@ function KpiCard({
   reference?: string;
   history: "delta" | "unavailable";
   historyNote?: string;
+  note?: string;
   compareLabel?: string;
   deltaScope?: string;
   accent: string;
@@ -211,7 +236,6 @@ function KpiCard({
         {history === "unavailable" ? (
           <span className="text-muted-foreground">
             Évolution historique non disponible.
-            {historyNote ? ` ${historyNote}` : ""}
             {reference ? ` Repère actuel : ${reference}.` : ""}
           </span>
         ) : (
@@ -234,6 +258,14 @@ function KpiCard({
           </>
         )}
       </p>
+      {note || historyNote ? (
+        <div className="mt-1">
+          <InfoNote>
+            {note ? <p>{note}</p> : null}
+            {historyNote ? <p>{historyNote}</p> : null}
+          </InfoNote>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -379,14 +411,16 @@ function QualityNote({ stats }: { stats: PerfStats }) {
   );
 }
 
-function cycleDecileDetail(current: PerfStats): string {
+function cycleDecileDetail(current: PerfStats, start: CycleStart): string {
+  const from =
+    start === "prise" ? "la sortie de salle d'attente" : "la date d'identification";
   if (current.cycleN === 0 || current.cycleP90 == null) {
     return "Aucune clôture mesurée sur cette période. Le 9e décile n'est pas calculé.";
   }
   const n = current.cycleP90;
   const unit = n > 1 ? "jours" : "jour";
   const calendar = n > 1 ? "calendaires" : "calendaire";
-  return `9e décile : ${n} ${unit}. Sur ${current.cycleN} clôtures mesurées, 90 % ont duré au plus ${n} ${unit} ${calendar} entre la prise en charge et la clôture. Les 10 % les plus lentes ont duré plus longtemps. L'écart sous le chiffre compare la médiane, pas ce décile.`;
+  return `9e décile : ${n} ${unit}. Sur ${current.cycleN} clôtures mesurées, 90 % ont duré au plus ${n} ${unit} ${calendar} entre ${from} et la clôture. Les 10 % les plus lentes ont duré plus longtemps. L'écart sous le chiffre compare la médiane, pas ce décile.`;
 }
 
 type KpiModelCard = {
@@ -401,6 +435,7 @@ type KpiModelCard = {
   reference?: string;
   history: "delta" | "unavailable";
   historyNote?: string;
+  note?: string;
   compareLabel?: string;
   deltaScope?: string;
   accent: string;
@@ -413,7 +448,8 @@ function kpiModel(
   previous: PerfStats,
   programme: PerfStats | null,
   compareLabel: string,
-  origin: MedianOrigin
+  origin: MedianOrigin,
+  cycleStart: CycleStart
 ): KpiModelCard[] {
   const ref = programme
     ? {
@@ -452,7 +488,11 @@ function kpiModel(
       detail:
         origin === "identification"
           ? `Hors médiane : ${current.priseExcludedMissing} sans date d'identification, ${current.priseExcludedInverted} identification après la prise en charge.`
-          : "Depuis la date de création. Un délai négatif compte 0 jour et reste dans la médiane.",
+          : undefined,
+      note:
+        origin === "creation"
+          ? "Depuis la date de création. Un délai négatif compte 0 jour et reste dans la médiane."
+          : "Le délai part de la date d'identification. Une sortie sans date, ou une identification postérieure à la prise en charge, sort de la médiane.",
       delta:
         current.priseMedian == null || previous.priseMedian == null
           ? null
@@ -471,8 +511,14 @@ function kpiModel(
       key: "cycle",
       label: "Cycle de traitement",
       value: days(current.cycleMedian),
-      hint: `Médiane en jours calendaires · ${plural(current.cycleN, "clôture mesurée", "clôtures mesurées")}`,
-      detail: cycleDecileDetail(current),
+      hint: `Médiane depuis ${cycleStart === "prise" ? "la sortie de salle d'attente" : "la date d'identification"} · ${plural(current.cycleN, "clôture mesurée", "clôtures mesurées")}`,
+      detail:
+        cycleStart === "identification"
+          ? `9e décile ${days(current.cycleP90)}. Hors médiane : ${current.cycleExcludedNoStart} sans date d'identification, ${current.cycleExcludedInverted} identification après la clôture.`
+          : current.cycleP90 == null
+            ? undefined
+            : `9e décile ${current.cycleP90} j`,
+      note: cycleDecileDetail(current, cycleStart),
       delta:
         current.cycleMedian == null || previous.cycleMedian == null
           ? null
@@ -616,90 +662,202 @@ function impactText(
   return `Avec la ${otherName}, la médiane serait ${level}, ${volume}.`;
 }
 
-function originHref(
+const CYCLE_LABEL: Record<CycleStart, string> = {
+  prise: "Sortie de salle d'attente",
+  identification: "Date d'identification",
+};
+
+function perfHref(
   data: RaidPerformancePayload,
-  origin: MedianOrigin
+  origin: MedianOrigin,
+  cycleStart: CycleStart
 ): string {
-  const search =
-    origin === "identification"
-      ? withMedianOrigin(data.window.search, "identification")
-      : data.window.search;
+  const search = withPerfSearch(data.window.search, origin, cycleStart);
   return search ? `${data.screen.basePath}?${search}` : data.screen.basePath;
 }
 
-function OriginControl({
-  data,
-  current,
+function cycleSnapshotText(start: CycleStart, snap: CycleStartSnapshot): string {
+  const base = `${CYCLE_LABEL[start]} : médiane ${days(snap.median)}, 9e décile ${days(snap.p90)}, sur ${plural(snap.n, "clôture mesurée", "clôtures mesurées")}.`;
+  if (start === "prise") {
+    return `${base} ${plural(snap.excludedNoStart, "clôture de la période n'a pas de sortie de salle d'attente", "clôtures de la période n'ont pas de sortie de salle d'attente")}.`;
+  }
+  return `${base} Hors médiane : ${plural(snap.excludedNoStart, "clôture sans date d'identification", "clôtures sans date d'identification")}, ${plural(snap.excludedInverted, "identification postérieure à la clôture", "identifications postérieures à la clôture")}.`;
+}
+
+function cycleImpactText(
+  active: CycleStart,
+  starts: Record<CycleStart, CycleStartSnapshot>
+): string {
+  const other: CycleStart = active === "prise" ? "identification" : "prise";
+  const shown = starts[active];
+  const alternate = starts[other];
+  const otherName = CYCLE_LABEL[other].toLowerCase();
+  if (shown.median == null && alternate.median == null) {
+    return "Aucune des deux lectures n'a de clôture mesurée sur cette population.";
+  }
+  if (alternate.median == null) {
+    return `Avec ${otherName}, la médiane n'est pas calculée : aucune clôture mesurée ne reste.`;
+  }
+  if (shown.median == null) {
+    return `Le mode affiché n'a pas de médiane. Avec ${otherName}, elle serait ${days(alternate.median)} sur ${plural(alternate.n, "clôture mesurée", "clôtures mesurées")}.`;
+  }
+  const gap = alternate.median - shown.median;
+  const level =
+    gap === 0
+      ? "égale"
+      : `${gap > 0 ? "plus élevée" : "plus basse"} de ${Math.abs(gap)} j`;
+  const volume =
+    shown.n === alternate.n
+      ? `sur le même nombre de clôtures (${shown.n})`
+      : `sur ${alternate.n} clôtures au lieu de ${shown.n}`;
+  return `Avec ${otherName}, la médiane serait ${level}, ${volume}. Le 9e décile serait ${days(alternate.p90)}.`;
+}
+
+function ModeSwitch<T extends string>({
+  label,
+  value,
+  options,
+  hrefFor,
 }: {
-  data: RaidPerformancePayload;
-  current: PerfStats;
+  label: string;
+  value: T;
+  options: { id: T; label: string }[];
+  hrefFor: (id: T) => string;
 }) {
   return (
-    <section className="space-y-3 rounded-xl border bg-card p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="max-w-3xl space-y-1">
-          <h2 className="text-sm font-semibold text-primary">
+    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={label}>
+      {options.map((option) => {
+        const active = value === option.id;
+        return (
+          <Button
+            key={option.id}
+            size="sm"
+            variant={active ? "default" : "outline"}
+            className={active ? "bg-[#0A3C74] hover:bg-[#0c4a8f]" : ""}
+            aria-current={active ? "page" : undefined}
+            asChild
+          >
+            <Link href={hrefFor(option.id)}>{option.label}</Link>
+          </Button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ModesControl({ data }: { data: RaidPerformancePayload }) {
+  return (
+    <section className="space-y-4 rounded-xl border bg-card p-4">
+      <h2 className="text-sm font-semibold text-primary">Modes de calcul</h2>
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-xs font-semibold text-foreground">
             Origine de la médiane de prise en charge
-          </h2>
-          <p className="text-xs leading-relaxed text-muted-foreground">
-            Ce choix s&apos;applique à la médiane de prise en charge, à
-            l&apos;écart de cette carte avec la période précédente, et à la
-            couleur « prise en charge » de la heatmap. La tenue de
-            l&apos;engagement, le cycle de traitement, le stock échu et les
-            échéances reportées ne changent pas avec ce choix.
-          </p>
+          </h3>
+          <ModeSwitch
+            label="Origine du délai de prise en charge"
+            value={data.medianOrigin}
+            options={[
+              { id: "creation", label: "Date de création" },
+              { id: "identification", label: "Date d'identification" },
+            ]}
+            hrefFor={(origin) => perfHref(data, origin, data.cycleStart)}
+          />
         </div>
-        <div
-          className="flex flex-wrap gap-1.5"
-          role="group"
-          aria-label="Origine du délai de prise en charge"
-        >
+        <div className="grid gap-2 lg:grid-cols-2">
           {(["creation", "identification"] as const).map((origin) => {
             const active = data.medianOrigin === origin;
             return (
-              <Button
+              <p
                 key={origin}
-                size="sm"
-                variant={active ? "default" : "outline"}
-                className={active ? "bg-[#0A3C74] hover:bg-[#0c4a8f]" : ""}
-                aria-current={active ? "page" : undefined}
-                asChild
+                className={
+                  active
+                    ? "rounded-lg border border-[#0A3C74]/30 bg-[#0A3C74]/5 px-3 py-2 text-xs leading-relaxed text-foreground"
+                    : "rounded-lg border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground"
+                }
               >
-                <Link href={originHref(data, origin)}>{ORIGIN_LABEL[origin]}</Link>
-              </Button>
+                <span className="font-medium text-foreground">
+                  {active ? "Mode affiché. " : "Autre mode. "}
+                </span>
+                {snapshotText(origin, data.priseOrigins[origin])}
+              </p>
             );
           })}
         </div>
-      </div>
-      <div className="grid gap-2 lg:grid-cols-2">
-        {(["creation", "identification"] as const).map((origin) => {
-          const active = data.medianOrigin === origin;
-          return (
-            <p
-              key={origin}
-              className={
-                active
-                  ? "rounded-lg border border-[#0A3C74]/30 bg-[#0A3C74]/5 px-3 py-2 text-xs leading-relaxed text-foreground"
-                  : "rounded-lg border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground"
-              }
-            >
-              <span className="font-medium text-foreground">
-                {active ? "Mode affiché. " : "Autre mode. "}
-              </span>
-              {snapshotText(origin, data.priseOrigins[origin])}
-            </p>
-          );
-        })}
-      </div>
-      <div className="space-y-1 text-xs leading-relaxed text-muted-foreground">
-        <p className="text-foreground">{impactText(data.medianOrigin, data.priseOrigins)}</p>
-        <p>
-          {`Valeurs inchangées sur cette population : tenue ${pct(current.tenuePct)} (${current.held}/${current.due}), cycle ${days(current.cycleMedian)} (${plural(current.cycleN, "clôture mesurée", "clôtures mesurées")}), stock échu ${current.stockOverdue} (${pct(current.stockPct)} des ${current.stockOpen} ouvertes datées), échéances reportées ${pct(current.glidePct)} (${current.glide}/${current.due}).`}
+        <p className="text-xs text-foreground">
+          {impactText(data.medianOrigin, data.priseOrigins)}
         </p>
-        <p>
-          {`L'écart sous la carte Prise en charge compare la période précédente de même durée, ${data.window.compareLabel}, calculée avec la même origine.`}
+        <InfoNote>
+          <p>
+            Ce choix s&apos;applique à la médiane de prise en charge, à
+            l&apos;écart de cette carte et à la couleur « prise en charge » de
+            la heatmap. La tenue de l&apos;engagement, le cycle de traitement, le stock échu et les échéances reportées ne changent pas avec ce choix.
+          </p>
+          <p>
+            {`L'écart sous la carte compare la période précédente de même durée, ${data.window.compareLabel}, calculée avec la même origine.`}
+          </p>
+          <p>Cliquer le chiffre d&apos;une carte ouvre les entrées RAID de ce calcul.</p>
+        </InfoNote>
+      </div>
+      <div className="space-y-2 border-t pt-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-xs font-semibold text-foreground">Cycle de traitement</h3>
+          <ModeSwitch
+            label="Départ du cycle de traitement"
+            value={data.cycleStart}
+            options={[
+              { id: "prise", label: "Sortie de salle d'attente" },
+              { id: "identification", label: "Date d'identification" },
+            ]}
+            hrefFor={(start) => perfHref(data, data.medianOrigin, start)}
+          />
+        </div>
+        <div className="grid gap-2 lg:grid-cols-2">
+          {(["prise", "identification"] as const).map((start) => {
+            const active = data.cycleStart === start;
+            return (
+              <p
+                key={start}
+                className={
+                  active
+                    ? "rounded-lg border border-[#0A3C74]/30 bg-[#0A3C74]/5 px-3 py-2 text-xs leading-relaxed text-foreground"
+                    : "rounded-lg border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground"
+                }
+              >
+                <span className="font-medium text-foreground">
+                  {active ? "Mode affiché. " : "Autre mode. "}
+                </span>
+                {cycleSnapshotText(start, data.cycleStarts[start])}
+              </p>
+            );
+          })}
+        </div>
+        <p className="text-xs text-foreground">
+          {cycleImpactText(data.cycleStart, data.cycleStarts)}
         </p>
-        <p>Cliquer le chiffre d&apos;une carte ouvre les entrées RAID de ce calcul.</p>
+        <InfoNote>
+          <p>
+            Les deux modes comptent les actions clôturées dont la clôture tombe
+            dans la période. L&apos;arrivée est la date de fin réelle, ou le
+            dernier passage à Clôturé dans le journal si l&apos;action est
+            encore clôturée.
+          </p>
+          <p>
+            Sortie de salle d&apos;attente : du premier statut hors A planifier,
+            Planifié et A lancer jusqu&apos;à la clôture. Sans cette sortie, la
+            ligne ne compte pas.
+          </p>
+          <p>
+            Date d&apos;identification : de ce jour jusqu&apos;à la clôture,
+            sans la salle d&apos;attente ni la date de création. Une
+            identification absente, ou postérieure à la clôture, sort du
+            calcul.
+          </p>
+          <p>
+            Ce choix suit la carte Cycle, son écart et la colonne cycle de la
+            heatmap. Il est indépendant du mode de prise en charge. La tenue, le stock échu et les échéances reportées ne changent pas avec ce choix.
+          </p>
+        </InfoNote>
       </div>
     </section>
   );
@@ -752,18 +910,26 @@ function cardCopy(
   }
   if (card === "cycle") {
     const delays = numericCalculs(rows);
+    const fromIdentification = data.cycleStart === "identification";
+    const rule = fromIdentification
+      ? "Le délai part de la date d'identification. Une clôture sans date d'identification est exclue. Une identification postérieure à la clôture est exclue : elle ne compte pas 0 jour."
+      : "Le délai part de la sortie de salle d'attente, le premier statut hors A planifier, Planifié et A lancer. Sans cette sortie, la ligne ne compte pas. Un écart négatif compte 0 jour.";
     return {
       title: "Cycle de traitement",
-      intro: `${period} Le cycle est le nombre de jours calendaires entre le jour de prise en charge et le jour de clôture, pour les actions au statut Clôturé dont la clôture tombe dans la période et dont les deux dates sont connues. Un écart négatif compte 0 jour. 0 jour signifie que la prise et la clôture tombent le même jour calendaire. Ce calcul est le même pour les deux origines de la médiane de prise en charge.`,
+      intro: `${period} Le cycle est le nombre de jours calendaires jusqu'au jour de clôture, pour les actions au statut Clôturé dont la clôture tombe dans la période. ${rule} 0 jour signifie que le départ et la clôture tombent le même jour calendaire.`,
       sums: [
         delays
           ? `Calcul : ${medianWork(delays)} Chiffre de la carte : ${days(current.cycleMedian)}.`
           : `Calcul : médiane de ${current.cycleN} délais = ${days(current.cycleMedian)}.`,
-        delays
-          ? decileWork(delays)
-          : "Aucun délai : le 9e décile n'est pas calculé.",
+        delays ? decileWork(delays) : "Aucun délai : le 9e décile n'est pas calculé.",
         "L'écart sous la carte compare la médiane, pas ce décile.",
-        "Dates utilisées : prise en charge et clôture. La colonne Calcul est le délai de la ligne.",
+        fromIdentification
+          ? `Hors tableau : ${current.cycleExcludedNoStart} sans date d'identification, ${current.cycleExcludedInverted} identification après la clôture.`
+          : `Hors tableau : ${current.cycleExcludedNoStart} clôtures sans sortie de salle d'attente.`,
+        cycleImpactText(data.cycleStart, data.cycleStarts),
+        fromIdentification
+          ? "Dates utilisées : date d'identification et clôture."
+          : "Dates utilisées : prise en charge et clôture. La colonne Calcul est le délai de la ligne.",
       ],
     };
   }
@@ -790,6 +956,20 @@ function cardCopy(
     ],
   };
 }
+
+/** Le tableau tient dans la popup : largeurs en % et texte qui revient à la ligne. */
+function evidenceColumnWidths(dateCount: number): string[] {
+  const date = dateCount >= 3 ? 8 : 9;
+  const parts = [8, 0, 12, 13, 9];
+  for (let index = 0; index < dateCount; index += 1) parts.push(date);
+  parts.push(12);
+  const used = parts.reduce((sum, value) => sum + value, 0);
+  parts[1] = 100 - used;
+  return parts.map((value) => `${value}%`);
+}
+
+const EVIDENCE_CELL =
+  "whitespace-normal break-words px-2 py-2 align-top text-xs leading-snug";
 
 function EvidenceDialog({
   card,
@@ -820,64 +1000,63 @@ function EvidenceDialog({
             <p key={line}>{line}</p>
           ))}
         </div>
-        <div className="min-h-0 flex-1 overflow-auto rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Code</TableHead>
-                <TableHead>Intitulé</TableHead>
-                <TableHead>Équipe</TableHead>
-                <TableHead>Responsable</TableHead>
-                <TableHead>Statut</TableHead>
-                {dateLabels.map((label) => (
-                  <TableHead key={label}>{label}</TableHead>
-                ))}
-                <TableHead>Calcul</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden rounded-md border">
+          <table className="w-full table-fixed border-collapse text-xs min-w-0">
+            <colgroup>
+              {evidenceColumnWidths(dateLabels.length).map((width, index) => (
+                <col key={`${width}-${index}`} style={{ width }} />
+              ))}
+            </colgroup>
+            <thead className="sticky top-0 z-10 border-b bg-background">
+              <tr>
+                {["Code", "Intitulé", "Équipe", "Responsable", "Statut", ...dateLabels, "Calcul"].map(
+                  (label) => (
+                    <th
+                      key={label}
+                      className="px-2 py-2 text-left align-bottom text-xs font-medium leading-tight break-words text-foreground"
+                    >
+                      {label}
+                    </th>
+                  )
+                )}
+              </tr>
+            </thead>
+            <tbody>
               {rows.length === 0 ? (
-                <TableRow>
-                  <TableCell
+                <tr>
+                  <td
                     colSpan={columnCount}
-                    className="py-10 text-center text-muted-foreground"
+                    className="px-2 py-10 text-center text-muted-foreground"
                   >
                     Aucune entrée n&apos;entre dans ce calcul.
-                  </TableCell>
-                </TableRow>
+                  </td>
+                </tr>
               ) : (
                 rows.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell>
+                  <tr key={row.id} className="border-b last:border-0 hover:bg-muted/50">
+                    <td className={EVIDENCE_CELL}>
                       <Link
                         href={`/raid/${row.id}`}
-                        className="font-medium text-primary hover:underline"
+                        className="font-medium break-all text-primary hover:underline"
                       >
                         {row.code}
                       </Link>
-                    </TableCell>
-                    <TableCell className="max-w-sm whitespace-normal text-sm">
-                      {row.intitule}
-                    </TableCell>
-                    <TableCell className="text-sm">{row.teamLabel}</TableCell>
-                    <TableCell className="text-sm">{row.responsable}</TableCell>
-                    <TableCell className="text-xs">{row.statut}</TableCell>
+                    </td>
+                    <td className={EVIDENCE_CELL}>{row.intitule}</td>
+                    <td className={EVIDENCE_CELL}>{row.teamLabel}</td>
+                    <td className={EVIDENCE_CELL}>{row.responsable}</td>
+                    <td className={EVIDENCE_CELL}>{row.statut}</td>
                     {dateLabels.map((label) => (
-                      <TableCell
-                        key={label}
-                        className="whitespace-nowrap text-xs tabular-nums"
-                      >
+                      <td key={label} className={`${EVIDENCE_CELL} tabular-nums`}>
                         {row.dates.find((date) => date.label === label)?.value ?? "—"}
-                      </TableCell>
+                      </td>
                     ))}
-                    <TableCell className="whitespace-nowrap text-sm tabular-nums">
-                      {row.calcul}
-                    </TableCell>
-                  </TableRow>
+                    <td className={`${EVIDENCE_CELL} tabular-nums`}>{row.calcul}</td>
+                  </tr>
                 ))
               )}
-            </TableBody>
-          </Table>
+            </tbody>
+          </table>
         </div>
       </DialogContent>
     </Dialog>
@@ -898,7 +1077,8 @@ export function RaidPerformanceScreen({ data }: { data: RaidPerformancePayload }
     previous,
     detail ? data.programme : null,
     data.window.compareLabel,
-    data.medianOrigin
+    data.medianOrigin,
+    data.cycleStart
   );
   const actions = detail?.actions ?? [];
   const visible = actions.filter((row) => row.flags.includes(filter));
@@ -913,7 +1093,11 @@ export function RaidPerformanceScreen({ data }: { data: RaidPerformancePayload }
   }
 
   function teamHref(id: string) {
-    const search = withMedianOrigin(data.window.search, data.medianOrigin);
+    const search = withPerfSearch(
+      data.window.search,
+      data.medianOrigin,
+      data.cycleStart
+    );
     return `/raid/performance/${id}?${search}`;
   }
 
@@ -935,11 +1119,13 @@ export function RaidPerformanceScreen({ data }: { data: RaidPerformancePayload }
               <h1 className="mt-1 text-2xl font-bold tracking-tight text-primary">
                 {data.screen.heading}
               </h1>
-              <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-                Prise en charge, tenue de l&apos;engagement initial et délai de
-                traitement. L&apos;échéance actualisée mesure les reports, elle ne
-                dit pas qu&apos;une équipe est à l&apos;heure.
-              </p>
+              <InfoNote>
+                <p>
+                  Prise en charge, tenue de l&apos;engagement initial et délai de
+                  traitement. L&apos;échéance actualisée mesure les reports, elle
+                  ne dit pas qu&apos;une équipe est à l&apos;heure.
+                </p>
+              </InfoNote>
             </div>
             {detail ? null : (
               <Button variant="outline" className="shrink-0" asChild>
@@ -962,7 +1148,7 @@ export function RaidPerformanceScreen({ data }: { data: RaidPerformancePayload }
                   asChild
                 >
                   <Link
-                    href={`${data.screen.basePath}?${withMedianOrigin(`preset=${preset.id}`, data.medianOrigin)}`}
+                    href={`${data.screen.basePath}?${withPerfSearch(`preset=${preset.id}`, data.medianOrigin, data.cycleStart)}`}
                   >
                     {preset.label}
                   </Link>
@@ -978,6 +1164,9 @@ export function RaidPerformanceScreen({ data }: { data: RaidPerformancePayload }
             <input type="hidden" name="preset" value="custom" />
             {data.medianOrigin === "identification" ? (
               <input type="hidden" name="origine" value="identification" />
+            ) : null}
+            {data.cycleStart === "identification" ? (
+              <input type="hidden" name="cycle" value="identification" />
             ) : null}
             <CalendarRange className="size-4 text-[#00BDBB]" />
             <input
@@ -1012,30 +1201,32 @@ export function RaidPerformanceScreen({ data }: { data: RaidPerformancePayload }
               Comparaison avec la période précédente de même durée :{" "}
               {data.window.compareLabel}.
             </p>
-            {data.window.preset === "quarter" ? (
+            <InfoNote>
+              {data.window.preset === "quarter" ? (
+                <p>
+                  Le trimestre civil court de son premier jour jusqu&apos;à
+                  aujourd&apos;hui. La comparaison reprend la période
+                  immédiatement précédente, du même nombre de jours. Elle ne
+                  reprend pas le trimestre civil précédent.
+                </p>
+              ) : null}
               <p>
-                Le trimestre civil court de son premier jour jusqu&apos;à
-                aujourd&apos;hui. La comparaison reprend la période
-                immédiatement précédente, du même nombre de jours. Elle ne
-                reprend pas le trimestre civil précédent.
+                Note de méthode. Les valeurs de la période précédente sont
+                recalculées à partir des informations actuellement disponibles.
+                Elles ne constituent pas une photographie historique figée. Les
+                changements de statut et les reports d&apos;échéance intervenus
+                depuis peuvent modifier certaines valeurs.
               </p>
-            ) : null}
-            <p className="text-sm leading-relaxed text-foreground">
-              Note de méthode. Les valeurs de la période précédente sont
-              recalculées à partir des informations actuellement disponibles.
-              Elles ne constituent pas une photographie historique figée. Les
-              changements de statut et les reports d&apos;échéance intervenus
-              depuis peuvent modifier certaines valeurs.
-            </p>
-            <p>
-              Une équipe reste grise sous {RAID_PERF_MIN_DUE} actions dues :
-              volume insuffisant, pas une performance moyenne. Le vert et le
-              rouge se lisent contre la médiane de ces équipes.
-            </p>
+              <p>
+                Une équipe reste grise sous {RAID_PERF_MIN_DUE} actions dues :
+                volume insuffisant, pas une performance moyenne. Le vert et le
+                rouge se lisent contre la médiane de ces équipes.
+              </p>
+            </InfoNote>
           </div>
         </div>
 
-        <OriginControl data={data} current={current} />
+        <ModesControl data={data} />
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {cards.map(({ key, unit, ...card }) => (
@@ -1062,14 +1253,16 @@ export function RaidPerformanceScreen({ data }: { data: RaidPerformancePayload }
             <h2 className="text-sm font-semibold text-primary">
               Activité et respect des engagements
             </h2>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              Les barres comptent des événements datés. La courbe mesure la
-              tenue des engagements dont l&apos;échéance initiale appartient au
-              seau.
-              {data.trendMode === "equipe"
-                ? " Courbe ambre : l'équipe. Courbe marine : le programme."
-                : ""}
-            </p>
+            <InfoNote>
+              <p>
+                Les barres comptent des événements datés. La courbe mesure la
+                tenue des engagements dont l&apos;échéance initiale appartient au
+                seau.
+                {data.trendMode === "equipe"
+                  ? " Courbe ambre : l'équipe. Courbe marine : le programme."
+                  : ""}
+              </p>
+            </InfoNote>
           </div>
           <div className="h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
@@ -1137,10 +1330,12 @@ export function RaidPerformanceScreen({ data }: { data: RaidPerformancePayload }
             <section className="overflow-hidden rounded-xl border bg-card">
               <div className="border-b px-4 py-3">
                 <h2 className="text-sm font-semibold text-primary">Responsables</h2>
-                <p className="text-xs text-muted-foreground">
-                  Même lecture que les équipes. Gris sous {RAID_PERF_MIN_DUE}{" "}
-                  actions dues : le taux n&apos;est pas interprétable.
-                </p>
+                <InfoNote>
+                  <p>
+                    Même lecture que les équipes. Gris sous {RAID_PERF_MIN_DUE}{" "}
+                    actions dues : le taux n&apos;est pas interprétable.
+                  </p>
+                </InfoNote>
               </div>
               <div className="overflow-x-auto">
                 <GroupTable
@@ -1156,12 +1351,11 @@ export function RaidPerformanceScreen({ data }: { data: RaidPerformancePayload }
               <div className="space-y-3 border-b px-4 py-3">
                 <div>
                   <h2 className="text-sm font-semibold text-primary">Actions</h2>
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    Dues : engagement de la fenêtre. Autres écarts : engagements
-                    non tenus, hors abandons et clôtures sans date de fin. Stock
-                    échu : encore ouvertes en retard à la date de fin, même si
-                    l&apos;échéance est plus ancienne.
-                  </p>
+                  <InfoNote>
+                    <p>
+                      Dues : engagement de la fenêtre. Autres écarts : engagements non tenus, hors abandons et clôtures sans date de fin. Stock échu : encore ouvertes en retard à la date de fin, même si l&apos;échéance est plus ancienne.
+                    </p>
+                  </InfoNote>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {FILTERS.map((item) => {
@@ -1253,16 +1447,21 @@ export function RaidPerformanceScreen({ data }: { data: RaidPerformancePayload }
                 <h2 className="text-sm font-semibold text-primary">
                   Heatmap des équipes chantier
                 </h2>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Vert : mieux que la médiane des équipes mesurables (base :
-                  tenue {pct(data.colorMedian.tenue)}, prise en charge{" "}
+                <p className="text-xs text-muted-foreground">
+                  base : tenue {pct(data.colorMedian.tenue)}, prise en charge{" "}
                   {days(data.colorMedian.prise)}, cycle {days(data.colorMedian.cycle)},
                   stock échu {pct(data.colorMedian.stock)}, échéances reportées{" "}
-                  {pct(data.colorMedian.glide)}). Rouge : moins bien. Égalité :
-                  neutre, sans couleur. Gris : volume insuffisant, moins de{" "}
-                  {RAID_PERF_MIN_DUE} actions dues. Le gris n&apos;est pas une
-                  performance moyenne. Cliquer une équipe ouvre son détail.
+                  {pct(data.colorMedian.glide)}.
                 </p>
+                <InfoNote>
+                  <p>
+                    Vert : mieux que la médiane des équipes mesurables. Rouge :
+                    moins bien. Égalité : neutre, sans couleur. Gris : volume
+                    insuffisant, moins de {RAID_PERF_MIN_DUE} actions dues. Le
+                    gris n&apos;est pas une performance moyenne. Cliquer une
+                    équipe ouvre son détail.
+                  </p>
+                </InfoNote>
               </div>
               <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
                 <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-emerald-950 dark:text-emerald-50">

@@ -115,6 +115,26 @@ export function withMedianOrigin(search: string, origin: MedianOrigin): string {
   return search ? `${search}&origine=identification` : "origine=identification";
 }
 
+/** Départ du cycle. Le défaut reste la sortie de salle d'attente. */
+export type CycleStart = "prise" | "identification";
+
+export function parseCycleStart(raw?: string): CycleStart {
+  return raw === "identification" ? "identification" : "prise";
+}
+
+export function withCycleStart(search: string, start: CycleStart): string {
+  if (start !== "identification") return search;
+  return search ? `${search}&cycle=identification` : "cycle=identification";
+}
+
+export function withPerfSearch(
+  search: string,
+  origin: MedianOrigin,
+  cycleStart: CycleStart
+): string {
+  return withCycleStart(withMedianOrigin(search, origin), cycleStart);
+}
+
 export type PerfWindow = {
   preset: PerfPreset;
   startDay: string;
@@ -188,6 +208,10 @@ export type PerfStats = {
   cycleMedian: number | null;
   cycleP90: number | null;
   cycleN: number;
+  /** Clôtures de la période sans le départ retenu (prise ou identification). */
+  cycleExcludedNoStart: number;
+  /** Mode identification : identification postérieure à la clôture. */
+  cycleExcludedInverted: number;
   blindPrise: number;
   blindClose: number;
   stockOpen: number;
@@ -281,11 +305,22 @@ export type PriseOriginSnapshot = {
   excludedInverted: number;
 };
 
+export type CycleStartSnapshot = {
+  median: number | null;
+  p90: number | null;
+  n: number;
+  excludedNoStart: number;
+  excludedInverted: number;
+};
+
 export type RaidPerformancePayload = {
   window: PerfWindow;
   medianOrigin: MedianOrigin;
   /** Les deux origines, sur la même population que les cartes. */
   priseOrigins: Record<MedianOrigin, PriseOriginSnapshot>;
+  cycleStart: CycleStart;
+  /** Les deux départs du cycle, sur la même population que les cartes. */
+  cycleStarts: Record<CycleStart, CycleStartSnapshot>;
   evidence: PerfEvidence;
   programme: PerfStats;
   previous: PerfStats;
@@ -350,6 +385,8 @@ function emptyStats(): PerfStats {
     cycleMedian: null,
     cycleP90: null,
     cycleN: 0,
+    cycleExcludedNoStart: 0,
+    cycleExcludedInverted: 0,
     blindPrise: 0,
     blindClose: 0,
     stockOpen: 0,
@@ -468,13 +505,57 @@ function priseSnapshot(
   };
 }
 
+function measureCycle(
+  action: PerfInput,
+  start: string,
+  end: string,
+  cycleStart: CycleStart
+): { days: number } | "out" | "missing" | "inverted" {
+  if (action.statut !== "Clôturé" || !action.closeDay || !inRange(action.closeDay, start, end)) {
+    return "out";
+  }
+  if (cycleStart === "prise") {
+    if (!action.priseDay) return "missing";
+    return { days: Math.max(0, daySpan(action.priseDay, action.closeDay)) };
+  }
+  if (!action.identificationDay) return "missing";
+  if (action.identificationDay > action.closeDay) return "inverted";
+  return { days: daySpan(action.identificationDay, action.closeDay) };
+}
+
+function cycleSnapshot(
+  actions: PerfInput[],
+  start: string,
+  end: string,
+  cycleStart: CycleStart
+): CycleStartSnapshot {
+  const delays: number[] = [];
+  let excludedNoStart = 0;
+  let excludedInverted = 0;
+  for (const action of actions) {
+    if (EXCLUDED.has(action.statut)) continue;
+    const measured = measureCycle(action, start, end, cycleStart);
+    if (measured === "missing") excludedNoStart += 1;
+    else if (measured === "inverted") excludedInverted += 1;
+    else if (measured !== "out") delays.push(measured.days);
+  }
+  return {
+    median: median(delays),
+    p90: p90(delays),
+    n: delays.length,
+    excludedNoStart,
+    excludedInverted,
+  };
+}
+
 function statsOf(
   actions: PerfInput[],
   start: string,
   end: string,
   asOfMs: number,
   live: boolean,
-  origin: MedianOrigin
+  origin: MedianOrigin,
+  cycleStart: CycleStart = "prise"
 ): PerfStats {
   const stats = emptyStats();
   const priseDelays: number[] = [];
@@ -503,14 +584,10 @@ function statsOf(
     if (measuredPrise === "missing") stats.priseExcludedMissing += 1;
     else if (measuredPrise === "inverted") stats.priseExcludedInverted += 1;
     else if (measuredPrise !== "out") priseDelays.push(measuredPrise.days);
-    if (
-      action.statut === "Clôturé" &&
-      action.closeDay &&
-      action.priseDay &&
-      inRange(action.closeDay, start, end)
-    ) {
-      cycleDelays.push(Math.max(0, daySpan(action.priseDay, action.closeDay)));
-    }
+    const measuredCycle = measureCycle(action, start, end, cycleStart);
+    if (measuredCycle === "missing") stats.cycleExcludedNoStart += 1;
+    else if (measuredCycle === "inverted") stats.cycleExcludedInverted += 1;
+    else if (measuredCycle !== "out") cycleDelays.push(measuredCycle.days);
 
     const seen =
       inRange(action.createdDay, start, end) ||
@@ -909,7 +986,8 @@ function buildEvidence(
   end: string,
   asOfMs: number,
   live: boolean,
-  origin: MedianOrigin
+  origin: MedianOrigin,
+  cycleStart: CycleStart = "prise"
 ): PerfEvidence {
   const tenue: PerfEvidenceRow[] = [];
   const prise: PerfEvidenceRow[] = [];
@@ -966,20 +1044,21 @@ function buildEvidence(
         )
       );
     }
-    if (
-      action.statut === "Clôturé" &&
-      action.closeDay &&
-      action.priseDay &&
-      inRange(action.closeDay, start, end)
-    ) {
+    const measuredCycle = measureCycle(action, start, end, cycleStart);
+    if (typeof measuredCycle === "object") {
       cycle.push(
         evidenceRow(
           action,
           [
-            { label: "Prise en charge", value: dayLabel(action.priseDay) },
+            cycleStart === "prise"
+              ? { label: "Prise en charge", value: dayLabel(action.priseDay) }
+              : {
+                  label: "Date d'identification",
+                  value: dayLabel(action.identificationDay),
+                },
             { label: "Clôture", value: dayLabel(action.closeDay) },
           ],
-          `${Math.max(0, daySpan(action.priseDay, action.closeDay))} j`
+          `${measuredCycle.days} j`
         )
       );
     }
@@ -1019,7 +1098,8 @@ export function buildRaidPerformance(
   now: Date,
   focus: { id: string; label: string; code: string } | null,
   screen: PerfScreen,
-  origin: MedianOrigin = "creation"
+  origin: MedianOrigin = "creation",
+  cycleStart: CycleStart = "prise"
 ): RaidPerformancePayload {
   const live = window.liveStock;
   const asOfMs = asOfInstant(window.endDay, live, now);
@@ -1040,7 +1120,7 @@ export function buildRaidPerformance(
       id,
       label,
       code,
-      ...statsOf(list, window.startDay, window.endDay, asOfMs, live, origin),
+      ...statsOf(list, window.startDay, window.endDay, asOfMs, live, origin, cycleStart),
       tones: MUTED,
     });
   }
@@ -1111,7 +1191,15 @@ export function buildRaidPerformance(
     }
     const responsables: PerfGroup[] = [];
     for (const [id, list] of byPerson) {
-      const stats = statsOf(list, window.startDay, window.endDay, asOfMs, live, origin);
+      const stats = statsOf(
+        list,
+        window.startDay,
+        window.endDay,
+        asOfMs,
+        live,
+        origin,
+        cycleStart
+      );
       if (!hasSignal(stats)) continue;
       responsables.push({
         id,
@@ -1135,7 +1223,8 @@ export function buildRaidPerformance(
         window.prevEndDay,
         prevAsOf,
         false,
-        origin
+        origin,
+        cycleStart
       ),
       responsables,
       actions: toActionRows(
@@ -1162,22 +1251,42 @@ export function buildRaidPerformance(
         "identification"
       ),
     },
+    cycleStart,
+    cycleStarts: {
+      prise: cycleSnapshot(population, window.startDay, window.endDay, "prise"),
+      identification: cycleSnapshot(
+        population,
+        window.startDay,
+        window.endDay,
+        "identification"
+      ),
+    },
     evidence: buildEvidence(
       population,
       window.startDay,
       window.endDay,
       asOfMs,
       live,
-      origin
+      origin,
+      cycleStart
     ),
-    programme: statsOf(inputs, window.startDay, window.endDay, asOfMs, live, origin),
+    programme: statsOf(
+      inputs,
+      window.startDay,
+      window.endDay,
+      asOfMs,
+      live,
+      origin,
+      cycleStart
+    ),
     previous: statsOf(
       inputs,
       window.prevStartDay,
       window.prevEndDay,
       prevAsOf,
       false,
-      origin
+      origin,
+      cycleStart
     ),
     colorMedian: medians,
     teams: drafted,

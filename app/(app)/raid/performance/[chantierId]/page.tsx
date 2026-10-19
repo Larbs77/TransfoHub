@@ -12,6 +12,7 @@ interface Props {
     from?: string | string[];
     to?: string | string[];
     origine?: string | string[];
+    cycle?: string | string[];
   }>;
 }
 
@@ -34,12 +35,13 @@ export default async function RaidPerformanceTeamPage({
     from: one(query.from),
     to: one(query.to),
     origine: one(query.origine),
+    cycle: one(query.cycle),
     teamId: decodeURIComponent(chantierId),
   });
   if (!data?.detail) notFound();
   return (
     <RaidPerformanceScreen
-      key={`${data.detail.team.id}-${data.window.search}-${data.medianOrigin}`}
+      key={`${data.detail.team.id}-${data.window.search}-${data.medianOrigin}-${data.cycleStart}`}
       data={data}
     />
   );
