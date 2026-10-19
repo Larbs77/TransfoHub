@@ -25,15 +25,15 @@ function canAccess(allowed: string[], href: string): boolean {
 type SignalTone = "rest" | "navy" | "destructive" | "warning" | "sky" | "success";
 
 const TONE_CLASS: Record<SignalTone, string> = {
-  rest: "border-[#0A3C74]/25 bg-[#0A3C74]/[0.08] text-[#0A3C74] hover:bg-[#0A3C74]/15 dark:border-[#00BDBB]/40 dark:bg-[#00BDBB]/12 dark:text-teal-50",
-  navy: "border-[#0A3C74] bg-[#0A3C74] text-white shadow-sm shadow-[#0A3C74]/25 hover:bg-[#0A3C74]/90 dark:border-[#00BDBB]/50",
+  rest: "border-[#0A3C74]/15 bg-[#0A3C74]/[0.04] text-[#0A3C74]/75 hover:bg-[#0A3C74]/10 dark:border-white/10 dark:bg-white/5 dark:text-slate-300",
+  navy: "border-[#0A3C74]/15 bg-[#0A3C74]/[0.06] text-[#0A3C74] hover:bg-[#0A3C74]/10 dark:border-[#00BDBB]/25 dark:bg-[#00BDBB]/10 dark:text-teal-100 dark:hover:bg-[#00BDBB]/15",
   destructive:
-    "border-red-700 bg-red-600 text-white shadow-sm shadow-red-600/30 hover:bg-red-600/90",
+    "border-red-200/80 bg-red-50 text-red-700 hover:bg-red-100/80 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200 dark:hover:bg-red-400/15",
   warning:
-    "border-amber-600 bg-amber-500 text-amber-950 shadow-sm shadow-amber-500/30 hover:bg-amber-400",
-  sky: "border-sky-700 bg-sky-600 text-white shadow-sm shadow-sky-600/30 hover:bg-sky-600/90",
+    "border-amber-200/80 bg-amber-50 text-amber-800 hover:bg-amber-100/80 dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-100 dark:hover:bg-amber-300/15",
+  sky: "border-sky-200/80 bg-sky-50 text-sky-800 hover:bg-sky-100/80 dark:border-sky-300/20 dark:bg-sky-300/10 dark:text-sky-100 dark:hover:bg-sky-300/15",
   success:
-    "border-emerald-700 bg-emerald-600 text-white shadow-sm shadow-emerald-600/30 hover:bg-emerald-600/90",
+    "border-emerald-200/80 bg-emerald-50 text-emerald-700 hover:bg-emerald-100/80 dark:border-emerald-300/20 dark:bg-emerald-300/10 dark:text-emerald-100 dark:hover:bg-emerald-300/15",
 };
 
 function SignalTile({
