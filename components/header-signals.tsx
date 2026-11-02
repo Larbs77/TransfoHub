@@ -3,16 +3,15 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  AlertTriangle,
-  CalendarClock,
-  CalendarRange,
-  ClipboardList,
-  TrendingUp,
-} from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { getHeaderSignals } from "@/app/(app)/actions";
 import type { HeaderSignals } from "@/lib/app-chrome";
 import { useUser } from "@/components/user-provider";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
 function canAccess(allowed: string[], href: string): boolean {
@@ -22,69 +21,17 @@ function canAccess(allowed: string[], href: string): boolean {
   );
 }
 
-type SignalTone = "rest" | "navy" | "destructive" | "warning" | "sky" | "success";
-
-const TONE_CLASS: Record<SignalTone, string> = {
-  rest: "border-[#0A3C74]/15 bg-[#0A3C74]/[0.04] text-[#0A3C74]/75 hover:bg-[#0A3C74]/10 dark:border-white/10 dark:bg-white/5 dark:text-slate-300",
-  navy: "border-[#0A3C74]/15 bg-[#0A3C74]/[0.06] text-[#0A3C74] hover:bg-[#0A3C74]/10 dark:border-[#00BDBB]/25 dark:bg-[#00BDBB]/10 dark:text-teal-100 dark:hover:bg-[#00BDBB]/15",
-  destructive:
-    "border-red-200/80 bg-red-50 text-red-700 hover:bg-red-100/80 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200 dark:hover:bg-red-400/15",
-  warning:
-    "border-amber-200/80 bg-amber-50 text-amber-800 hover:bg-amber-100/80 dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-100 dark:hover:bg-amber-300/15",
-  sky: "border-sky-200/80 bg-sky-50 text-sky-800 hover:bg-sky-100/80 dark:border-sky-300/20 dark:bg-sky-300/10 dark:text-sky-100 dark:hover:bg-sky-300/15",
-  success:
-    "border-emerald-200/80 bg-emerald-50 text-emerald-700 hover:bg-emerald-100/80 dark:border-emerald-300/20 dark:bg-emerald-300/10 dark:text-emerald-100 dark:hover:bg-emerald-300/15",
-};
-
-function SignalTile({
-  href,
-  value,
-  label,
-  title,
-  tone,
-  icon: Icon,
-  muted,
-}: {
-  href: string;
-  value: string;
-  label: string;
-  title: string;
-  tone: SignalTone;
-  icon: typeof AlertTriangle;
-  muted?: boolean;
-}) {
-  return (
-    <Link
-      href={href}
-      title={title}
-      className={cn(
-        "inline-flex h-8 min-w-0 items-center justify-center gap-1 overflow-hidden rounded-md border px-2 whitespace-nowrap transition-colors",
-        TONE_CLASS[tone]
-      )}
-    >
-      <Icon className="size-3.5 shrink-0 opacity-90" aria-hidden />
-      <span
-        className={cn(
-          "text-sm font-bold tabular-nums tracking-tight",
-          muted && "opacity-60"
-        )}
-      >
-        {value}
-      </span>
-      <span className="text-[11px] font-bold tracking-tight">{label}</span>
-    </Link>
-  );
-}
+const PILL_ALERT =
+  "border-red-200/80 bg-red-50 text-red-700 hover:bg-red-100/80 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200 dark:hover:bg-red-400/15";
+const PILL_QUIET =
+  "border-[#0A3C74]/15 bg-transparent text-[#0A3C74]/75 hover:bg-[#0A3C74]/[0.06] dark:border-white/15 dark:text-slate-300 dark:hover:bg-white/5";
 
 function SignalSkeleton() {
   return (
-    <div className="grid min-w-0 grid-cols-5 gap-1.5">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <div
-          key={i}
-          className="h-8 animate-pulse rounded-md border border-[#0A3C74]/15 bg-[#0A3C74]/[0.06] dark:border-[#00BDBB]/20 dark:bg-[#00BDBB]/10"
-        />
-      ))}
+    <div className="flex items-center gap-3">
+      <div className="h-8 w-24 animate-pulse rounded-full bg-[#0A3C74]/[0.06] dark:bg-white/10" />
+      <div className="h-4 w-28 animate-pulse rounded bg-muted" />
+      <div className="h-4 w-16 animate-pulse rounded bg-muted" />
     </div>
   );
 }
@@ -93,6 +40,7 @@ export function HeaderSignals() {
   const user = useUser();
   const pathname = usePathname();
   const [signals, setSignals] = useState<HeaderSignals | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     void getHeaderSignals()
@@ -115,53 +63,104 @@ export function HeaderSignals() {
   if (!canRaid) return null;
   if (!signals) return <SignalSkeleton />;
 
+  const overdue = signals.overdueActions > 0;
+  const dueThisWeek = signals.dueThisWeek > 0;
+
   return (
-    <div className="grid min-w-0 grid-cols-5 gap-1.5">
-      <SignalTile
-        href="/raid/actions?statut=active&scope=all"
-        value={String(signals.activeActions)}
-        label="Actives"
-        title="Actions actives"
-        icon={ClipboardList}
-        tone={signals.activeActions > 0 ? "navy" : "rest"}
-        muted={signals.activeActions === 0}
-      />
-      <SignalTile
+    <div className="flex min-w-0 items-center gap-3">
+      <Link
         href="/raid/actions?overdue=true&scope=all"
-        value={String(signals.overdueActions)}
-        label="Échues"
         title="Actions échues"
-        icon={AlertTriangle}
-        tone={signals.overdueActions > 0 ? "destructive" : "rest"}
-        muted={signals.overdueActions === 0}
-      />
-      <SignalTile
+        className={cn(
+          "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm transition-colors",
+          overdue ? PILL_ALERT : PILL_QUIET
+        )}
+      >
+        <span className={cn("font-semibold tabular-nums", !overdue && "opacity-70")}>
+          {signals.overdueActions}
+        </span>
+        <span className="font-medium">Échues</span>
+      </Link>
+
+      <Link
         href="/raid/actions?echeance=week&scope=all"
-        value={String(signals.dueThisWeek)}
-        label="Cette sem."
         title="Actions de cette semaine"
-        icon={CalendarClock}
-        tone={signals.dueThisWeek > 0 ? "warning" : "rest"}
-        muted={signals.dueThisWeek === 0}
-      />
-      <SignalTile
-        href="/raid/actions?echeance=next&scope=all"
-        value={String(signals.dueNextWeek)}
-        label="Sem. proch."
-        title="Actions de la semaine prochaine"
-        icon={CalendarRange}
-        tone={signals.dueNextWeek > 0 ? "sky" : "rest"}
-        muted={signals.dueNextWeek === 0}
-      />
-      <SignalTile
-        href="/raid/actions?statut=Clôturé&scope=all"
-        value={`${signals.closeRate}%`}
-        label="Clôture"
-        title="Taux de clôture des actions"
-        icon={TrendingUp}
-        tone={signals.closeRate >= 50 ? "success" : "rest"}
-        muted={signals.closeRate === 0}
-      />
+        className="inline-flex min-w-0 items-baseline gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <span
+          className={cn(
+            "font-semibold tabular-nums",
+            dueThisWeek
+              ? "text-amber-800 dark:text-amber-100"
+              : "text-foreground/80"
+          )}
+        >
+          {signals.dueThisWeek}
+        </span>
+        <span className="truncate">cette semaine</span>
+      </Link>
+
+      <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md px-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label="Autres indicateurs d'actions"
+          >
+            Actions
+            <ChevronDown className="size-3.5 opacity-70" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-64 p-1">
+          <MenuLink
+            href="/raid/actions?statut=active&scope=all"
+            label="Actives"
+            value={String(signals.activeActions)}
+            title="Actions actives"
+            onPick={() => setMenuOpen(false)}
+          />
+          <MenuLink
+            href="/raid/actions?echeance=next&scope=all"
+            label="Semaine prochaine"
+            value={String(signals.dueNextWeek)}
+            title="Actions de la semaine prochaine"
+            onPick={() => setMenuOpen(false)}
+          />
+          <MenuLink
+            href="/raid/actions?statut=Clôturé&scope=all"
+            label="Clôturées"
+            value={`${signals.closeRate}\u00a0%`}
+            title="Taux de clôture des actions"
+            onPick={() => setMenuOpen(false)}
+          />
+        </PopoverContent>
+      </Popover>
     </div>
+  );
+}
+
+function MenuLink({
+  href,
+  label,
+  value,
+  title,
+  onPick,
+}: {
+  href: string;
+  label: string;
+  value: string;
+  title: string;
+  onPick: () => void;
+}) {
+  return (
+    <Link
+      href={href}
+      title={title}
+      onClick={onPick}
+      className="flex items-center justify-between gap-3 rounded-md px-2.5 py-2 text-sm hover:bg-accent"
+    >
+      <span>{label}</span>
+      <span className="font-semibold tabular-nums text-foreground">{value}</span>
+    </Link>
   );
 }
